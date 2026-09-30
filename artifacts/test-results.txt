@@ -10,6 +10,11 @@ PASS fishing bite anticipation starts
 PASS bite opens timing window
 PASS perfect timing resolves result
 PASS successful catch increments combo and rarity
+PASS reveal starts as unknown silhouette
+PASS reveal shows rarity seal
+PASS reveal grows silhouette and light
+PASS reveal starts card flip
+PASS reveal resolves fish name
 PASS notebook prevents casting
 PASS valid cast starts timed sequence
 PASS cast enters bite anticipation
@@ -33,14 +38,54 @@ PASS first perfect pull wears fish down but does not finish
 PASS rapid repeated inputs cannot skip battle
 PASS six perfect pulls land the combo legendary
 PASS legendary battle lasts at least nine seconds and counts once
-PASS legendary starts its six second staged celebration
-PASS legendary advances to rising energy
-PASS legendary advances to full screen climax
-PASS legendary advances to afterglow
+PASS legendary starts its delayed 8.4 second card reveal
+PASS legendary starts sealed with no species spoiler
+PASS legendary stage at 1.11s is RARITY
+PASS legendary toast stays hidden at 1.11s
+PASS legendary stage at 1.91s is RISING
+PASS legendary toast stays hidden at 1.91s
+PASS legendary stage at 3.21s is HOLD
+PASS legendary toast stays hidden at 3.21s
+PASS legendary stage at 3.66s is FLIPPING
+PASS legendary toast stays hidden at 3.66s
+PASS legendary stage at 4.04s is FLIPPING
+PASS legendary toast stays hidden at 4.04s
+PASS legendary stage at 4.06s is CLIMAX
+PASS legendary species appears after the card edge at 4.06s
+PASS legendary stage at 6.21s is AFTERGLOW
+PASS legendary species appears after the card edge at 6.21s
+PASS legendary stage at 8.40s is AFTERGLOW
+PASS legendary species appears after the card edge at 8.40s
+PASS legendary music shares the entire visual timeline
+PASS legendary music leaves a breath before the flip
+PASS legendary music does not wrap after its ending
+PASS early Space cannot skip the legendary reveal
+PASS legendary card is open before continue
+PASS continue resets after the legendary card opens
+PASS repeated legendary restarts as a sealed catch
 PASS bad pull strains the line without instant failure
 PASS repeated bad pulls can snap the line and reset combo
 PASS reset clears battle and celebration state
 PASS battle timeout loses the fish
+PASS challenge seed 0 opens SHRINKING RING
+PASS challenge SHRINKING RING accepts a centred keyboard beat
+PASS challenge SHRINKING RING rejects an outside beat after grace
+PASS challenge SHRINKING RING can recover at its visible target
+PASS challenge seed 1 opens MOVING SAFE ZONE
+PASS challenge MOVING SAFE ZONE accepts a centred keyboard beat
+PASS challenge MOVING SAFE ZONE rejects an outside beat after grace
+PASS challenge MOVING SAFE ZONE can recover at its visible target
+PASS challenge seed 2 opens TIDE SLALOM
+PASS challenge TIDE SLALOM accepts a centred keyboard beat
+PASS challenge TIDE SLALOM rejects an outside beat after grace
+PASS challenge TIDE SLALOM can recover at its visible target
+PASS challenge seed 3 opens FINISHING RHYTHM
+PASS challenge FINISHING RHYTHM accepts a centred keyboard beat
+PASS challenge FINISHING RHYTHM rejects an outside beat after grace
+PASS challenge FINISHING RHYTHM can recover at its visible target
+PASS bite configures the four-round challenge chain
+PASS moving gauge completes rotated chain 0 within time limit
+PASS moving gauge completes rotated chain 1 within time limit
+PASS moving gauge completes rotated chain 2 within time limit
+PASS moving gauge completes rotated chain 3 within time limit
 RESULT: 0 failure(s)
-WARNING: ObjectDB instances leaked at exit (run with --verbose for details).
-   at: cleanup (core/object/object.cpp:2663)
