@@ -26,6 +26,7 @@ var terrain: Texture2D
 var hero: Texture2D
 var props: Array[Dictionary] = []
 var solids: Array[Rect2] = []
+var landmarks: Array[Dictionary] = []
 var textures: Dictionary = {}
 var face := 0
 var walk_time := 0.0
@@ -58,7 +59,7 @@ func _build_world():
 	_build_map(current_map)
 
 func _build_map(map_name: String):
-	props.clear(); solids.clear()
+	props.clear(); solids.clear(); landmarks.clear()
 	if map_name == "beach":
 		_build_beach()
 	elif map_name == "rocky":
@@ -67,6 +68,7 @@ func _build_map(map_name: String):
 		_build_town()
 
 func _build_town():
+	landmarks = [{"kind":"pier","pos":Vector2(502,500),"label":"Old Salt Pier"}]
 	_add_prop("inn", Vector2(240,322), Rect2(-32,-40,64,37))
 	_add_prop("cottage", Vector2(424,320), Rect2(-25,-29,50,25))
 	_add_prop("shop", Vector2(550,335), Rect2(-25,-29,50,25))
@@ -92,6 +94,11 @@ func _build_town():
 
 func _build_beach():
 	# Amber beach: dunes, driftwood and a broad north entrance from town.
+	landmarks = [
+		{"kind":"driftwood","pos":Vector2(146,430),"label":"Driftwood Cove"},
+		{"kind":"pool","pos":Vector2(300,480),"label":"North Tide Pool"},
+		{"kind":"pool","pos":Vector2(620,480),"label":"South Tide Pool"}
+	]
 	_add_prop("cottage", Vector2(260,190), Rect2(-25,-29,50,25))
 	_add_prop("barrel", Vector2(322,232), Rect2(-7,-17,14,16))
 	_add_prop("sign", Vector2(392,92), Rect2(-6,-9,12,9))
@@ -105,6 +112,11 @@ func _build_beach():
 
 func _build_rocky():
 	# Rocky shore: sparse windblown trees and stone shelves.
+	landmarks = [
+		{"kind":"breakwater","pos":Vector2(310,420),"label":"Stone Breakwater"},
+		{"kind":"pool","pos":Vector2(170,585),"label":"Blackglass Pool"},
+		{"kind":"pool","pos":Vector2(520,573),"label":"Gull's Pool"}
+	]
 	_add_prop("inn", Vector2(585,170), Rect2(-32,-40,64,37))
 	_add_prop("sign", Vector2(120,102), Rect2(-6,-9,12,9))
 	for x in range(70,760,52):
@@ -217,7 +229,22 @@ func _transition_to(map_name: String, spawn: Vector2):
 	toast = "Travelling to " + map_name.capitalize() + "..."; toast_t = 1.0
 
 func _can_fish() -> bool:
-	return (player.x >= 490 and player.x <= 514 and player.y >= 506) or (player.y >= _shore(player.x)-21 and player.x>70 and player.x<810)
+	for spot in _fishing_spots():
+		if player.distance_to(spot.pos) <= 24.0: return true
+	return (player.y >= _shore(player.x)-21 and player.x>70 and player.x<810)
+
+func _fishing_spots() -> Array[Dictionary]:
+	match current_map:
+		"town": return [{"pos":Vector2(502,530),"label":"Old Salt Pier"}]
+		"beach": return [
+			{"pos":Vector2(300,487),"label":"North Tide Pool"},
+			{"pos":Vector2(620,487),"label":"South Tide Pool"}
+		]
+		"rocky": return [
+			{"pos":Vector2(170,590),"label":"Blackglass Pool"},
+			{"pos":Vector2(520,578),"label":"Gull's Pool"}
+		]
+		_: return []
 
 func _try_fish():
 	if notebook_open or cast_timer > 0: return
@@ -257,6 +284,7 @@ func _load_game(path: String = SAVE_PATH):
 func _draw():
 	if terrain == null: return
 	draw_texture(terrain,Vector2.ZERO)
+	_draw_map_landmarks()
 	# Fine animated foam and water highlights, snapped to integer pixels.
 	for x in range(32,819,24):
 		var y := _shore(x) + 3 + int(sin(elapsed*1.5+x)*2)
@@ -323,6 +351,32 @@ func _draw_exit_markers():
 		draw_line(tip,right,Color("#f0dcaa"),2.0)
 		draw_string(ThemeDB.fallback_font, p + Vector2(-24,-10), str(marker.label), HORIZONTAL_ALIGNMENT_CENTER, 48, 8, Color("#3f4038"))
 
+func _draw_map_landmarks():
+	# Small, readable primitives make each shoreline recognizable without new art.
+	for landmark in landmarks:
+		var p: Vector2 = landmark.pos
+		var kind := str(landmark.kind)
+		if kind == "pier":
+			draw_rect(Rect2(p-Vector2(18,7),Vector2(36,20)),Color("#8f6e4e"))
+			for x in range(-14,19,8): draw_line(p+Vector2(x,-6),p+Vector2(x,12),Color("#d2a36b"),2.0)
+			draw_line(p+Vector2(-20,14),p+Vector2(20,14),Color("#513f37"),2.0)
+		elif kind == "driftwood":
+			draw_line(p+Vector2(-25,5),p+Vector2(23,-8),Color("#765744"),5.0)
+			draw_line(p+Vector2(-16,1),p+Vector2(-23,-8),Color("#a27b54"),2.0)
+		elif kind == "breakwater":
+			for i in range(7):
+				var q := p+Vector2(i*18-54, sin(i*1.7)*4)
+				draw_circle(q,9.0,Color("#526b69")); draw_circle(q-Vector2(2,2),5.0,Color("#718785"))
+		elif kind == "pool":
+			draw_circle(p,16.0,Color("#4f9291")); draw_circle(p-Vector2(3,3),11.0,Color("#80b9a7"))
+			draw_arc(p,16.0,0,TAU,16,Color("#d0d3a4"),2.0)
+	# Fishing markers sit just inland of each water feature and pulse gently.
+	for spot in _fishing_spots():
+		var p: Vector2 = spot.pos
+		var pulse := 1.0 + sin(elapsed*3.0 + p.x)*0.15
+		draw_circle(p,5.0*pulse,Color(0.91,0.81,0.47,0.85))
+		draw_arc(p,9.0*pulse,0,TAU,12,Color("#f3e2a2"),1.0)
+
 func _exit_hint() -> String:
 	var best := ""
 	var best_distance := 120.0
@@ -352,12 +406,12 @@ func _text(pos: Vector2, value: String, size := 11, paper := false):
 
 func _draw_hud():
 	_panel(Rect2(8,8,174,34))
-	_text(Vector2(16,22),"SALTMERE  /  AMBER COAST",11)
+	_text(Vector2(16,22),"SALTMERE  /  " + _map_display_name(),11)
 	_text(Vector2(16,35),"Day %02d    Fish %02d" % [day,fish_count],10)
 	_panel(Rect2(294,8,178,22))
 	_text(Vector2(302,23),"[N] Ledger   [F6] Save",10)
 	_panel(Rect2(8,244,464,19))
-	_text(Vector2(15,257),toast if toast_t>0 else "WASD / arrows: walk     SPACE: cast     Follow the path to the pier",10)
+	_text(Vector2(15,257),toast if toast_t>0 else _map_hint(),10)
 	var nearby_exit := _exit_hint()
 	if nearby_exit != "" and not notebook_open and not transition_active:
 		_panel(Rect2(286,218,184,20))
@@ -374,3 +428,17 @@ func _draw_hud():
 			row += 18
 		_text(Vector2(85,201),"Shore or pier: SPACE to cast",10,true)
 		_text(Vector2(85,218),"N to close  /  Movement pauses while reading",10,true)
+
+func _map_display_name() -> String:
+	match current_map:
+		"town": return "TOWN HARBOR"
+		"beach": return "AMBER BEACH"
+		"rocky": return "ROCKY SHORE"
+		_: return current_map.to_upper()
+
+func _map_hint() -> String:
+	match current_map:
+		"town": return "WASD / arrows: walk     SPACE: cast at Old Salt Pier"
+		"beach": return "WASD / arrows: walk     SPACE: cast in the tide pools"
+		"rocky": return "WASD / arrows: walk     SPACE: cast at the stone pools"
+		_: return "WASD / arrows: walk     SPACE: cast"
