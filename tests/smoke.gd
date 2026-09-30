@@ -102,13 +102,36 @@ func run():
 		game._handle_fishing_strike(0.5)
 	check(game.last_rarity=='LEGENDARY' and game.fishing_state==game.FishingState.RESULT,'six perfect pulls land the combo legendary')
 	check(game.battle_elapsed>=9.0 and game.fish_count==before_battle+1,'legendary battle lasts at least nine seconds and counts once')
-	check(game.legendary_t==0.0 and game.result_t>6.0,'legendary starts its six second staged celebration')
-	game._process_fishing(1.0)
-	check(game.legendary_stage==1,'legendary advances to rising energy')
-	game._process_fishing(1.2)
-	check(game.legendary_stage==2,'legendary advances to full screen climax')
-	game._process_fishing(1.7)
-	check(game.legendary_stage==3,'legendary advances to afterglow')
+	check(game.legendary_t==0.0 and game.result_t==8.4,'legendary starts its delayed 8.4 second card reveal')
+	check(game.reveal_stage_name()=='UNKNOWN' and not game.toast.contains('Rainbow Kingfish'),'legendary starts sealed with no species spoiler')
+	var reveal_points := [1.11,1.91,3.21,3.66,4.04,4.06,6.21,8.4]
+	var reveal_names := ['RARITY','RISING','HOLD','FLIPPING','FLIPPING','CLIMAX','AFTERGLOW','AFTERGLOW']
+	var reveal_clock := 0.0
+	for index in range(reveal_points.size()):
+		game._process_fishing(reveal_points[index]-reveal_clock)
+		reveal_clock = reveal_points[index]
+		check(game.reveal_stage_name()==reveal_names[index],'legendary stage at %.2fs is %s' % [reveal_clock,reveal_names[index]])
+		if reveal_clock < game.LegendaryRevealTiming.REVEAL_AT:
+			check(not game.toast.contains('Rainbow Kingfish'),'legendary toast stays hidden at %.2fs' % reveal_clock)
+		else:
+			check(game.toast.contains('Rainbow Kingfish'),'legendary species appears after the card edge at %.2fs' % reveal_clock)
+	check(game.music._fanfare_length==game.LegendaryRevealTiming.DURATION,'legendary music shares the entire visual timeline')
+	# The pause is musically quiet and the fanfare cannot wrap back to its omen.
+	game.music._fanfare_start_sample=0.0
+	check(absf(game.music._fanfare_voice(3.4))<0.03,'legendary music leaves a breath before the flip')
+	check(game.music._fanfare_voice(8.5)==0.0,'legendary music does not wrap after its ending')
+	# Early repeated Space presses cannot erase the mystery, but continue works
+	# once the face has finished opening. A second catch restarts every stage.
+	game._reset_fishing(); game.combo=2; game._resolve_fishing_timing(0.5)
+	Input.action_press('fish'); game._process_fishing(0.1)
+	check(game.fishing_state==game.FishingState.RESULT and game.reveal_stage_name()=='UNKNOWN','early Space cannot skip the legendary reveal')
+	Input.action_release('fish')
+	game._process_fishing(4.5)
+	check(game.legendary_t >= game.LegendaryRevealTiming.FLIP_END,'legendary card is open before continue')
+	game._reset_fishing()
+	check(game.fishing_state==game.FishingState.IDLE,'continue resets after the legendary card opens')
+	game._resolve_fishing_timing(0.5)
+	check(game.legendary_t==0.0 and game.reveal_stage_name()=='UNKNOWN','repeated legendary restarts as a sealed catch')
 	game._reset_fishing(); game._try_fish(); game._process_fishing(2.0)
 	game._process_fishing(1.1)
 	game._handle_fishing_strike(0.0)
