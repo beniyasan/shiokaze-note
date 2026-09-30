@@ -27,4 +27,20 @@ PASS town beach exit is reachable
 PASS beach tide pools are fishable
 PASS beach inland cast rejected
 PASS rocky tide pools are fishable
+PASS battle starts with stamina and a 20 second limit
+PASS initial tug cooldown rejects instant catch
+PASS first perfect pull wears fish down but does not finish
+PASS rapid repeated inputs cannot skip battle
+PASS six perfect pulls land the combo legendary
+PASS legendary battle lasts at least nine seconds and counts once
+PASS legendary starts its six second staged celebration
+PASS legendary advances to rising energy
+PASS legendary advances to full screen climax
+PASS legendary advances to afterglow
+PASS bad pull strains the line without instant failure
+PASS repeated bad pulls can snap the line and reset combo
+PASS reset clears battle and celebration state
+PASS battle timeout loses the fish
 RESULT: 0 failure(s)
+WARNING: ObjectDB instances leaked at exit (run with --verbose for details).
+   at: cleanup (core/object/object.cpp:2663)
