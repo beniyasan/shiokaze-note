@@ -108,6 +108,18 @@ func run():
 	check(game.fish_hp==0 and game.battle_hits==0 and game.legendary_t==0.0,'reset clears battle and celebration state')
 	game._try_fish(); game._process_fishing(2.0); game._process_fishing(21.0)
 	check(game.last_grade=='MISS','battle timeout loses the fish')
+	# The standalone chain exposes all four deterministic mini-game styles.
+	var ChallengeScript = preload('res://fishing_challenge.gd')
+	for seed in range(4):
+		var challenge = ChallengeScript.new()
+		challenge.configure(3,2,seed)
+		check(challenge.current_game()==seed,'challenge seed %d opens %s' % [seed,challenge.current_game_name()])
+		var beat = challenge.accept(0.5,0.0)
+		check(beat.success,'challenge %s accepts a centred keyboard beat' % challenge.current_game_name())
+	# A combo-two battle wires the chain into the live timing state.
+	game._reset_fishing(); game.combo=2; game.player=Vector2(170,590)
+	game._try_fish(); game._process_fishing(2.0)
+	check(game.fishing_challenge != null and game.fishing_challenge.rounds.size()==4,'bite configures the four-round challenge chain')
 	game.queue_free()
 	await process_frame
 	print('RESULT: %d failure(s)' % failures)
