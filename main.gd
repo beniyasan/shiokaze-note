@@ -341,18 +341,20 @@ func _resolve_fishing_timing(position: float):
 	last_grade = grade
 	var roll := rng.randf()
 	var result := "Sand goby"
-	if grade == "PERFECT" and roll > 0.55: result = "Moonfin trout"
+	var legendary := grade == "PERFECT" and combo >= 3
+	if legendary: result = "Rainbow Kingfish"
+	elif grade == "PERFECT" and roll > 0.55: result = "Moonfin trout"
 	elif roll > 0.78: result = "Silver sprat"
 	last_catch = result
-	last_rarity = "RARE" if result == "Moonfin trout" else ("UNCOMMON" if result == "Silver sprat" else "COMMON")
+	last_rarity = "LEGENDARY" if legendary else ("RARE" if result == "Moonfin trout" else ("UNCOMMON" if result == "Silver sprat" else "COMMON"))
 	fish_count += 1
 	catches[result] = int(catches.get(result,0))+1
 	fishing_state = FishingState.RESULT
 	cast_timer = 0.0
 	result_t = 2.0
-	flash_t = 0.32 if last_rarity == "RARE" else 0.18
-	shake_t = 0.22 if last_rarity == "RARE" else 0.10
-	toast = grade + "!  " + last_catch + "  /  SPACE to cast again"
+	flash_t = 0.60 if last_rarity == "LEGENDARY" else (0.32 if last_rarity == "RARE" else 0.18)
+	shake_t = 0.50 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
+	toast = ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch + "  /  SPACE to cast again"
 	toast_t = result_t
 
 func _finish_cast():
@@ -586,22 +588,22 @@ func _draw_fishing_hud():
 func _draw_fishing_result():
 	var panel := Rect2(92,64,296,110)
 	_panel(panel)
-	_text(Vector2(116,88),last_grade,20)
-	_text(Vector2(116,113),last_catch,16)
+	_text(Vector2(116,88),"BIG CATCH!!" if last_rarity == "LEGENDARY" else last_grade,24 if last_rarity == "LEGENDARY" else 20)
+	_text(Vector2(116,113),last_catch,20 if last_rarity == "LEGENDARY" else 16)
 	if last_grade != "MISS":
-		_text(Vector2(116,133),last_rarity + "  /  COMBO x" + str(combo),11)
+		_text(Vector2(116,133),last_rarity + "  /  COMBO x" + str(combo),13 if last_rarity == "LEGENDARY" else 11)
 	else:
 		_text(Vector2(116,133),"Combo reset",11)
 	_text(Vector2(116,155),"SPACE  cast again",11)
 	if flash_t > 0.0:
 		hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.9,0.55,flash_t*0.28))
 	if last_grade != "MISS":
-		var sparkle_color := Color("#f8dc75") if last_rarity == "RARE" else Color("#c6e6b7")
-		var sparkle_count := 14 if last_rarity == "RARE" else 7
+		var sparkle_color := Color("#ffffff") if last_rarity == "LEGENDARY" else (Color("#f8dc75") if last_rarity == "RARE" else Color("#c6e6b7"))
+		var sparkle_count := 28 if last_rarity == "LEGENDARY" else (14 if last_rarity == "RARE" else 7)
 		for i in range(sparkle_count):
 			var a := fish_particle_t*2.0 + float(i)*TAU/float(sparkle_count)
 			var q := Vector2(240,108) + Vector2(cos(a),sin(a))* (42.0 + sin(fish_particle_t*5.0+i)*5.0)
-			hud.draw_circle(q,2.0,sparkle_color)
+			hud.draw_circle(q,3.0 if last_rarity == "LEGENDARY" else 2.0,Color.from_hsv(fmod(float(i)/float(sparkle_count)+fish_particle_t*0.1,1.0),0.72,1.0) if last_rarity == "LEGENDARY" else sparkle_color)
 
 func hud_bar(pos: Vector2, size: Vector2, amount: float, color: Color):
 	hud.draw_rect(Rect2(pos,size), color)
