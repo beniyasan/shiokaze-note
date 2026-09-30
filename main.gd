@@ -121,7 +121,7 @@ func _add_prop(kind: String, pos: Vector2, body: Rect2):
 
 func _shore(x: float) -> float:
 	if current_map == "beach": return 500.0
-	if current_map == "rocky": return 430.0 + (int(x/96.0)%3)*12
+	if current_map == "rocky": return 620.0 - (int(x/96.0)%3)*12
 	if x < 240: return 464
 	if x < 416: return 480
 	if x < 608: return 464
@@ -205,6 +205,9 @@ func _entry_spawn(map_name: String) -> Vector2:
 	if current_map == "beach" and map_name == "rocky": return Vector2(90,340)
 	if current_map == "rocky" and map_name == "town": return Vector2(760,340)
 	return Vector2(400,80)
+
+func transition_to_map(map_name: String, spawn: Vector2):
+	_transition_to(map_name, spawn)
 
 func _transition_to(map_name: String, spawn: Vector2):
 	if map_name == current_map: return
@@ -303,7 +306,7 @@ func _draw_hud():
 	if notebook_open:
 		_panel(Rect2(66,51,348,181),true)
 		_text(Vector2(85,75),"THE TIDE LEDGER",17,true)
-		_text(Vector2(85,94),"Saltmere town & Amber beach",11,true)
+		_text(Vector2(85,94),"Saltmere / " + current_map.capitalize(),11,true)
 		var row := 116
 		for species in ["Silver sprat","Sand goby","Moonfin trout","Old boot"]:
 			_text(Vector2(85,row),"%s  ................  %d" % [species,int(catches.get(species,0))],11,true)
