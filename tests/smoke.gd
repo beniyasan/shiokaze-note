@@ -114,12 +114,33 @@ func run():
 		var challenge = ChallengeScript.new()
 		challenge.configure(3,2,seed)
 		check(challenge.current_game()==seed,'challenge seed %d opens %s' % [seed,challenge.current_game_name()])
+		var starting_name = challenge.current_game_name()
 		var beat = challenge.accept(0.5,0.0)
-		check(beat.success,'challenge %s accepts a centred keyboard beat' % challenge.current_game_name())
+		check(beat.success,'challenge %s accepts a centred keyboard beat' % starting_name)
+		challenge.configure(3,2,seed)
+		challenge.tick(1.2)
+		var missed = challenge.accept(0.0,0.0)
+		check(not missed.success and challenge.round_index==0,'challenge %s rejects an outside beat after grace' % starting_name)
+		var recovered = challenge.accept(challenge.target_center(),challenge.safe_lane())
+		check(recovered.success,'challenge %s can recover at its visible target' % starting_name)
 	# A combo-two battle wires the chain into the live timing state.
 	game._reset_fishing(); game.combo=2; game.player=Vector2(170,590)
 	game._try_fish(); game._process_fishing(2.0)
 	check(game.fishing_challenge != null and game.fishing_challenge.rounds.size()==4,'bite configures the four-round challenge chain')
+	# Use the real moving gauge at 60fps, rather than injecting perfect positions.
+	# This proves each rotated chain can be caught through the normal key path.
+	for seed in range(4):
+		game._reset_fishing(); game.combo=2
+		game._try_fish(); game._process_fishing(2.0)
+		game.fishing_challenge.configure(3,2,seed)
+		for frame in range(1200):
+			if game.fishing_state != game.FishingState.TIMING: break
+			game._process_fishing(1.0/60.0)
+			var target = game.fishing_challenge.target_center()
+			var half_width = game.fishing_challenge.target_width()*0.5
+			if game.pull_cooldown<=0.0 and game.gauge>=0.42 and game.gauge<=0.62 and absf(game.gauge-target)<=half_width:
+				game._handle_fishing_strike(game.gauge)
+		check(game.last_rarity=='LEGENDARY' and game.fishing_challenge.done,'moving gauge completes rotated chain %d within time limit' % seed)
 	game.queue_free()
 	await process_frame
 	print('RESULT: %d failure(s)' % failures)
