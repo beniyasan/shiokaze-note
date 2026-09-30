@@ -1,5 +1,8 @@
 extends Node2D
 
+const FishingChallengeScript = preload("res://fishing_challenge.gd")
+const MusicDirectorScript = preload("res://audio/music_director.gd")
+
 # Original v2 world dimensions retained; viewport now shows a walkable slice.
 const TILE := 16
 const WORLD_W := 64
@@ -65,9 +68,22 @@ var shake_t := 0.0
 var fish_particle_t := 0.0
 var legendary_t := 0.0
 var legendary_stage := 0
+var fishing_challenge: FishingChallenge
+var challenge_strength := 1
+var challenge_round_event := ""
+var challenge_hint_t := 0.0
+var music: Node
 var se_player := AudioStreamPlayer.new()
 const SE_RATE := 22050.0
 var hud := Node2D.new()
+
+func _music_call(method: String, args: Array = []) -> void:
+	# Music is an optional child so older exported checkouts can still boot. Keep
+	# gameplay independent from the director while routing all state changes
+	# through one guarded call site.
+	if music == null or not is_instance_valid(music) or not music.has_method(method):
+		return
+	music.callv(method, args)
 
 func _ready():
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
@@ -92,6 +108,13 @@ func _ready():
 	se_player.volume_db = -8.0
 	add_child(se_player)
 	se_player.play()
+	# The field loop is layered at runtime. MusicDirector is optional while the
+	# prototype is being opened from an older checkout, so keep gameplay usable
+	# if that script has not been imported yet.
+	if ResourceLoader.exists("res://audio/music_director.gd"):
+		music = MusicDirectorScript.new()
+		add_child(music)
+		_music_call("start_field")
 	rng.randomize()
 	if not OS.get_cmdline_user_args().has("--fresh"):
 		_load_game()
@@ -309,6 +332,7 @@ func _try_fish():
 		face = 0
 		toast = "Line out... wait for a bite!"
 		toast_t = 2.0
+		_music_call("start_fishing", [combo])
 		_play_se("cast")
 	else:
 		toast = "Cast from the water's edge or the end of the pier"; toast_t = 3.0
@@ -335,9 +359,18 @@ func _process_fishing(delta: float):
 			timing_timer = 20.0
 			gauge = 0.0
 			gauge_direction = 1.0
+			# The challenge chain sits on top of the existing tug-of-war.  A
+			# growing combo asks for more varied beats, while the line tension and
+			# stamina model below remain authoritative for the actual catch.
+			challenge_strength = clampi(combo + 1, 1, 3)
+			fishing_challenge = FishingChallengeScript.new()
+			fishing_challenge.configure(challenge_strength, combo, rng.randi())
+			challenge_round_event = fishing_challenge.round_label()
+			challenge_hint_t = 2.4
 			toast = "BITE!  Keep the line in the gold zone!"
 			toast_t = 2.0
 			flash_t = 0.12
+			_play_se("bite")
 			_play_se("battle_start")
 		elif Input.is_action_just_pressed("fish"):
 			# Early taps are ignored so anticipation remains readable.
@@ -356,6 +389,9 @@ func _process_fishing(delta: float):
 		var counter := Input.get_axis("move_left", "move_right")
 		var countering := counter * battle_direction < -0.25
 		var straining := counter * battle_direction > 0.25
+		if fishing_challenge != null and not fishing_challenge.done:
+			fishing_challenge.tick(delta, counter)
+			challenge_hint_t = maxf(0.0, challenge_hint_t-delta)
 		battle_escape = clampf(battle_escape + delta * (-0.035 if countering else (0.095 if straining else 0.055)), 0.0, 1.0)
 		battle_tension = clampf(battle_tension + delta * (-0.045 if countering else (0.07 if straining else -0.014)), 0.0, 1.0)
 		gauge += delta * (1.25 + battle_tension * 0.75) * gauge_direction
@@ -365,7 +401,7 @@ func _process_fishing(delta: float):
 			# Running out of line is a miss even if the fish was nearly tired.
 			_resolve_fishing_timing(-1.0)
 		elif Input.is_action_just_pressed("fish"):
-			_handle_fishing_strike(gauge)
+			_handle_fishing_strike(gauge, counter)
 	elif fishing_state == FishingState.RESULT:
 		result_t -= delta
 		if Input.is_action_just_pressed("fish"):
@@ -405,6 +441,8 @@ func _resolve_fishing_timing(position: float):
 		cast_timer = 0.0
 		result_t = 1.3
 		shake_t = 0.12
+		_music_call("set_combo", [0])
+		_music_call("start_field")
 		_play_se("miss")
 		toast = "MISS!  Tap SPACE to cast again"
 		toast_t = result_t
@@ -419,6 +457,8 @@ func _resolve_fishing_timing(position: float):
 	elif roll > 0.78: result = "Silver sprat"
 	last_catch = result
 	last_rarity = "LEGENDARY" if legendary else ("RARE" if result == "Moonfin trout" else ("UNCOMMON" if result == "Silver sprat" else "COMMON"))
+	_music_call("set_combo", [combo])
+	_music_call("play_fanfare", [legendary])
 	fish_count += 1
 	catches[result] = int(catches.get(result,0))+1
 	fishing_state = FishingState.RESULT
@@ -432,9 +472,29 @@ func _resolve_fishing_timing(position: float):
 	toast = ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch + "  /  SPACE to cast again"
 	toast_t = result_t
 
-func _handle_fishing_strike(position: float):
+func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	if pull_cooldown > 0.0: return
 	pull_cooldown = 1.8
+
+	# Challenge beats are deliberately forgiving and resolve before the normal
+	# gauge grade.  A missed beat strains the same authoritative line model as a
+	# missed gold-zone pull; it never bypasses the existing escape/tension rules.
+	if fishing_challenge != null and not fishing_challenge.done:
+		var challenge_result := fishing_challenge.accept(position, counter_axis)
+		challenge_round_event = str(challenge_result.get("event", ""))
+		challenge_hint_t = 1.1
+		if not bool(challenge_result.get("success", false)):
+			battle_tension = clampf(battle_tension + 0.25, 0.0, 1.0)
+			battle_escape = clampf(battle_escape + 0.12, 0.0, 1.0)
+			shake_t = 0.24
+			_play_se("danger")
+			toast = "CHALLENGE MISSED!  " + challenge_round_event
+			toast_t = 1.2
+			if battle_tension >= 1.0 or battle_escape >= 1.0:
+				_resolve_fishing_timing(-1.0)
+			return
+		if bool(challenge_result.get("round_complete", false)):
+			_play_se("perfect_tug")
 
 	# A pull outside the teal band strains the line. Inside it, each successful
 	# input wears down the fish and raises the spectacle toward the final catch.
@@ -525,6 +585,7 @@ func _finish_cast():
 
 func _reset_fishing():
 	fishing_state = FishingState.IDLE
+	_music_call("start_field")
 	cast_timer = 0.0
 	bite_timer = 0.0
 	timing_timer = 0.0
@@ -543,6 +604,10 @@ func _reset_fishing():
 	direction_timer = 0.0
 	battle_tension = 0.0
 	battle_escape = 0.0
+	fishing_challenge = null
+	challenge_strength = 1
+	challenge_round_event = ""
+	challenge_hint_t = 0.0
 	toast = "Ready to cast"
 	toast_t = 1.2
 
@@ -750,7 +815,9 @@ func _draw_fishing_hud():
 			var start := Vector2(240,126) + Vector2(cos(a),sin(a))* (140.0 + power * 55.0)
 			var end := Vector2(240,126) + Vector2(cos(a),sin(a))* 350.0
 			hud.draw_line(start,end,Color.from_hsv(float(i)/14.0,0.55,1.0,0.10+power*0.46),2.0+power*3.0)
-	var panel := Rect2(96,48,288,160)
+	var challenge_live := fishing_challenge != null and not fishing_challenge.done
+	var challenge_offset := 30 if challenge_live else 0
+	var panel := Rect2(96,48,288,160 + challenge_offset)
 	_panel(panel)
 	_text(Vector2(114,70), "FISHING  /  " + ("WAIT FOR THE BITE" if fishing_state == FishingState.ANTICIPATING else "TUG-OF-WAR"), 12)
 	if fishing_state == FishingState.ANTICIPATING:
@@ -758,20 +825,58 @@ func _draw_fishing_hud():
 		hud_bar(Vector2(114,98),Vector2(252,8),p,Color("#6c9b91"))
 		_text(Vector2(114,123), "Listen for the splash...", 10)
 	else:
+		if challenge_live:
+			_text(Vector2(114,86), fishing_challenge.round_label(), 9)
+			_text(Vector2(114,99), _challenge_prompt(), 8)
+			if challenge_hint_t > 0.0 and challenge_round_event != "":
+				_text(Vector2(114,110), challenge_round_event, 8)
+		var gauge_y := 98.0 + challenge_offset
 		# Gold center zone is the PERFECT band; wider teal band is GOOD.
-		_text(Vector2(114,87), "TIME %02ds   /   PULLS %d" % [ceili(maxf(0.0,timing_timer)),battle_hits], 9)
-		hud_bar(Vector2(114,98),Vector2(252,12),1.0,Color("#355a5a"))
-		hud_bar(Vector2(114+252*0.26,98),Vector2(252*0.54,12),1.0,Color("#7eb59d"))
-		hud_bar(Vector2(114+252*0.42,98),Vector2(252*0.20,12),1.0,Color("#edc467"))
-		hud.draw_rect(Rect2(114+252*gauge-2,94,4,20),Color("#fff3c2"))
-		_text(Vector2(114,128), ("SPACE  PULL NOW!" if pull_cooldown <= 0.0 else "Recover... wait for next pull"), 11)
-		_text(Vector2(114,145), "FISH STAMINA  %d / %d" % [fish_hp,fish_hp_max], 9)
-		hud_bar(Vector2(114,151),Vector2(252,6),float(fish_hp)/maxf(1.0,fish_hp_max),Color("#a45f69"))
-		_text(Vector2(114,171), "LINE TENSION", 9)
-		hud_bar(Vector2(194,166),Vector2(172,6),battle_tension,Color("#bd7b58"))
-		_text(Vector2(114,186), "FISH " + ("<" if battle_direction < 0 else ">") + "  HOLD " + ("RIGHT" if battle_direction < 0 else "LEFT") + " TO COUNTER", 10)
-		_text(Vector2(114,201), "ESCAPE", 8)
-		hud_bar(Vector2(151,195),Vector2(215,4),battle_escape,Color("#c06363"))
+		_text(Vector2(114,87 + challenge_offset), "TIME %02ds   /   PULLS %d" % [ceili(maxf(0.0,timing_timer)),battle_hits], 9)
+		hud_bar(Vector2(114,gauge_y),Vector2(252,12),1.0,Color("#355a5a"))
+		hud_bar(Vector2(114+252*0.26,gauge_y),Vector2(252*0.54,12),1.0,Color("#7eb59d"))
+		hud_bar(Vector2(114+252*0.42,gauge_y),Vector2(252*0.20,12),1.0,Color("#edc467"))
+		if challenge_live:
+			_draw_challenge_target(Vector2(114,gauge_y),Vector2(252,12))
+		hud.draw_rect(Rect2(114+252*gauge-2,gauge_y-4,4,20),Color("#fff3c2"))
+		_text(Vector2(114,128 + challenge_offset), ("SPACE  PULL NOW!" if pull_cooldown <= 0.0 else "Recover... wait for next pull"), 11)
+		_text(Vector2(114,145 + challenge_offset), "FISH STAMINA  %d / %d" % [fish_hp,fish_hp_max], 9)
+		hud_bar(Vector2(114,151 + challenge_offset),Vector2(252,6),float(fish_hp)/maxf(1.0,fish_hp_max),Color("#a45f69"))
+		_text(Vector2(114,171 + challenge_offset), "LINE TENSION", 9)
+		hud_bar(Vector2(194,166 + challenge_offset),Vector2(172,6),battle_tension,Color("#bd7b58"))
+		_text(Vector2(114,186 + challenge_offset), "FISH " + ("<" if battle_direction < 0 else ">") + "  HOLD " + ("RIGHT" if battle_direction < 0 else "LEFT") + " TO COUNTER", 10)
+		_text(Vector2(114,201 + challenge_offset), "ESCAPE", 8)
+		hud_bar(Vector2(151,195 + challenge_offset),Vector2(215,4),battle_escape,Color("#c06363"))
+
+func _challenge_prompt() -> String:
+	if fishing_challenge == null: return ""
+	match fishing_challenge.current_game_name():
+		"SHRINKING RING": return "SPACE inside the shrinking ring"
+		"MOVING SAFE ZONE": return "SPACE while the safe zone overlaps"
+		"TIDE SLALOM":
+			var lane := fishing_challenge.safe_lane()
+			if lane < -0.5: return "HOLD LEFT, then SPACE"
+			if lane > 0.5: return "HOLD RIGHT, then SPACE"
+			return "CENTER, then SPACE"
+		"FINISHING RHYTHM": return "Tap SPACE on every finishing beat"
+		_: return fishing_challenge.instructions()
+
+func _draw_challenge_target(pos: Vector2, size: Vector2):
+	if fishing_challenge == null or fishing_challenge.done: return
+	var center := clampf(fishing_challenge.target_center(), 0.0, 1.0)
+	var width := clampf(fishing_challenge.target_width(), 0.04, 1.0)
+	var left := pos.x + size.x * clampf(center - width * 0.5, 0.0, 1.0)
+	var right := pos.x + size.x * clampf(center + width * 0.5, 0.0, 1.0)
+	var color := Color("#eacb72")
+	match fishing_challenge.current_game_name():
+		"MOVING SAFE ZONE": color = Color("#9fd5ac")
+		"TIDE SLALOM": color = Color("#b6b3ed")
+		"FINISHING RHYTHM": color = Color("#f2a66f")
+	# Keep the original gold/teal grade visible underneath. The outlined target
+	# makes each challenge readable even for players who ignore the text prompt.
+	hud.draw_rect(Rect2(left,pos.y-2,maxf(2.0,right-left),size.y+4),Color(color,0.38))
+	hud.draw_line(Vector2(left,pos.y-4),Vector2(left,pos.y+size.y+4),color,1.0)
+	hud.draw_line(Vector2(right,pos.y-4),Vector2(right,pos.y+size.y+4),color,1.0)
 
 func _draw_fishing_result():
 	if last_rarity == "LEGENDARY":
