@@ -512,6 +512,9 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 			_resolve_fishing_timing(-1.0)
 		return
 	battle_hits += 1
+	# Let each clean pull add a layer during the same encounter; the retained
+	# catch combo remains the starting energy for the next cast.
+	_music_call("set_combo", [mini(4, combo + battle_hits)])
 	if grade == "PERFECT": perfect_pulls += 1
 	fish_hp = maxi(0, fish_hp - (2 if grade == "PERFECT" else 1))
 	battle_tension = clampf(battle_tension + (0.08 if grade == "PERFECT" else 0.14), 0.0, 1.0)
