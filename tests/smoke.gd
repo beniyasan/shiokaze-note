@@ -48,5 +48,12 @@ func run():
 	check(game.current_map=='rocky','save restores active map')
 	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,440); game._check_map_exit()
 	check(game._walkable(Vector2(500,440)) and game.transition_target=='beach','town beach exit is reachable')
+	# Each map exposes named, local fishing landmarks as well as its shoreline.
+	game.current_map='beach'; game._build_map('beach'); game.player=Vector2(300,487)
+	check(game._can_fish() and game._fishing_spots().size()==2,'beach tide pools are fishable')
+	game.player=Vector2(300,300)
+	check(not game._can_fish(),'beach inland cast rejected')
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
+	check(game._can_fish() and game._fishing_spots().size()==2,'rocky tide pools are fishable')
 	print('RESULT: %d failure(s)' % failures)
 	quit(failures)
