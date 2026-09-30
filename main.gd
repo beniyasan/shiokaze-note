@@ -186,7 +186,8 @@ func _check_map_exit():
 	if transition_active: return
 	var exit := ""
 	if current_map == "town":
-		if player.y > 525 and player.x > 450 and player.x < 550: exit = "beach"
+		# The south road meets the shoreline around y=440; keep the exit on walkable land.
+		if player.y > 438 and player.x > 450 and player.x < 550: exit = "beach"
 		elif player.x > 798 and player.y > 250 and player.y < 430: exit = "rocky"
 	elif current_map == "beach":
 		if player.y < 34 and player.x > 280 and player.x < 560: exit = "town"
