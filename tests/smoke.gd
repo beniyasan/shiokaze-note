@@ -46,5 +46,7 @@ func run():
 	check(game.current_map=='rocky' and game.fish_count==5,'beach to rocky preserves ledger')
 	game._save_game('user://map-test.json'); game.current_map='town'; game._build_map('town'); game._load_game('user://map-test.json')
 	check(game.current_map=='rocky','save restores active map')
+	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,440); game._check_map_exit()
+	check(game._walkable(Vector2(500,440)) and game.transition_target=='beach','town beach exit is reachable')
 	print('RESULT: %d failure(s)' % failures)
 	quit(failures)
