@@ -6,8 +6,15 @@ PASS sea blocks movement
 PASS pier is walkable
 PASS route waypoint (500.0, 530.0)
 PASS pier route ends at fishing spot
+PASS fishing bite anticipation starts
+PASS bite opens timing window
+PASS perfect timing resolves result
+PASS successful catch increments combo and rarity
 PASS notebook prevents casting
 PASS valid cast starts timed sequence
+PASS cast enters bite anticipation
+PASS perfect timing awards grade and combo
+PASS miss resets combo
 PASS catch recorded in ledger
 PASS save restores ledger and count
 PASS save restores valid position
@@ -17,4 +24,7 @@ PASS town to beach transition
 PASS beach to rocky preserves ledger
 PASS save restores active map
 PASS town beach exit is reachable
+PASS beach tide pools are fishable
+PASS beach inland cast rejected
+PASS rocky tide pools are fishable
 RESULT: 0 failure(s)
