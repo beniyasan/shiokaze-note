@@ -1,0 +1,16 @@
+Godot Engine v4.6.3.stable.official.7d41c59c4 - https://godotengine.org
+
+PASS spawn is walkable
+PASS inn blocks movement
+PASS sea blocks movement
+PASS pier is walkable
+PASS route waypoint (500.0, 530.0)
+PASS pier route ends at fishing spot
+PASS notebook prevents casting
+PASS valid cast starts timed sequence
+PASS catch recorded in ledger
+PASS save restores ledger and count
+PASS save restores valid position
+PASS inland cast rejected
+PASS legacy unsafe position handled
+RESULT: 0 failure(s)
