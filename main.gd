@@ -68,6 +68,11 @@ var shake_t := 0.0
 var fish_particle_t := 0.0
 var legendary_t := 0.0
 var legendary_stage := 0
+# Every successful, non-legendary catch now gets a short, readable reveal:
+# card back -> rarity -> growing silhouette -> flip.  The timer is separate
+# from result_t so the existing result/input pacing stays intact.
+var reveal_t := 0.0
+var reveal_stage := 0
 var fishing_challenge: FishingChallenge
 var challenge_strength := 1
 var challenge_round_event := ""
@@ -409,6 +414,10 @@ func _process_fishing(delta: float):
 		if last_rarity == "LEGENDARY":
 			var previous_legendary_t := legendary_t
 			legendary_t = minf(legendary_t + delta, 6.0)
+			# Keep the generic reveal state in sync for deterministic probes and
+			# future result skins; legendary keeps its established six-second arc.
+			reveal_t = legendary_t
+			reveal_stage = _reveal_stage_at(reveal_t, last_rarity)
 			# The catch is deliberately paced: a small omen, rising energy, a
 			# full-screen climax, then a long rainbow afterglow.
 			if previous_legendary_t < 0.82 and legendary_t >= 0.82:
@@ -424,9 +433,54 @@ func _process_fishing(delta: float):
 			if previous_legendary_t < 3.75 and legendary_t >= 3.75:
 				legendary_stage = maxi(legendary_stage, 3)
 				_play_se("after")
+		elif last_grade != "MISS":
+			var previous_reveal_t := reveal_t
+			reveal_t = minf(reveal_t + delta, 2.0)
+			reveal_stage = _reveal_stage_at(reveal_t, last_rarity)
+			# A single gentle chime marks the flip; no rapid white flashes.
+			if previous_reveal_t < 1.48 and reveal_t >= 1.48:
+				_play_se("rise")
 	flash_t = maxf(0.0, flash_t-delta)
 	shake_t = maxf(0.0, shake_t-delta)
 	fish_particle_t += delta
+
+# Stage boundaries are fixed so a seed, frame rate, or renderer cannot change
+# the order of the reveal.  Legendary reuses its existing six-second timing;
+# standard catches fit the same two-second result window they had before.
+func _reveal_stage_at(time: float, rarity: String) -> int:
+	if rarity == "LEGENDARY":
+		if time < 0.82: return 0 # unknown omen
+		if time < 2.05: return 1 # rarity and energy rising
+		if time < 3.75: return 2 # full-screen reveal
+		return 3 # afterglow
+	if time < 0.42: return 0 # card back and ???
+	if time < 0.82: return 1 # rarity seal
+	if time < 1.42: return 2 # growing silhouette/light
+	if time < 1.78: return 3 # card flip
+	return 4 # fish name revealed
+
+func reveal_stage_name() -> String:
+	if last_rarity == "LEGENDARY":
+		match reveal_stage:
+			0: return "UNKNOWN"
+			1: return "RISING"
+			2: return "CLIMAX"
+			3: return "AFTERGLOW"
+			_: return "UNKNOWN"
+	match reveal_stage:
+		0: return "UNKNOWN"
+		1: return "RARITY"
+		2: return "RISING"
+		3: return "FLIPPING"
+		4: return "REVEALED"
+		_: return "UNKNOWN"
+
+func _rarity_color(rarity: String) -> Color:
+	match rarity:
+		"RARE": return Color("#72c7e8")
+		"UNCOMMON": return Color("#8bd59c")
+		"LEGENDARY": return Color("#f6c76b")
+		_: return Color("#b7c3d7")
 
 func _resolve_fishing_timing(position: float):
 	var grade := "MISS"
@@ -465,6 +519,8 @@ func _resolve_fishing_timing(position: float):
 	cast_timer = 0.0
 	legendary_t = 0.0
 	legendary_stage = 0
+	reveal_t = 0.0
+	reveal_stage = 0
 	result_t = 6.2 if last_rarity == "LEGENDARY" else 2.0
 	flash_t = 0.90 if last_rarity == "LEGENDARY" else (0.32 if last_rarity == "RARE" else 0.18)
 	shake_t = 1.10 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
@@ -597,6 +653,8 @@ func _reset_fishing():
 	last_rarity = ""
 	legendary_t = 0.0
 	legendary_stage = 0
+	reveal_t = 0.0
+	reveal_stage = 0
 	fish_hp = 0
 	fish_hp_max = 0
 	battle_hits = 0
@@ -885,6 +943,9 @@ func _draw_fishing_result():
 	if last_rarity == "LEGENDARY":
 		_draw_legendary_result()
 		return
+	if last_grade != "MISS":
+		_draw_standard_reveal_result()
+		return
 	var panel := Rect2(92,64,296,110)
 	_panel(panel)
 	_text(Vector2(116,88),"BIG CATCH!!" if last_rarity == "LEGENDARY" else last_grade,24 if last_rarity == "LEGENDARY" else 20)
@@ -903,6 +964,81 @@ func _draw_fishing_result():
 			var a := fish_particle_t*2.0 + float(i)*TAU/float(sparkle_count)
 			var q := Vector2(240,108) + Vector2(cos(a),sin(a))* (42.0 + sin(fish_particle_t*5.0+i)*5.0)
 			hud.draw_circle(q,3.0 if last_rarity == "LEGENDARY" else 2.0,Color.from_hsv(fmod(float(i)/float(sparkle_count)+fish_particle_t*0.1,1.0),0.72,1.0) if last_rarity == "LEGENDARY" else sparkle_color)
+
+func _draw_standard_reveal_result():
+	var t := reveal_t
+	var center := Vector2(240,137)
+	var rarity_col := _rarity_color(last_rarity)
+	var rise := clampf((t - 0.82) / 0.60, 0.0, 1.0)
+	var pulse := 0.5 + 0.5 * sin(t * 2.4)
+	var flip_p := clampf((t - 1.42) / 0.36, 0.0, 1.0)
+	var face_visible := t >= 1.60
+	# The card stays on screen for the whole reveal. A wide back, a narrow
+	# turning edge, and a wide face read as one smooth flip rather than a cut.
+	var card_half_width := 136.0
+	if t >= 1.42 and t < 1.78:
+		card_half_width = maxf(7.0, 136.0 * absf(cos(flip_p * PI)))
+	var card_rect := Rect2(center.x - card_half_width, 35, card_half_width * 2.0, 194)
+	_panel(card_rect)
+	hud.draw_rect(card_rect.grow(-5), Color(0.06, 0.10, 0.18, 0.72))
+	# Soft rings and rays make the silhouette grow without using strobing.
+	if t >= 0.42:
+		for ring in range(3):
+			var radius := 28.0 + rise * (18.0 + ring * 15.0)
+			hud.draw_arc(center, radius, 0, TAU, 64, Color(rarity_col, 0.16 + pulse * 0.08), 1.5)
+	if t >= 0.82:
+		for i in range(12):
+			var a := float(i) * TAU / 12.0 + t * 0.10
+			var inner := 40.0 + rise * 18.0
+			var outer := inner + 13.0 + rise * 28.0
+			hud.draw_line(center + Vector2(cos(a), sin(a)) * inner, center + Vector2(cos(a), sin(a)) * outer, Color(rarity_col, 0.22 + rise * 0.28), 1.0)
+	var fish_scale := 0.28
+	if t >= 0.42:
+		fish_scale = 0.36 + rise * 0.64
+	var fish_col := Color("#111a2b") if not face_visible else rarity_col.lightened(0.12)
+	var fish_width_scale := 1.0
+	if t >= 1.42 and t < 1.78:
+		fish_width_scale = absf(cos(flip_p * PI))
+	_draw_reveal_fish(center, fish_scale, fish_col, face_visible, fish_width_scale)
+	if face_visible:
+		# Coloured bands remain subtle so the card and name carry the reveal.
+		for k in range(5):
+			var band_x := -38.0 + float(k) * 18.0
+			hud.draw_line(center + Vector2(band_x, -13) * fish_scale, center + Vector2(band_x + 5, 16) * fish_scale, Color(1.0, 0.92, 0.70, 0.42), 2.0)
+	if t < 0.42:
+		_center_text(68, "???", 28, Color("#e7edf7"))
+		_center_text(207, "A hidden tide catch", 10, Color("#b4c5db"))
+	elif t < 0.82:
+		_center_text(66, "RARITY...", 18, rarity_col.lightened(0.22))
+		_center_text(207, "The water holds its breath", 10, Color("#c4d1e2"))
+	elif t < 1.42:
+		_center_text(64, last_rarity, 22, rarity_col.lightened(0.22))
+		_center_text(207, "Something is surfacing", 10, Color("#d5e2ef"))
+	elif not face_visible:
+		_center_text(64, last_rarity, 18, rarity_col.lightened(0.16))
+		_center_text(207, "TURNING THE CARD...", 10, Color("#e3e7ee"))
+	else:
+		_center_text(62, last_rarity, 16, rarity_col.lightened(0.18))
+		_center_text(207, last_catch, 19, Color("#fff0c6"))
+		_center_text(225, "%s  /  COMBO x%d" % [last_rarity, combo], 10, Color("#d3deec"))
+		_center_text(250, "SPACE  continue", 10, Color("#fff0d8"))
+	# A single low-alpha wash at the flip keeps the card readable and avoids
+	# the rapid flashing that makes ordinary catches tiring to watch.
+	if t >= 1.42 and t < 1.78:
+		var flip_glow := sin(flip_p * PI) * 0.10
+		hud.draw_rect(Rect2(0, 0, 480, 270), Color(rarity_col, flip_glow))
+
+func _draw_reveal_fish(center: Vector2, scale: float, color: Color, revealed: bool, width_scale: float = 1.0):
+	var body := PackedVector2Array([Vector2(-84,0), Vector2(-55,-25), Vector2(29,-30), Vector2(65,-13), Vector2(87,0), Vector2(65,18), Vector2(30,30), Vector2(-51,25)])
+	var transformed := PackedVector2Array()
+	for point in body:
+		transformed.append(center + Vector2(point.x * width_scale, point.y) * scale)
+	hud.draw_colored_polygon(transformed, color)
+	var tail := PackedVector2Array([center + Vector2(-67 * width_scale, 0) * scale, center + Vector2(-112 * width_scale, -36) * scale, center + Vector2(-108 * width_scale, 35) * scale])
+	hud.draw_colored_polygon(tail, color.darkened(0.18))
+	if revealed:
+		hud.draw_circle(center + Vector2(57 * width_scale, -8) * scale, 5.0 * scale, Color("#18263d"))
+		hud.draw_circle(center + Vector2(58 * width_scale, -10) * scale, 1.5 * scale, Color.WHITE)
 
 func _draw_legendary_result():
 	var t := legendary_t
