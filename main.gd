@@ -7,6 +7,12 @@ const WORLD_H := 40
 const WORLD_SIZE := Vector2(WORLD_W*TILE, WORLD_H*TILE)
 const SAVE_PATH := "user://saltmere_save.json"
 var player := Vector2(368, 372)
+var current_map := "town"
+var transition_active := false
+var transition_t := 0.0
+var transition_target := ""
+var transition_spawn := Vector2.ZERO
+var transition_fade := 0.0
 var speed := 78.0
 var fish_count := 0
 var day := 1
@@ -49,6 +55,18 @@ func _ready():
 	queue_redraw()
 
 func _build_world():
+	_build_map(current_map)
+
+func _build_map(map_name: String):
+	props.clear(); solids.clear()
+	if map_name == "beach":
+		_build_beach()
+	elif map_name == "rocky":
+		_build_rocky()
+	else:
+		_build_town()
+
+func _build_town():
 	_add_prop("inn", Vector2(240,322), Rect2(-32,-40,64,37))
 	_add_prop("cottage", Vector2(424,320), Rect2(-25,-29,50,25))
 	_add_prop("shop", Vector2(550,335), Rect2(-25,-29,50,25))
@@ -72,11 +90,38 @@ func _build_world():
 		_add_prop("reeds",Vector2(791+(i%3)*11,287+i*10),Rect2())
 	props.sort_custom(func(a,b): return a.pos.y < b.pos.y)
 
+func _build_beach():
+	# Amber beach: dunes, driftwood and a broad north entrance from town.
+	_add_prop("cottage", Vector2(260,190), Rect2(-25,-29,50,25))
+	_add_prop("barrel", Vector2(322,232), Rect2(-7,-17,14,16))
+	_add_prop("sign", Vector2(392,92), Rect2(-6,-9,12,9))
+	for x in range(70,790,42):
+		_add_prop("rock", Vector2(x,270+(x%5)*21), Rect2(-10,-13,20,12))
+	for x in range(90,760,58):
+		_add_prop("tree%d" % (int(x/58)%3), Vector2(x,90+(x%4)*25), Rect2(-6,-12,12,12))
+	for i in range(14):
+		_add_prop("reeds", Vector2(760+(i%3)*11,260+i*10), Rect2())
+	props.sort_custom(func(a,b): return a.pos.y < b.pos.y)
+
+func _build_rocky():
+	# Rocky shore: sparse windblown trees and stone shelves.
+	_add_prop("inn", Vector2(585,170), Rect2(-32,-40,64,37))
+	_add_prop("sign", Vector2(120,102), Rect2(-6,-9,12,9))
+	for x in range(70,760,52):
+		_add_prop("rock", Vector2(x,250+(x%6)*25), Rect2(-10,-13,20,12))
+	for x in range(130,760,95):
+		_add_prop("tree%d" % (int(x/95)%3), Vector2(x,90+(x%3)*28), Rect2(-6,-12,12,12))
+	for i in range(12):
+		_add_prop("barrel", Vector2(340+(i%4)*18,420+i*9), Rect2(-7,-17,14,16))
+	props.sort_custom(func(a,b): return a.pos.y < b.pos.y)
+
 func _add_prop(kind: String, pos: Vector2, body: Rect2):
 	props.append({"kind":kind,"pos":pos})
 	if body.size != Vector2.ZERO: solids.append(Rect2(pos+body.position,body.size))
 
 func _shore(x: float) -> float:
+	if current_map == "beach": return 500.0
+	if current_map == "rocky": return 430.0 + (int(x/96.0)%3)*12
 	if x < 240: return 464
 	if x < 416: return 480
 	if x < 608: return 464
@@ -104,6 +149,19 @@ func _move_player(dir: Vector2, delta: float):
 
 func _process(delta):
 	elapsed += delta
+	if transition_active:
+		transition_t += delta
+		transition_fade = minf(1.0, transition_t / 0.22)
+		if transition_t >= 0.44:
+			current_map = transition_target
+			_build_map(current_map)
+			player = transition_spawn
+			transition_active = false
+			transition_fade = 0.0
+			toast = "Arrived at " + current_map.capitalize()
+			toast_t = 2.0
+		queue_redraw(); hud.queue_redraw()
+		return
 	if Input.is_action_just_pressed("notebook"):
 		notebook_open = not notebook_open
 	var dir := Input.get_vector("move_left", "move_right", "move_up", "move_down")
@@ -113,6 +171,7 @@ func _process(delta):
 		walk_time += delta
 		if absf(dir.x) > absf(dir.y): face = 2 if dir.x < 0 else 3
 		else: face = 1 if dir.y < 0 else 0
+		_check_map_exit()
 	if not notebook_open:
 		if cast_timer > 0:
 			cast_timer -= delta
@@ -122,6 +181,36 @@ func _process(delta):
 	toast_t = maxf(0.0, toast_t-delta)
 	cam.position = player.round()
 	queue_redraw(); hud.queue_redraw()
+
+func _check_map_exit():
+	if transition_active: return
+	var exit := ""
+	if current_map == "town":
+		if player.y > 525 and player.x > 450 and player.x < 550: exit = "beach"
+		elif player.x > 798 and player.y > 250 and player.y < 430: exit = "rocky"
+	elif current_map == "beach":
+		if player.y < 34 and player.x > 280 and player.x < 560: exit = "town"
+		elif player.x > 798 and player.y > 280 and player.y < 560: exit = "rocky"
+	elif current_map == "rocky":
+		if player.x < 34 and player.y > 250 and player.y < 430: exit = "town"
+		elif player.y > 420 and player.x > 280 and player.x < 560: exit = "beach"
+	if exit != "":
+		var spawn := _entry_spawn(exit)
+		_transition_to(exit, spawn)
+
+func _entry_spawn(map_name: String) -> Vector2:
+	if current_map == "town" and map_name == "beach": return Vector2(400,80)
+	if current_map == "town" and map_name == "rocky": return Vector2(90,340)
+	if current_map == "beach" and map_name == "town": return Vector2(500,520)
+	if current_map == "beach" and map_name == "rocky": return Vector2(90,340)
+	if current_map == "rocky" and map_name == "town": return Vector2(760,340)
+	return Vector2(400,80)
+
+func _transition_to(map_name: String, spawn: Vector2):
+	if map_name == current_map: return
+	transition_target = map_name; transition_spawn = spawn; transition_t = 0.0
+	transition_fade = 0.0; transition_active = true
+	toast = "Travelling to " + map_name.capitalize() + "..."; toast_t = 1.0
 
 func _can_fish() -> bool:
 	return (player.x >= 490 and player.x <= 514 and player.y >= 506) or (player.y >= _shore(player.x)-21 and player.x>70 and player.x<810)
@@ -144,13 +233,16 @@ func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		toast = "Could not save. Please check available storage."; toast_t = 4; return
-	f.store_string(JSON.stringify({"version":3,"day":day,"time":time_of_day,"fish":fish_count,"x":player.x,"y":player.y,"catches":catches}))
+	f.store_string(JSON.stringify({"version":4,"map":current_map,"day":day,"time":time_of_day,"fish":fish_count,"x":player.x,"y":player.y,"catches":catches}))
 	toast = "Saved to the tide ledger"; toast_t = 2.4
 
 func _load_game(path: String = SAVE_PATH):
 	if not FileAccess.file_exists(path): return
 	var data = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if not data is Dictionary: return
+	var loaded_map := str(data.get("map","town"))
+	if loaded_map in ["town","beach","rocky"] and loaded_map != current_map:
+		current_map = loaded_map; _build_map(current_map)
 	day = maxi(1,int(data.get("day",1))); fish_count = maxi(0,int(data.get("fish",0)))
 	time_of_day = clampf(float(data.get("time",0.35)),0.0,1.0)
 	var saved_pos := Vector2(float(data.get("x",368)),float(data.get("y",372)))
@@ -177,6 +269,10 @@ func _draw():
 		var tex: Texture2D = textures[prop.kind]
 		draw_texture(tex,prop.pos-Vector2(tex.get_width()/2.0,tex.get_height()))
 	if not drawn: _draw_player()
+	if transition_active:
+		draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color(0.04,0.08,0.10, transition_fade))
+	if transition_active:
+		draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color(0.04,0.08,0.10, transition_fade))
 	if cast_timer > 0:
 		var float_pos := player.round()+Vector2(15,32+int(sin(elapsed*6)))
 		draw_line(player.round()+Vector2(7,-9),player.round()+Vector2(12,-23),Color("#80674a"))
