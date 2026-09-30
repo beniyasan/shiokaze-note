@@ -26,6 +26,17 @@ func run():
 	game._resolve_fishing_timing(0.5)
 	check(game.fishing_state==game.FishingState.RESULT and game.last_grade=='PERFECT','perfect timing resolves result')
 	check(game.combo==1 and game.last_rarity!='','successful catch increments combo and rarity')
+	# Standard catches use a deterministic gacha-style reveal instead of
+	# showing the species immediately: unknown -> rarity -> rising -> flip.
+	check(game.reveal_stage==0 and game.reveal_stage_name()=='UNKNOWN','reveal starts as unknown silhouette')
+	game._process_fishing(0.45)
+	check(game.reveal_stage==1 and game.reveal_stage_name()=='RARITY','reveal shows rarity seal')
+	game._process_fishing(0.40)
+	check(game.reveal_stage==2 and game.reveal_stage_name()=='RISING','reveal grows silhouette and light')
+	game._process_fishing(0.60)
+	check(game.reveal_stage==3 and game.reveal_stage_name()=='FLIPPING','reveal starts card flip')
+	game._process_fishing(0.40)
+	check(game.reveal_stage==4 and game.reveal_stage_name()=='REVEALED','reveal resolves fish name')
 	game._reset_fishing()
 	game.notebook_open=true; game._try_fish()
 	check(game.cast_timer==0,'notebook prevents casting')
