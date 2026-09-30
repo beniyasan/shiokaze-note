@@ -273,6 +273,7 @@ func _draw():
 		var tex: Texture2D = textures[prop.kind]
 		draw_texture(tex,prop.pos-Vector2(tex.get_width()/2.0,tex.get_height()))
 	if not drawn: _draw_player()
+	_draw_exit_markers()
 	if transition_active:
 		draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color(0.04,0.08,0.10, transition_fade))
 	if transition_active:
@@ -282,6 +283,61 @@ func _draw():
 		draw_line(player.round()+Vector2(7,-9),player.round()+Vector2(12,-23),Color("#80674a"))
 		draw_line(player.round()+Vector2(12,-23),float_pos,Color("#d1d6b2"))
 		draw_rect(Rect2(float_pos,Vector2(2,3)),Color("#edb17b"))
+
+func _exit_markers() -> Array[Dictionary]:
+	# Exit markers are deliberately kept in world space so they remain visible as
+	# the camera follows the player. Their locations mirror _check_map_exit().
+	match current_map:
+		"town":
+			return [
+				{"pos":Vector2(500,441),"label":"BEACH","dir":Vector2(0,1)},
+				{"pos":Vector2(800,338),"label":"ROCKY SHORE","dir":Vector2(1,0)}
+			]
+		"beach":
+			return [
+				{"pos":Vector2(420,40),"label":"TOWN","dir":Vector2(0,-1)},
+				{"pos":Vector2(800,390),"label":"ROCKY SHORE","dir":Vector2(1,0)}
+			]
+		"rocky":
+			return [
+				{"pos":Vector2(40,340),"label":"TOWN","dir":Vector2(-1,0)},
+				{"pos":Vector2(420,430),"label":"BEACH","dir":Vector2(0,1)}
+			]
+		_:
+			return []
+
+func _draw_exit_markers():
+	for marker in _exit_markers():
+		var p: Vector2 = marker.pos
+		var d: Vector2 = marker.dir
+		# A small pixel signpost with a directional chevron. It uses the same
+		# muted wood/ink palette as the existing sign prop.
+		draw_line(p + Vector2(0,10), p + Vector2(0,-7), Color("#604c3d"), 2.0)
+		var board := Rect2(p + Vector2(-27,-19), Vector2(54,12))
+		draw_rect(board, Color("#c59b65"))
+		draw_rect(board.grow(-1), Color("#6d5544"), false, 1.0)
+		var tip := p + d * 9.0
+		var left := tip - d * 5.0 + Vector2(-d.y,d.x) * 4.0
+		var right := tip - d * 5.0 - Vector2(-d.y,d.x) * 4.0
+		draw_line(tip,left,Color("#f0dcaa"),2.0)
+		draw_line(tip,right,Color("#f0dcaa"),2.0)
+		draw_string(ThemeDB.fallback_font, p + Vector2(-24,-10), str(marker.label), HORIZONTAL_ALIGNMENT_CENTER, 48, 8, Color("#3f4038"))
+
+func _exit_hint() -> String:
+	var best := ""
+	var best_distance := 120.0
+	for marker in _exit_markers():
+		var distance := player.distance_to(marker.pos)
+		if distance < best_distance:
+			best_distance = distance
+			best = "Exit to " + str(marker.label).capitalize() + "  " + _exit_arrow(marker.dir)
+	return best
+
+func _exit_arrow(direction: Vector2) -> String:
+	if direction.x > 0: return ">"
+	if direction.x < 0: return "<"
+	if direction.y > 0: return "v"
+	return "^"
 
 func _draw_player():
 	var frame := int(walk_time*9)%4 if walking else 0
@@ -302,6 +358,10 @@ func _draw_hud():
 	_text(Vector2(302,23),"[N] Ledger   [F6] Save",10)
 	_panel(Rect2(8,244,464,19))
 	_text(Vector2(15,257),toast if toast_t>0 else "WASD / arrows: walk     SPACE: cast     Follow the path to the pier",10)
+	var nearby_exit := _exit_hint()
+	if nearby_exit != "" and not notebook_open and not transition_active:
+		_panel(Rect2(286,218,184,20))
+		_text(Vector2(294,232),nearby_exit,10)
 	if _can_fish() and not notebook_open and cast_timer<=0:
 		_panel(Rect2(172,218,138,20)); _text(Vector2(182,232),"SPACE  Cast your line",11)
 	if notebook_open:
