@@ -34,6 +34,24 @@ var walking := false
 var elapsed := 0.0
 var cast_timer := 0.0
 var catches: Dictionary = {}
+# Fishing is a short, deterministic-feeling arcade loop: cast, wait for a bite,
+# then tap SPACE while the moving gauge crosses the sweet spot.
+enum FishingState { IDLE, ANTICIPATING, TIMING, RESULT }
+var fishing_state: FishingState = FishingState.IDLE
+var bite_timer := 0.0
+var bite_delay := 1.1
+var timing_timer := 0.0
+var timing_window := 0.72
+var gauge := 0.0
+var gauge_direction := 1.0
+var combo := 0
+var last_grade := ""
+var last_catch := ""
+var last_rarity := ""
+var result_t := 0.0
+var flash_t := 0.0
+var shake_t := 0.0
+var fish_particle_t := 0.0
 var hud := Node2D.new()
 
 func _ready():
@@ -115,10 +133,13 @@ func _build_rocky():
 	landmarks = [
 		{"kind":"breakwater","pos":Vector2(310,420),"label":"Stone Breakwater"},
 		{"kind":"pool","pos":Vector2(170,585),"label":"Blackglass Pool"},
-		{"kind":"pool","pos":Vector2(520,573),"label":"Gull's Pool"}
+		{"kind":"pool","pos":Vector2(520,573),"label":"Gull's Pool"},
+		{"kind":"lighthouse","pos":Vector2(704,154),"label":"Farwatch Lighthouse"}
 	]
 	_add_prop("inn", Vector2(585,170), Rect2(-32,-40,64,37))
 	_add_prop("sign", Vector2(120,102), Rect2(-6,-9,12,9))
+	# A future-route sign keeps the lighthouse legible before that region is playable.
+	_add_prop("sign", Vector2(632,232), Rect2())
 	for x in range(70,760,52):
 		_add_prop("rock", Vector2(x,250+(x%6)*25), Rect2(-10,-13,20,12))
 	for x in range(130,760,95):
@@ -177,7 +198,7 @@ func _process(delta):
 	if Input.is_action_just_pressed("notebook"):
 		notebook_open = not notebook_open
 	var dir := Input.get_vector("move_left", "move_right", "move_up", "move_down")
-	walking = dir.length() > 0 and not notebook_open and cast_timer <= 0
+	walking = dir.length() > 0 and not notebook_open and fishing_state == FishingState.IDLE
 	if walking:
 		_move_player(dir,delta)
 		walk_time += delta
@@ -185,13 +206,15 @@ func _process(delta):
 		else: face = 1 if dir.y < 0 else 0
 		_check_map_exit()
 	if not notebook_open:
-		if cast_timer > 0:
-			cast_timer -= delta
-			if cast_timer <= 0: _finish_cast()
-		elif Input.is_action_just_pressed("fish"): _try_fish()
+		_process_fishing(delta)
 	if Input.is_action_just_pressed("save_game"): _save_game()
 	toast_t = maxf(0.0, toast_t-delta)
 	cam.position = player.round()
+	if shake_t > 0.0:
+		var shake_power := 4.0 if last_rarity == "RARE" else 2.0
+		cam.offset = Vector2(sin(elapsed*80.0), cos(elapsed*71.0)) * shake_power * minf(1.0, shake_t*8.0)
+	else:
+		cam.offset = Vector2.ZERO
 	queue_redraw(); hud.queue_redraw()
 
 func _check_map_exit():
@@ -247,18 +270,104 @@ func _fishing_spots() -> Array[Dictionary]:
 		_: return []
 
 func _try_fish():
-	if notebook_open or cast_timer > 0: return
+	if notebook_open: return
+	if fishing_state == FishingState.RESULT:
+		_reset_fishing()
+		return
+	if fishing_state != FishingState.IDLE: return
 	if _can_fish():
-		cast_timer = 1.6; face = 0
-		toast = "Casting... watch the float"; toast_t = 2.0
+		fishing_state = FishingState.ANTICIPATING
+		cast_timer = 1.8
+		bite_delay = rng.randf_range(0.72, 1.42)
+		bite_timer = 0.0
+		face = 0
+		toast = "Line out... wait for a bite!"
+		toast_t = 2.0
 	else:
 		toast = "Cast from the water's edge or the end of the pier"; toast_t = 3.0
 
-func _finish_cast():
-	var result: String = ["Silver sprat", "Sand goby", "Moonfin trout", "Old boot"][rng.randi_range(0,3)]
-	if result != "Old boot": fish_count += 1
+func _process_fishing(delta: float):
+	if fishing_state == FishingState.ANTICIPATING:
+		bite_timer += delta
+		cast_timer = maxf(0.0, cast_timer-delta)
+		if bite_timer >= bite_delay:
+			fishing_state = FishingState.TIMING
+			timing_timer = timing_window
+			gauge = 0.0
+			gauge_direction = 1.0
+			toast = "BITE!  TAP SPACE in the gold zone!"
+			toast_t = timing_window
+			flash_t = 0.12
+		elif Input.is_action_just_pressed("fish"):
+			# Early taps are ignored so anticipation remains readable.
+			toast = "Not yet... watch the float"
+			toast_t = 0.6
+	elif fishing_state == FishingState.TIMING:
+		timing_timer -= delta
+		gauge += delta * 1.55 * gauge_direction
+		if gauge >= 1.0: gauge = 1.0; gauge_direction = -1.0
+		if gauge <= 0.0: gauge = 0.0; gauge_direction = 1.0
+		if Input.is_action_just_pressed("fish"):
+			_resolve_fishing_timing(gauge)
+		elif timing_timer <= 0.0:
+			_resolve_fishing_timing(-1.0)
+	elif fishing_state == FishingState.RESULT:
+		result_t -= delta
+		if Input.is_action_just_pressed("fish"):
+			_reset_fishing()
+	flash_t = maxf(0.0, flash_t-delta)
+	shake_t = maxf(0.0, shake_t-delta)
+	fish_particle_t += delta
+
+func _resolve_fishing_timing(position: float):
+	var grade := "MISS"
+	if position >= 0.42 and position <= 0.62: grade = "PERFECT"
+	elif position >= 0.26 and position <= 0.80: grade = "GOOD"
+	if grade == "MISS":
+		combo = 0
+		last_catch = "The fish got away"
+		last_rarity = ""
+		last_grade = grade
+		fishing_state = FishingState.RESULT
+		cast_timer = 0.0
+		result_t = 1.3
+		shake_t = 0.12
+		toast = "MISS!  Tap SPACE to cast again"
+		toast_t = result_t
+		return
+	combo += 1
+	last_grade = grade
+	var roll := rng.randf()
+	var result := "Sand goby"
+	if grade == "PERFECT" and roll > 0.55: result = "Moonfin trout"
+	elif roll > 0.78: result = "Silver sprat"
+	last_catch = result
+	last_rarity = "RARE" if result == "Moonfin trout" else ("UNCOMMON" if result == "Silver sprat" else "COMMON")
+	fish_count += 1
 	catches[result] = int(catches.get(result,0))+1
-	toast = "Caught: " + result + "!  [N] View ledger"; toast_t = 3.5
+	fishing_state = FishingState.RESULT
+	cast_timer = 0.0
+	result_t = 2.0
+	flash_t = 0.32 if last_rarity == "RARE" else 0.18
+	shake_t = 0.22 if last_rarity == "RARE" else 0.10
+	toast = grade + "!  " + last_catch + "  /  SPACE to cast again"
+	toast_t = result_t
+
+func _finish_cast():
+	# Compatibility helper for old saves/tests: resolve a generous GOOD hit.
+	if fishing_state == FishingState.IDLE: combo = 0
+	_resolve_fishing_timing(0.5)
+
+func _reset_fishing():
+	fishing_state = FishingState.IDLE
+	cast_timer = 0.0
+	bite_timer = 0.0
+	timing_timer = 0.0
+	last_grade = ""
+	last_catch = ""
+	last_rarity = ""
+	toast = "Ready to cast"
+	toast_t = 1.2
 
 func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
@@ -306,11 +415,11 @@ func _draw():
 		draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color(0.04,0.08,0.10, transition_fade))
 	if transition_active:
 		draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color(0.04,0.08,0.10, transition_fade))
-	if cast_timer > 0:
+	if fishing_state == FishingState.ANTICIPATING or fishing_state == FishingState.TIMING:
 		var float_pos := player.round()+Vector2(15,32+int(sin(elapsed*6)))
 		draw_line(player.round()+Vector2(7,-9),player.round()+Vector2(12,-23),Color("#80674a"))
 		draw_line(player.round()+Vector2(12,-23),float_pos,Color("#d1d6b2"))
-		draw_rect(Rect2(float_pos,Vector2(2,3)),Color("#edb17b"))
+		draw_circle(float_pos+Vector2(1,1),3.0+sin(elapsed*10)*1.2,Color("#edb17b"))
 
 func _exit_markers() -> Array[Dictionary]:
 	# Exit markers are deliberately kept in world space so they remain visible as
@@ -353,6 +462,15 @@ func _draw_exit_markers():
 
 func _draw_map_landmarks():
 	# Small, readable primitives make each shoreline recognizable without new art.
+	if current_map == "rocky":
+		# Wind-cut shelves and cairns point toward the future lighthouse route.
+		for i in range(6):
+			var shelf := Vector2(560 + i*34, 278 + (i%2)*8)
+			draw_line(shelf, shelf + Vector2(23, -5), Color("#6f8580"), 2.0)
+		for i in range(5):
+			var cairn := Vector2(385 + i*57, 348 - i*37)
+			draw_circle(cairn, 5.0, Color("#526b69"))
+			draw_circle(cairn - Vector2(1,2), 2.5, Color("#91a39a"))
 	for landmark in landmarks:
 		var p: Vector2 = landmark.pos
 		var kind := str(landmark.kind)
@@ -370,6 +488,18 @@ func _draw_map_landmarks():
 		elif kind == "pool":
 			draw_circle(p,16.0,Color("#4f9291")); draw_circle(p-Vector2(3,3),11.0,Color("#80b9a7"))
 			draw_arc(p,16.0,0,TAU,16,Color("#d0d3a4"),2.0)
+		elif kind == "lighthouse":
+			# Farwatch is a distant silhouette for now; the west trail can become
+			# an actual route when the offshore map is added.
+			draw_circle(p+Vector2(0,10),24.0,Color("#334f52"))
+			draw_colored_polygon(PackedVector2Array([
+				p+Vector2(-11,10), p+Vector2(-7,-25), p+Vector2(7,-25), p+Vector2(11,10)
+			]),Color("#d8c28d"))
+			draw_rect(Rect2(p+Vector2(-10,-30),Vector2(20,7)),Color("#57484a"))
+			draw_rect(Rect2(p+Vector2(-8,-38),Vector2(16,9)),Color("#bd7057"))
+			draw_circle(p+Vector2(0,-34),4.0,Color("#f4d67e"))
+			draw_line(p+Vector2(0,-34),p+Vector2(-39,-47),Color(1.0,0.92,0.63,0.18),3.0)
+			draw_line(p+Vector2(0,-34),p+Vector2(39,-47),Color(1.0,0.92,0.63,0.18),3.0)
 		# Landmark names are intentionally small, like hand-painted map notes.
 		draw_string(ThemeDB.fallback_font, p + Vector2(-34,27), str(landmark.label), HORIZONTAL_ALIGNMENT_CENTER, 68, 8, Color("#3f514d"))
 	# Fishing markers sit just inland of each water feature and pulse gently.
@@ -418,8 +548,12 @@ func _draw_hud():
 	if nearby_exit != "" and not notebook_open and not transition_active:
 		_panel(Rect2(286,218,184,20))
 		_text(Vector2(294,232),nearby_exit,10)
-	if _can_fish() and not notebook_open and cast_timer<=0:
+	if _can_fish() and not notebook_open and fishing_state == FishingState.IDLE:
 		_panel(Rect2(172,218,138,20)); _text(Vector2(182,232),"SPACE  Cast your line",11)
+	if fishing_state == FishingState.ANTICIPATING or fishing_state == FishingState.TIMING:
+		_draw_fishing_hud()
+	elif fishing_state == FishingState.RESULT:
+		_draw_fishing_result()
 	if notebook_open:
 		_panel(Rect2(66,51,348,181),true)
 		_text(Vector2(85,75),"THE TIDE LEDGER",17,true)
@@ -430,6 +564,47 @@ func _draw_hud():
 			row += 18
 		_text(Vector2(85,201),"Shore or pier: SPACE to cast",10,true)
 		_text(Vector2(85,218),"N to close  /  Movement pauses while reading",10,true)
+
+func _draw_fishing_hud():
+	var panel := Rect2(112,72,256,82)
+	_panel(panel)
+	_text(Vector2(130,92), "FISHING  /  " + ("WAIT FOR THE BITE" if fishing_state == FishingState.ANTICIPATING else "TIMING WINDOW"), 12)
+	if fishing_state == FishingState.ANTICIPATING:
+		var p := clampf(bite_timer / maxf(0.01,bite_delay), 0.0, 1.0)
+		hud_bar(Vector2(130,108),Vector2(220,8),p,Color("#6c9b91"))
+		_text(Vector2(130,132), "Listen for the splash...", 10)
+	else:
+		# Gold center zone is the PERFECT band; wider teal band is GOOD.
+		hud_bar(Vector2(130,108),Vector2(220,12),1.0,Color("#355a5a"))
+		hud_bar(Vector2(130+220*0.26,108),Vector2(220*0.54,12),1.0,Color("#7eb59d"))
+		hud_bar(Vector2(130+220*0.42,108),Vector2(220*0.20,12),1.0,Color("#edc467"))
+		draw_rect(Rect2(130+220*gauge-2,104,4,20),Color("#fff3c2"))
+		_text(Vector2(130,138), "SPACE  hook it!", 11)
+
+func _draw_fishing_result():
+	var panel := Rect2(92,64,296,110)
+	_panel(panel)
+	_text(Vector2(116,88),last_grade,20)
+	_text(Vector2(116,113),last_catch,16)
+	if last_grade != "MISS":
+		_text(Vector2(116,133),last_rarity + "  /  COMBO x" + str(combo),11)
+	else:
+		_text(Vector2(116,133),"Combo reset",11)
+	_text(Vector2(116,155),"SPACE  cast again",11)
+	if flash_t > 0.0:
+		hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.9,0.55,flash_t*0.28))
+	if last_grade != "MISS":
+		var sparkle_color := Color("#f8dc75") if last_rarity == "RARE" else Color("#c6e6b7")
+		var sparkle_count := 14 if last_rarity == "RARE" else 7
+		for i in range(sparkle_count):
+			var a := fish_particle_t*2.0 + float(i)*TAU/float(sparkle_count)
+			var q := Vector2(240,108) + Vector2(cos(a),sin(a))* (42.0 + sin(fish_particle_t*5.0+i)*5.0)
+			hud.draw_circle(q,2.0,sparkle_color)
+
+func hud_bar(pos: Vector2, size: Vector2, amount: float, color: Color):
+	hud.draw_rect(Rect2(pos,size), color)
+	if amount > 0.0:
+		hud.draw_rect(Rect2(pos, Vector2(size.x * clampf(amount,0.0,1.0), size.y)), color.lightened(0.16))
 
 func _map_display_name() -> String:
 	match current_map:
