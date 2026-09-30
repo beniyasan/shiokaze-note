@@ -361,11 +361,11 @@ func _process_fishing(delta: float):
 		gauge += delta * (1.25 + battle_tension * 0.75) * gauge_direction
 		if gauge >= 1.0: gauge = 1.0; gauge_direction = -1.0
 		if gauge <= 0.0: gauge = 0.0; gauge_direction = 1.0
-		if Input.is_action_just_pressed("fish"):
-			_handle_fishing_strike(gauge)
-		elif timing_timer <= 0.0 or battle_tension >= 1.0 or battle_escape >= 1.0:
+		if timing_timer <= 0.0 or battle_tension >= 1.0 or battle_escape >= 1.0:
 			# Running out of line is a miss even if the fish was nearly tired.
 			_resolve_fishing_timing(-1.0)
+		elif Input.is_action_just_pressed("fish"):
+			_handle_fishing_strike(gauge)
 	elif fishing_state == FishingState.RESULT:
 		result_t -= delta
 		if Input.is_action_just_pressed("fish"):
@@ -436,7 +436,7 @@ func _handle_fishing_strike(position: float):
 	if pull_cooldown > 0.0: return
 	pull_cooldown = 1.8
 
-	# A pull outside the teal band snaps the line. Inside it, each successful
+	# A pull outside the teal band strains the line. Inside it, each successful
 	# input wears down the fish and raises the spectacle toward the final catch.
 	var grade := "MISS"
 	if position >= 0.42 and position <= 0.62: grade = "PERFECT"
@@ -759,6 +759,7 @@ func _draw_fishing_hud():
 		_text(Vector2(114,123), "Listen for the splash...", 10)
 	else:
 		# Gold center zone is the PERFECT band; wider teal band is GOOD.
+		_text(Vector2(114,87), "TIME %02ds   /   PULLS %d" % [ceili(maxf(0.0,timing_timer)),battle_hits], 9)
 		hud_bar(Vector2(114,98),Vector2(252,12),1.0,Color("#355a5a"))
 		hud_bar(Vector2(114+252*0.26,98),Vector2(252*0.54,12),1.0,Color("#7eb59d"))
 		hud_bar(Vector2(114+252*0.42,98),Vector2(252*0.20,12),1.0,Color("#edc467"))
@@ -769,7 +770,8 @@ func _draw_fishing_hud():
 		_text(Vector2(114,171), "LINE TENSION", 9)
 		hud_bar(Vector2(194,166),Vector2(172,6),battle_tension,Color("#bd7b58"))
 		_text(Vector2(114,186), "FISH " + ("<" if battle_direction < 0 else ">") + "  HOLD " + ("RIGHT" if battle_direction < 0 else "LEFT") + " TO COUNTER", 10)
-		hud_bar(Vector2(114,193),Vector2(252,4),battle_escape,Color("#c06363"))
+		_text(Vector2(114,201), "ESCAPE", 8)
+		hud_bar(Vector2(151,195),Vector2(215,4),battle_escape,Color("#c06363"))
 
 func _draw_fishing_result():
 	if last_rarity == "LEGENDARY":
