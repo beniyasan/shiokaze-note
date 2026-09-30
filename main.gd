@@ -370,6 +370,8 @@ func _draw_map_landmarks():
 		elif kind == "pool":
 			draw_circle(p,16.0,Color("#4f9291")); draw_circle(p-Vector2(3,3),11.0,Color("#80b9a7"))
 			draw_arc(p,16.0,0,TAU,16,Color("#d0d3a4"),2.0)
+		# Landmark names are intentionally small, like hand-painted map notes.
+		draw_string(ThemeDB.fallback_font, p + Vector2(-34,27), str(landmark.label), HORIZONTAL_ALIGNMENT_CENTER, 68, 8, Color("#3f514d"))
 	# Fishing markers sit just inland of each water feature and pulse gently.
 	for spot in _fishing_spots():
 		var p: Vector2 = spot.pos
