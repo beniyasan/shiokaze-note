@@ -17,6 +17,7 @@ Space starts a cast at the shore or pier. After the bite, the fish battle is a s
 - Fish stamina, line tension, escape pressure, pull cooldown and the battle timer are all visible
 - Clean pulls ramp the procedural SE and screen effects; failed pulls strain the line and can snap it
 - A three-catch perfect combo unlocks Rainbow Kingfish (LEGENDARY)
+- Five illustrated collection cards can be found in the tide ledger: Sand goby (COMMON), Silver sprat and Coral bream (UNCOMMON), Moonfin trout (RARE), and Rainbow Kingfish (LEGENDARY)
 
 LEGENDARY follows a paced reveal: omen, rising energy, full-screen rainbow light/rays/particles, then a long afterglow. All SE are synthesized with Godot's AudioStreamGenerator and have no external audio-file dependency. The ledger records each catch, and save/load stores versioned position and catch data while rejecting unsafe legacy positions.
 
