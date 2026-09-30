@@ -39,5 +39,12 @@ func run():
 	f.store_string('{"fish":5,"x":950,"y":600}'); f.close()
 	game._load_game('user://legacy-test.json')
 	check(game._walkable(game.player) and game.fish_count==5,'legacy unsafe position handled')
+	# Map transitions fade, rebuild props, and preserve shared progress.
+	game.current_map='town'; game._build_map('town'); game._transition_to('beach',Vector2(400,80)); game._process(0.5)
+	check(game.current_map=='beach' and game.player==Vector2(400,80),'town to beach transition')
+	game._transition_to('rocky',Vector2(90,340)); game._process(0.5)
+	check(game.current_map=='rocky' and game.fish_count==5,'beach to rocky preserves ledger')
+	game._save_game('user://map-test.json'); game.current_map='town'; game._build_map('town'); game._load_game('user://map-test.json')
+	check(game.current_map=='rocky','save restores active map')
 	print('RESULT: %d failure(s)' % failures)
 	quit(failures)
