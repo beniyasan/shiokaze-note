@@ -206,6 +206,8 @@ func _process(delta):
 		else: face = 1 if dir.y < 0 else 0
 		_check_map_exit()
 	if not notebook_open:
+		if Input.is_action_just_pressed("fish") and fishing_state == FishingState.IDLE:
+			_try_fish()
 		_process_fishing(delta)
 	if Input.is_action_just_pressed("save_game"): _save_game()
 	toast_t = maxf(0.0, toast_t-delta)
@@ -578,7 +580,7 @@ func _draw_fishing_hud():
 		hud_bar(Vector2(130,108),Vector2(220,12),1.0,Color("#355a5a"))
 		hud_bar(Vector2(130+220*0.26,108),Vector2(220*0.54,12),1.0,Color("#7eb59d"))
 		hud_bar(Vector2(130+220*0.42,108),Vector2(220*0.20,12),1.0,Color("#edc467"))
-		draw_rect(Rect2(130+220*gauge-2,104,4,20),Color("#fff3c2"))
+		hud.draw_rect(Rect2(130+220*gauge-2,104,4,20),Color("#fff3c2"))
 		_text(Vector2(130,138), "SPACE  hook it!", 11)
 
 func _draw_fishing_result():
