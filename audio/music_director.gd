@@ -44,9 +44,11 @@ var target_mode_mix := 0.0
 var pending_combo := 0
 var active_combo := 0
 var elapsed := 0.0
+var _sample_cursor := 0.0
 var _last_beat := -1
 var _fanfare_time := 0.0
 var _fanfare_length := 0.0
+var _fanfare_start_sample := 0.0
 var _fanfare_legendary := false
 var _fanfare_done_emitted := false
 var _fade_out_seconds := 0.0
@@ -101,6 +103,7 @@ func play_fanfare(legendary: bool = false) -> void:
 	_fanfare_legendary = legendary
 	_fanfare_time = 0.0
 	_fanfare_length = 4.4 if legendary else 1.8
+	_fanfare_start_sample = _sample_cursor
 	_fanfare_done_emitted = false
 	_set_target_mode(MODE_FANFARE)
 
@@ -141,14 +144,15 @@ func set_enabled(value: bool) -> void:
 		target_mode_mix = 0.0
 		active_combo = 0
 		pending_combo = 0
+		_playback = null
 		if _stream_player != null:
 			_stream_player.stop()
 		if changed:
 			mode_changed.emit(MODE_SILENT)
 	elif mode == MODE_SILENT:
-		_create_player()
-		if _stream_player != null:
+		if _stream_player != null and _stream_player.is_inside_tree():
 			_stream_player.play()
+			_playback = _stream_player.get_stream_playback() as AudioStreamGeneratorPlayback
 		start_field()
 
 func get_snapshot() -> Dictionary:
@@ -250,9 +254,9 @@ func _pump_audio() -> void:
 	var samples := PackedVector2Array()
 	samples.resize(frames)
 	for i in range(frames):
-		var sample_time := elapsed + float(i) / SAMPLE_RATE
-		var value := _sample_at(sample_time)
+		var value := _sample_at(_sample_cursor)
 		samples[i] = Vector2(value, value)
+		_sample_cursor += 1.0 / SAMPLE_RATE
 	_playback.push_buffer(samples)
 
 func _sample_at(t: float) -> float:
@@ -343,7 +347,7 @@ func _fanfare_voice(t: float) -> float:
 	# initial field-only window.
 	if _fanfare_length <= 0.0:
 		return 0.0
-	var local := fmod(_fanfare_time + t * 0.0, _fanfare_length)
+	var local := fmod(maxf(0.0, t - _fanfare_start_sample), _fanfare_length)
 	var beat := BEAT_SECONDS
 	if _fanfare_legendary:
 		# Omen -> rising arpeggio -> bright resolve -> afterglow. The same A
