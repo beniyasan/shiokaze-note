@@ -44,6 +44,17 @@ var timing_timer := 0.0
 var timing_window := 0.72
 var gauge := 0.0
 var gauge_direction := 1.0
+var fish_hp := 0
+var fish_hp_max := 0
+var battle_hits := 0
+var battle_required := 4
+var battle_elapsed := 0.0
+var pull_cooldown := 0.0
+var perfect_pulls := 0
+var direction_timer := 0.0
+var battle_tension := 0.0
+var battle_escape := 0.0
+var battle_direction := 1.0
 var combo := 0
 var last_grade := ""
 var last_catch := ""
@@ -52,6 +63,10 @@ var result_t := 0.0
 var flash_t := 0.0
 var shake_t := 0.0
 var fish_particle_t := 0.0
+var legendary_t := 0.0
+var legendary_stage := 0
+var se_player := AudioStreamPlayer.new()
+const SE_RATE := 22050.0
 var hud := Node2D.new()
 
 func _ready():
@@ -68,6 +83,15 @@ func _ready():
 	add_child(cam)
 	var layer := CanvasLayer.new()
 	add_child(layer); layer.add_child(hud); hud.draw.connect(_draw_hud)
+	# Keep the arcade feedback self-contained: the short SE are synthesized in
+	# memory, so the game has no external audio-file dependency.
+	var generator := AudioStreamGenerator.new()
+	generator.mix_rate = SE_RATE
+	generator.buffer_length = 0.8
+	se_player.stream = generator
+	se_player.volume_db = -8.0
+	add_child(se_player)
+	se_player.play()
 	rng.randomize()
 	if not OS.get_cmdline_user_args().has("--fresh"):
 		_load_game()
@@ -213,7 +237,7 @@ func _process(delta):
 	toast_t = maxf(0.0, toast_t-delta)
 	cam.position = player.round()
 	if shake_t > 0.0:
-		var shake_power := 4.0 if last_rarity == "RARE" else 2.0
+		var shake_power := 8.0 if last_rarity == "LEGENDARY" else (4.0 if last_rarity == "RARE" else 2.0)
 		cam.offset = Vector2(sin(elapsed*80.0), cos(elapsed*71.0)) * shake_power * minf(1.0, shake_t*8.0)
 	else:
 		cam.offset = Vector2.ZERO
@@ -285,6 +309,7 @@ func _try_fish():
 		face = 0
 		toast = "Line out... wait for a bite!"
 		toast_t = 2.0
+		_play_se("cast")
 	else:
 		toast = "Cast from the water's edge or the end of the pier"; toast_t = 3.0
 
@@ -294,29 +319,75 @@ func _process_fishing(delta: float):
 		cast_timer = maxf(0.0, cast_timer-delta)
 		if bite_timer >= bite_delay:
 			fishing_state = FishingState.TIMING
-			timing_timer = timing_window
+			# A bite opens a short tug-of-war instead of a one-frame skill check.
+			# The fish must be controlled through several good inputs.
+			fish_hp_max = 10 + mini(combo, 4)
+			fish_hp = fish_hp_max
+			battle_hits = 0
+			battle_required = fish_hp_max
+			battle_elapsed = 0.0
+			pull_cooldown = 1.0
+			perfect_pulls = 0
+			direction_timer = 2.0
+			battle_tension = 0.22
+			battle_escape = 0.0
+			battle_direction = -1.0 if rng.randf() < 0.5 else 1.0
+			timing_timer = 20.0
 			gauge = 0.0
 			gauge_direction = 1.0
-			toast = "BITE!  TAP SPACE in the gold zone!"
-			toast_t = timing_window
+			toast = "BITE!  Keep the line in the gold zone!"
+			toast_t = 2.0
 			flash_t = 0.12
+			_play_se("battle_start")
 		elif Input.is_action_just_pressed("fish"):
 			# Early taps are ignored so anticipation remains readable.
 			toast = "Not yet... watch the float"
 			toast_t = 0.6
 	elif fishing_state == FishingState.TIMING:
 		timing_timer -= delta
-		gauge += delta * 1.55 * gauge_direction
+		# The fish surges against the line. The moving target gets more urgent
+		# as tension rises, giving each pull a readable battle rhythm.
+		battle_elapsed += delta
+		pull_cooldown = maxf(0.0, pull_cooldown - delta)
+		direction_timer -= delta
+		if direction_timer <= 0.0:
+			battle_direction = -battle_direction
+			direction_timer = rng.randf_range(2.0, 3.3)
+		var counter := Input.get_axis("move_left", "move_right")
+		var countering := counter * battle_direction < -0.25
+		var straining := counter * battle_direction > 0.25
+		battle_escape = clampf(battle_escape + delta * (-0.035 if countering else (0.095 if straining else 0.055)), 0.0, 1.0)
+		battle_tension = clampf(battle_tension + delta * (-0.045 if countering else (0.07 if straining else -0.014)), 0.0, 1.0)
+		gauge += delta * (1.25 + battle_tension * 0.75) * gauge_direction
 		if gauge >= 1.0: gauge = 1.0; gauge_direction = -1.0
 		if gauge <= 0.0: gauge = 0.0; gauge_direction = 1.0
 		if Input.is_action_just_pressed("fish"):
-			_resolve_fishing_timing(gauge)
-		elif timing_timer <= 0.0:
+			_handle_fishing_strike(gauge)
+		elif timing_timer <= 0.0 or battle_tension >= 1.0 or battle_escape >= 1.0:
+			# Running out of line is a miss even if the fish was nearly tired.
 			_resolve_fishing_timing(-1.0)
 	elif fishing_state == FishingState.RESULT:
 		result_t -= delta
 		if Input.is_action_just_pressed("fish"):
 			_reset_fishing()
+		if last_rarity == "LEGENDARY":
+			var previous_legendary_t := legendary_t
+			legendary_t = minf(legendary_t + delta, 6.0)
+			# The catch is deliberately paced: a small omen, rising energy, a
+			# full-screen climax, then a long rainbow afterglow.
+			if previous_legendary_t < 0.82 and legendary_t >= 0.82:
+				legendary_stage = maxi(legendary_stage, 1)
+				_play_se("rise")
+				flash_t = maxf(flash_t, 0.42)
+				shake_t = maxf(shake_t, 0.65)
+			if previous_legendary_t < 2.05 and legendary_t >= 2.05:
+				legendary_stage = maxi(legendary_stage, 2)
+				_play_se("peak")
+				flash_t = maxf(flash_t, 1.35)
+				shake_t = maxf(shake_t, 1.8)
+			if previous_legendary_t < 3.75 and legendary_t >= 3.75:
+				legendary_stage = maxi(legendary_stage, 3)
+				_play_se("after")
 	flash_t = maxf(0.0, flash_t-delta)
 	shake_t = maxf(0.0, shake_t-delta)
 	fish_particle_t += delta
@@ -334,6 +405,7 @@ func _resolve_fishing_timing(position: float):
 		cast_timer = 0.0
 		result_t = 1.3
 		shake_t = 0.12
+		_play_se("miss")
 		toast = "MISS!  Tap SPACE to cast again"
 		toast_t = result_t
 		return
@@ -351,11 +423,100 @@ func _resolve_fishing_timing(position: float):
 	catches[result] = int(catches.get(result,0))+1
 	fishing_state = FishingState.RESULT
 	cast_timer = 0.0
-	result_t = 2.0
-	flash_t = 0.60 if last_rarity == "LEGENDARY" else (0.32 if last_rarity == "RARE" else 0.18)
-	shake_t = 0.50 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
+	legendary_t = 0.0
+	legendary_stage = 0
+	result_t = 6.2 if last_rarity == "LEGENDARY" else 2.0
+	flash_t = 0.90 if last_rarity == "LEGENDARY" else (0.32 if last_rarity == "RARE" else 0.18)
+	shake_t = 1.10 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
+	_play_se("catch" if last_rarity != "LEGENDARY" else "legendary")
 	toast = ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch + "  /  SPACE to cast again"
 	toast_t = result_t
+
+func _handle_fishing_strike(position: float):
+	if pull_cooldown > 0.0: return
+	pull_cooldown = 1.8
+
+	# A pull outside the teal band snaps the line. Inside it, each successful
+	# input wears down the fish and raises the spectacle toward the final catch.
+	var grade := "MISS"
+	if position >= 0.42 and position <= 0.62: grade = "PERFECT"
+	elif position >= 0.26 and position <= 0.80: grade = "GOOD"
+	if grade == "MISS":
+		battle_tension = clampf(battle_tension + 0.33, 0.0, 1.0)
+		battle_escape = clampf(battle_escape + 0.16, 0.0, 1.0)
+		shake_t = 0.28
+		_play_se("danger")
+		toast = "LINE STRAIN! Counter the fish, then try again"
+		toast_t = 1.2
+		if battle_tension >= 1.0 or battle_escape >= 1.0:
+			_resolve_fishing_timing(-1.0)
+		return
+	battle_hits += 1
+	if grade == "PERFECT": perfect_pulls += 1
+	fish_hp = maxi(0, fish_hp - (2 if grade == "PERFECT" else 1))
+	battle_tension = clampf(battle_tension + (0.08 if grade == "PERFECT" else 0.14), 0.0, 1.0)
+	battle_escape = maxf(0.0, battle_escape - (0.24 if grade == "PERFECT" else 0.11))
+	gauge_direction = -gauge_direction
+	shake_t = maxf(shake_t, 0.14 + battle_hits * 0.06)
+	flash_t = maxf(flash_t, 0.10 + battle_hits * 0.025)
+	_play_se("perfect_tug" if grade == "PERFECT" else "tug")
+	if fish_hp <= 0:
+		# Preserve the strongest grade across the battle for rarity/combos.
+		_resolve_fishing_timing(0.5 if perfect_pulls * 2 >= battle_hits else 0.34)
+		return
+	toast = ("PERFECT PULL!  " if grade == "PERFECT" else "GOOD PULL!  ") + "Fish stamina %d/%d" % [fish_hp, fish_hp_max]
+	toast_t = 0.9
+
+func _play_se(kind: String):
+	# Tiny procedural chimes keep the feedback punchy while avoiding bundled
+	# copyrighted assets. In headless tests the audio server may be absent, so
+	# every step is guarded and simply becomes a no-op there.
+	if se_player == null or se_player.stream == null: return
+	var playback := se_player.get_stream_playback() as AudioStreamGeneratorPlayback
+	if playback == null: return
+	var duration := 0.18
+	var base := 280.0
+	var volume := 0.22
+	var sweep := 0.0
+	var tones: Array = []
+	match kind:
+		"cast":
+			base = 220.0; duration = 0.16; volume = 0.16
+		"bite":
+			base = 540.0; duration = 0.22; volume = 0.24; tones = [810.0]
+		"battle_start":
+			base = 420.0; duration = 0.30; volume = 0.25; sweep = 260.0; tones = [630.0]
+		"tug":
+			base = 300.0 + battle_hits * 55.0; duration = 0.17; volume = 0.25; tones = [base * 1.5]
+		"perfect_tug":
+			base = 500.0 + battle_hits * 70.0; duration = 0.24; volume = 0.34; sweep = 180.0; tones = [base * 1.5, base * 2.0]
+		"danger":
+			base = 120.0; duration = 0.28; volume = 0.28; sweep = -70.0
+		"miss":
+			base = 150.0; duration = 0.28; volume = 0.22; sweep = -55.0
+		"catch":
+			base = 520.0; duration = 0.34; volume = 0.26; sweep = 180.0; tones = [780.0]
+		"legendary":
+			base = 330.0; duration = 0.52; volume = 0.36; sweep = 260.0; tones = [495.0, 660.0, 990.0]
+		"rise":
+			base = 620.0; duration = 0.44; volume = 0.38; sweep = 480.0; tones = [930.0, 1240.0]
+		"peak":
+			base = 261.6; duration = 0.72; volume = 0.44; sweep = 80.0; tones = [329.6, 392.0, 523.2, 659.2]
+		"after":
+			base = 783.9; duration = 0.64; volume = 0.28; sweep = -260.0; tones = [523.2, 392.0]
+		_: return
+	var frames := int(duration * SE_RATE)
+	for i in range(frames):
+		if not playback.can_push_buffer(1): break
+		var t := float(i) / SE_RATE
+		var progress := clampf(t / duration, 0.0, 1.0)
+		var freq := maxf(45.0, base + sweep * progress)
+		var sample := sin(TAU * freq * t) * 0.72
+		for tone in tones:
+			sample += sin(TAU * float(tone) * t) * 0.24
+		# Quick attack and musical tail; no click at the boundaries.
+		var envelope := minf(1.0, t / 0.018) * minf(1.0, (duration - t) / 0.06)
+		playback.push_frame(Vector2.ONE * sample * volume * envelope)
 
 func _finish_cast():
 	# Compatibility helper for old saves/tests: resolve a generous GOOD hit.
@@ -370,6 +531,18 @@ func _reset_fishing():
 	last_grade = ""
 	last_catch = ""
 	last_rarity = ""
+	legendary_t = 0.0
+	legendary_stage = 0
+	fish_hp = 0
+	fish_hp_max = 0
+	battle_hits = 0
+	battle_required = 4
+	battle_elapsed = 0.0
+	pull_cooldown = 0.0
+	perfect_pulls = 0
+	direction_timer = 0.0
+	battle_tension = 0.0
+	battle_escape = 0.0
 	toast = "Ready to cast"
 	toast_t = 1.2
 
@@ -570,22 +743,38 @@ func _draw_hud():
 		_text(Vector2(85,218),"N to close  /  Movement pauses while reading",10,true)
 
 func _draw_fishing_hud():
-	var panel := Rect2(112,72,256,82)
+	if fishing_state == FishingState.TIMING:
+		var power := 1.0 - float(fish_hp) / maxf(1.0,fish_hp_max)
+		for i in range(14):
+			var a := float(i) * TAU / 14.0 + elapsed * 0.16
+			var start := Vector2(240,126) + Vector2(cos(a),sin(a))* (140.0 + power * 55.0)
+			var end := Vector2(240,126) + Vector2(cos(a),sin(a))* 350.0
+			hud.draw_line(start,end,Color.from_hsv(float(i)/14.0,0.55,1.0,0.10+power*0.46),2.0+power*3.0)
+	var panel := Rect2(96,48,288,160)
 	_panel(panel)
-	_text(Vector2(130,92), "FISHING  /  " + ("WAIT FOR THE BITE" if fishing_state == FishingState.ANTICIPATING else "TIMING WINDOW"), 12)
+	_text(Vector2(114,70), "FISHING  /  " + ("WAIT FOR THE BITE" if fishing_state == FishingState.ANTICIPATING else "TUG-OF-WAR"), 12)
 	if fishing_state == FishingState.ANTICIPATING:
 		var p := clampf(bite_timer / maxf(0.01,bite_delay), 0.0, 1.0)
-		hud_bar(Vector2(130,108),Vector2(220,8),p,Color("#6c9b91"))
-		_text(Vector2(130,132), "Listen for the splash...", 10)
+		hud_bar(Vector2(114,98),Vector2(252,8),p,Color("#6c9b91"))
+		_text(Vector2(114,123), "Listen for the splash...", 10)
 	else:
 		# Gold center zone is the PERFECT band; wider teal band is GOOD.
-		hud_bar(Vector2(130,108),Vector2(220,12),1.0,Color("#355a5a"))
-		hud_bar(Vector2(130+220*0.26,108),Vector2(220*0.54,12),1.0,Color("#7eb59d"))
-		hud_bar(Vector2(130+220*0.42,108),Vector2(220*0.20,12),1.0,Color("#edc467"))
-		hud.draw_rect(Rect2(130+220*gauge-2,104,4,20),Color("#fff3c2"))
-		_text(Vector2(130,138), "SPACE  hook it!", 11)
+		hud_bar(Vector2(114,98),Vector2(252,12),1.0,Color("#355a5a"))
+		hud_bar(Vector2(114+252*0.26,98),Vector2(252*0.54,12),1.0,Color("#7eb59d"))
+		hud_bar(Vector2(114+252*0.42,98),Vector2(252*0.20,12),1.0,Color("#edc467"))
+		hud.draw_rect(Rect2(114+252*gauge-2,94,4,20),Color("#fff3c2"))
+		_text(Vector2(114,128), ("SPACE  PULL NOW!" if pull_cooldown <= 0.0 else "Recover... wait for next pull"), 11)
+		_text(Vector2(114,145), "FISH STAMINA  %d / %d" % [fish_hp,fish_hp_max], 9)
+		hud_bar(Vector2(114,151),Vector2(252,6),float(fish_hp)/maxf(1.0,fish_hp_max),Color("#a45f69"))
+		_text(Vector2(114,171), "LINE TENSION", 9)
+		hud_bar(Vector2(194,166),Vector2(172,6),battle_tension,Color("#bd7b58"))
+		_text(Vector2(114,186), "FISH " + ("<" if battle_direction < 0 else ">") + "  HOLD " + ("RIGHT" if battle_direction < 0 else "LEFT") + " TO COUNTER", 10)
+		hud_bar(Vector2(114,193),Vector2(252,4),battle_escape,Color("#c06363"))
 
 func _draw_fishing_result():
+	if last_rarity == "LEGENDARY":
+		_draw_legendary_result()
+		return
 	var panel := Rect2(92,64,296,110)
 	_panel(panel)
 	_text(Vector2(116,88),"BIG CATCH!!" if last_rarity == "LEGENDARY" else last_grade,24 if last_rarity == "LEGENDARY" else 20)
@@ -605,8 +794,81 @@ func _draw_fishing_result():
 			var q := Vector2(240,108) + Vector2(cos(a),sin(a))* (42.0 + sin(fish_particle_t*5.0+i)*5.0)
 			hud.draw_circle(q,3.0 if last_rarity == "LEGENDARY" else 2.0,Color.from_hsv(fmod(float(i)/float(sparkle_count)+fish_particle_t*0.1,1.0),0.72,1.0) if last_rarity == "LEGENDARY" else sparkle_color)
 
+func _draw_legendary_result():
+	var t := legendary_t
+	var center := Vector2(240,132)
+	var rise := clampf((t - 0.65) / 1.4, 0.0, 1.0)
+	var peak := clampf((t - 2.05) / 0.32, 0.0, 1.0)
+	var after := clampf((t - 4.6) / 1.4, 0.0, 1.0)
+	# Broad, smoothly moving colour fields provide scale without strobing.
+	hud.draw_rect(Rect2(0,0,480,270),Color(0.025,0.03,0.12,0.5 + rise * 0.43 - after * 0.19))
+	var strength := (0.10 + rise * 0.31) * (1.0 - after * 0.48)
+	for i in range(32):
+		var a := float(i) * TAU / 32.0 + t * 0.07
+		var b := a + TAU / 45.0
+		var col := Color.from_hsv(fmod(float(i)/32.0 + t * 0.028,1.0),0.75,1.0,strength)
+		hud.draw_colored_polygon(PackedVector2Array([center, center + Vector2(cos(a),sin(a)) * 580.0, center + Vector2(cos(b),sin(b)) * 580.0]),col)
+	# Concentric rings travel from a tiny omen all the way past the screen edges.
+	for j in range(5):
+		var radius := 15.0 + rise * (44.0 + j * 42.0) + peak * 60.0
+		var col := Color.from_hsv(fmod(t * 0.08 + float(j)/5.0,1.0),0.65,1.0,0.6 - after * 0.34)
+		hud.draw_arc(center,radius,0,TAU,96,col,2.0 + peak * 2.0)
+	# Confetti fills the entire frame at the climax instead of orbiting a small
+	# central panel. Motion is smooth; these are not alternating white flashes.
+	var count := 18 + int(rise * 32.0) + int(peak * 86.0)
+	for i in range(count):
+		var angle := float(i) * 2.399963 + t * (0.05 if i % 2 == 0 else -0.035)
+		var radius := 18.0 + fmod(float(i) * 41.0 + t * (15.0 + float(i % 7) * 8.0), 335.0) * (0.2 + rise * 0.8)
+		var q := center + Vector2(cos(angle),sin(angle) * 0.7) * radius
+		var col := Color.from_hsv(fmod(float(i) * 0.0618 + t * 0.032,1.0),0.65,1.0,0.95 - after * 0.45)
+		var sz := 1.5 + peak * float(2 + i % 3)
+		hud.draw_rect(Rect2(q-Vector2(sz,sz),Vector2(sz*2,sz*2)),col)
+		if i % 4 == 0:
+			hud.draw_line(q-Vector2(sz*2.5,0),q+Vector2(sz*2.5,0),Color(1,1,0.85,col.a),1)
+			hud.draw_line(q-Vector2(0,sz*2.5),q+Vector2(0,sz*2.5),Color(1,1,0.85,col.a),1)
+	if t < 0.82:
+		_center_text(56,"SOMETHING ENORMOUS...",19,Color("#c8e8ff"))
+		_center_text(219,"Feel the tide gathering",11,Color("#d4cefa"))
+	elif t < 2.05:
+		_center_text(49,"THE OCEAN AWAKENS",24,Color("#ffe0a4"))
+		_center_text(229,"RAINBOW ENERGY RISING",14,Color("#fff5dc"))
+	else:
+		# A wide ribbon and a large trophy silhouette dominate the final frame.
+		hud.draw_colored_polygon(PackedVector2Array([Vector2(14,19),Vector2(466,19),Vector2(455,63),Vector2(24,63)]),Color(0.12,0.05,0.2,0.88))
+		hud.draw_line(Vector2(16,19),Vector2(464,19),Color("#ffe39a"),3)
+		hud.draw_line(Vector2(24,63),Vector2(456,63),Color("#ffe39a"),3)
+		_center_text(53,"LEGENDARY!!",35,Color("#fff4bd"))
+		_center_text(211,"RAINBOW KINGFISH",24,Color("#fff3c9"))
+		_center_text(231,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
+		_center_text(258,"SPACE  continue",10,Color("#fff0d8"))
+	# The fish grows from a dark silhouette to a full-width rainbow trophy.
+	var scale := 0.22 + rise * 0.55 + peak * 0.28
+	var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])
+	var transformed := PackedVector2Array()
+	for p in body: transformed.append(center + p * scale)
+	hud.draw_colored_polygon(transformed,Color("#130f32") if t < 2.05 else Color("#fff1c2"))
+	hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-67,0)*scale,center+Vector2(-112,-36)*scale,center+Vector2(-108,35)*scale]),Color("#9184ff") if t >= 2.05 else Color("#130f32"))
+	if t >= 2.05:
+		for k in range(8):
+			var x := -50.0 + k * 14.0
+			var col := Color.from_hsv(fmod(float(k)/8.0+t*0.025,1.0),0.62,1.0)
+			hud.draw_rect(Rect2(center+Vector2(x,-18)*scale,Vector2(13,36)*scale),col)
+		hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-25,-26)*scale,center+Vector2(5,-53)*scale,center+Vector2(31,-26)*scale]),Color("#d0acff"))
+		hud.draw_circle(center+Vector2(57,-8)*scale,5*scale,Color("#162539"))
+		hud.draw_circle(center+Vector2(58,-10)*scale,1.5*scale,Color.WHITE)
+	# The initial reveal gets one soft glow, never repeated high-frequency flash.
+	if t >= 2.05 and t < 2.55:
+		var glow := sin((t-2.05)/0.5*PI)*0.20
+		hud.draw_rect(Rect2(0,0,480,270),Color(1,0.90,0.67,glow))
+
+func _center_text(y: float, value: String, size: int, color: Color):
+	var font := ThemeDB.fallback_font
+	var width := font.get_string_size(value,HORIZONTAL_ALIGNMENT_LEFT,-1,size).x
+	hud.draw_string(font,Vector2((480-width)/2+1,y+2),value,HORIZONTAL_ALIGNMENT_LEFT,-1,size,Color(0.04,0.025,0.09,0.95))
+	hud.draw_string(font,Vector2((480-width)/2,y),value,HORIZONTAL_ALIGNMENT_LEFT,-1,size,color)
+
 func hud_bar(pos: Vector2, size: Vector2, amount: float, color: Color):
-	hud.draw_rect(Rect2(pos,size), color)
+	hud.draw_rect(Rect2(pos,size), color.darkened(0.65))
 	if amount > 0.0:
 		hud.draw_rect(Rect2(pos, Vector2(size.x * clampf(amount,0.0,1.0), size.y)), color.lightened(0.16))
 
