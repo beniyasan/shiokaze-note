@@ -13,4 +13,8 @@ PASS save restores ledger and count
 PASS save restores valid position
 PASS inland cast rejected
 PASS legacy unsafe position handled
+PASS town to beach transition
+PASS beach to rocky preserves ledger
+PASS save restores active map
+PASS town beach exit is reachable
 RESULT: 0 failure(s)
