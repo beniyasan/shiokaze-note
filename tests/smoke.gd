@@ -52,6 +52,14 @@ func run():
 	game._process_fishing(2.0)
 	game._resolve_fishing_timing(0.5)
 	check(game.last_grade=='PERFECT' and game.combo>=1,'perfect timing awards grade and combo')
+	# The cast keeps a PERFECT-pool candidate, while the mini-game grade still
+	# changes quality: GOOD downgrades a high-rarity candidate to RARE, whereas
+	# PERFECT adopts the candidate unchanged.
+	var high_candidate: Dictionary = game.FISH_SPECIES[15].duplicate(true)
+	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game._resolve_fishing_timing(0.34)
+	check(game.last_catch==str(high_candidate.name) and game.last_rarity=='RARE' and game.last_catch_metadata.get('original_rarity','')=='EPIC' and game.result_t<=2.0,'GOOD timing downgrades EPIC candidate without legendary reveal')
+	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game._resolve_fishing_timing(0.5)
+	check(game.last_catch==str(high_candidate.name) and game.last_rarity=='EPIC' and game.last_catch_metadata.get('original_rarity','')=='EPIC','PERFECT timing keeps the cast candidate rarity')
 	# Promotion lies are configured once per cast, so a seeded cast reproduces
 	# both its misleading cue and its reversal window exactly.
 	game._reset_fishing(); game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530); game.shells=100
@@ -67,9 +75,12 @@ func run():
 		var first_candidate := str(game.cast_candidate.get('name',''))
 		game._reset_fishing(); game.shells=100; game.rng.seed=false_cue_seed; game._try_fish()
 		check(game.promotion_false_cue and game.promotion_cue_rank==first_cue_rank and game.cast_candidate.get('name','')==first_candidate,'promotion cue is deterministic per cast seed')
+		check(not game.promotion_false_cue_revealed,'false cue stays hidden during anticipation')
 		var reversal_delta: float = game.bite_delay * 0.68
 		game._process_fishing(reversal_delta)
-		check(game.promotion_reversal and first_cue_rank != first_target_rank,'false cue enters its configured reversal window')
+		check(game.promotion_reversal and not game.promotion_false_cue_revealed and first_cue_rank != first_target_rank,'false cue enters its configured reversal window without revealing early')
+		game._resolve_fishing_timing(0.5)
+		check(game.promotion_false_cue_revealed,'false cue is disclosed only on the result reveal')
 	game._reset_fishing()
 	game._reset_fishing()
 	game._resolve_fishing_timing(0.1)
@@ -217,11 +228,13 @@ func run():
 	game.player=Vector2(690,520)
 	check(game._species_pool().any(func(f): return f.rarity=='LEGENDARY' and f.maps.has('hidden')),'hidden fish require the actual grotto fishing spot')
 	check(game._legendary_chance_for_cast()<=0.05,'rocky legendary chance is capped at five percent')
+	game.combo=2; game.fever_active=false; game.bait_index=1
+	var no_fever_legendary_chance: float = game._legendary_chance_for_cast()
 	game.combo=3; game.fever_active=true; game.bait_index=1
 	var fever_legendary_chance: float = game._legendary_chance_for_cast()
 	game.bait_index=2
 	var moonseed_legendary_chance: float = game._legendary_chance_for_cast()
-	check(is_equal_approx(fever_legendary_chance,0.03) and is_equal_approx(moonseed_legendary_chance,0.05) and is_equal_approx(moonseed_legendary_chance-fever_legendary_chance,0.02),'Moonseed adds only a bounded legendary nudge')
+	check(is_equal_approx(no_fever_legendary_chance,0.01) and is_equal_approx(fever_legendary_chance,0.03) and is_equal_approx(moonseed_legendary_chance,0.05) and is_equal_approx(moonseed_legendary_chance-fever_legendary_chance,0.02),'legendary chance uses actual FEVER and bounded Moonseed nudge')
 	check(game._rarity_bonus_scale('COMMON')==0.0 and game._rarity_bonus_scale('RARE')>game._rarity_bonus_scale('UNCOMMON') and game._rarity_bonus_scale('EPIC')>game._rarity_bonus_scale('RARE'),'bait and FEVER scales favour higher rarities')
 	# Force a legendary candidate to verify the reveal path without relying on a
 	# statistical roll.  The result must still come from the cast candidate.
