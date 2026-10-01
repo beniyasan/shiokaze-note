@@ -62,6 +62,7 @@ var last_catch_size_cm := 0.0
 var last_catch_weight_kg := 0.0
 var last_catch_variant := "Standard"
 var last_catch_mystery := false
+var last_rescue_used := false
 # Expanded coastal field guide: five original entries plus eighteen approved species.
 const FISH_SPECIES: Array[Dictionary] = [
  {"name":"Silver sprat","rarity":"COMMON","maps":["town","beach"]}, {"name":"Sand goby","rarity":"COMMON","maps":["town","beach"]}, {"name":"Moonfin trout","rarity":"RARE","maps":["beach","rocky"]}, {"name":"Old boot","rarity":"COMMON","maps":["town"]}, {"name":"Rainbow Kingfish","rarity":"LEGENDARY","maps":["rocky"]},
@@ -101,6 +102,15 @@ var combo := 0
 const FEVER_THRESHOLD := 3
 const FEVER_DURATION := 30.0
 const FEVER_RARITY_BONUS := 0.5
+## Soft pity is a transparent rescue hook for an unlucky run.  A miss or a
+## low-grade (GOOD) catch advances the meter, but the player still has to land
+## the next battle normally.  Once armed, the hook only changes the species
+## floor to RARE; it never auto-wins a cast or bypasses map/grade rules.
+const PITY_THRESHOLD := 3
+var pity_meter := 0
+var rescue_ready := false
+var low_grade_streak := 0
+var rescue_selection_used := false
 var fever_active := false
 var fever_t := 0.0
 var fever_flash_t := 0.0
@@ -389,7 +399,8 @@ func _species_pool() -> Array[Dictionary]:
 		if fish.maps.has(current_map) or (fish.maps.has("hidden") and hidden_spot_collected): pool.append(fish)
 	return pool
 
-func _pick_species(grade: String) -> Dictionary:
+func _pick_species(grade: String, apply_rescue := false) -> Dictionary:
+	if apply_rescue: rescue_selection_used = false
 	var pool := _species_pool()
 	if pool.is_empty(): return FISH_SPECIES[0]
 	var eligible: Array[Dictionary] = []
@@ -410,8 +421,54 @@ func _pick_species(grade: String) -> Dictionary:
 	var roll := rng.randf() * total
 	for i in range(eligible.size()):
 		roll -= weights[i]
-		if roll <= 0.0: return eligible[i]
-	return eligible.back()
+		if roll <= 0.0:
+			return _apply_rescue_floor(eligible[i], eligible, grade) if apply_rescue else eligible[i]
+	var fallback: Dictionary = eligible[eligible.size() - 1]
+	return _apply_rescue_floor(fallback, eligible, grade) if apply_rescue else fallback
+
+func _rarity_rank(rarity: String) -> int:
+	match rarity:
+		"LEGENDARY": return 4
+		"EPIC": return 3
+		"RARE": return 2
+		"UNCOMMON": return 1
+		_: return 0
+
+func _apply_rescue_floor(candidate: Dictionary, eligible: Array[Dictionary], _grade: String) -> Dictionary:
+	# The rescue hook is intentionally conservative: it selects from the same
+	# map/grade-eligible pool and only raises the rarity floor to RARE.  The
+	# timing battle has already been completed before this is called.
+	if not rescue_ready or _rarity_rank(str(candidate.get("rarity", "COMMON"))) >= _rarity_rank("RARE"):
+		return candidate
+	var rare_pool: Array[Dictionary] = []
+	for fish in eligible:
+		if _rarity_rank(str(fish.get("rarity", "COMMON"))) >= _rarity_rank("RARE"):
+			rare_pool.append(fish)
+	if rare_pool.is_empty():
+		return candidate
+	rescue_selection_used = true
+	return rare_pool[rng.randi_range(0, rare_pool.size() - 1)]
+
+func _reset_pity() -> void:
+	pity_meter = 0
+	low_grade_streak = 0
+	rescue_ready = false
+
+func _advance_pity(outcome: String) -> void:
+	# Keep this meter monotonic while a run is unlucky so its HUD signal is easy
+	# to trust.  A successful RARE/PERFECT catch calls _reset_pity instead.
+	pity_meter = mini(PITY_THRESHOLD, pity_meter + 1)
+	if outcome == "GOOD": low_grade_streak += 1
+	if pity_meter >= PITY_THRESHOLD:
+		rescue_ready = true
+
+func pity_status() -> Dictionary:
+	return {"meter": pity_meter, "threshold": PITY_THRESHOLD, "ready": rescue_ready, "low_grade_streak": low_grade_streak}
+
+func _pity_label() -> String:
+	if rescue_ready:
+		return "RESCUE READY  /  RARE+ floor"
+	return "RESCUE %d/%d" % [pity_meter, PITY_THRESHOLD]
 
 # Keep the variation ranges deliberately broad but believable.  They are
 # derived from rarity rather than adding 23 hand-maintained fields to the
@@ -737,6 +794,7 @@ func _resolve_fishing_timing(position: float):
 	elif position >= 0.26 and position <= 0.80: grade = "GOOD"
 	if grade == "MISS":
 		_break_chain()
+		_advance_pity("MISS")
 		last_catch = "The fish got away"
 		last_rarity = ""
 		last_grade = grade
@@ -745,6 +803,7 @@ func _resolve_fishing_timing(position: float):
 		last_catch_weight_kg = 0.0
 		last_catch_variant = "Standard"
 		last_catch_mystery = true
+		last_rescue_used = false
 		fishing_state = FishingState.RESULT
 		cast_timer = 0.0
 		result_t = 1.3
@@ -759,13 +818,23 @@ func _resolve_fishing_timing(position: float):
 	var fever_started := combo >= FEVER_THRESHOLD and not fever_active
 	if fever_started: _start_fever()
 	last_grade = grade
-	var picked := _pick_species(grade)
+	var rescue_was_ready := rescue_ready
+	rescue_selection_used = false
+	var picked := _pick_species(grade, true)
 	var legendary := grade == "PERFECT" and combo >= 3
 	if legendary and current_map != "rocky": legendary = false
 	if legendary and hidden_spot_collected and rng.randf() > 0.65: picked = FISH_SPECIES[22]
 	elif legendary: picked = FISH_SPECIES[4]
 	last_catch = str(picked.name)
 	last_rarity = str(picked.rarity)
+	last_rescue_used = rescue_was_ready and rescue_selection_used and _rarity_rank(last_rarity) >= _rarity_rank("RARE")
+	# A clean or genuinely rare catch closes the unlucky streak.  GOOD/common
+	# outcomes remain visible on the meter, allowing the one-shot rescue hook to
+	# arm without silently granting a win.
+	if _rarity_rank(last_rarity) >= _rarity_rank("RARE") or grade == "PERFECT":
+		_reset_pity()
+	else:
+		_advance_pity("GOOD")
 	_music_call("set_combo", [combo])
 	_music_call("play_fanfare", [legendary])
 	fish_count += 1
@@ -783,6 +852,8 @@ func _resolve_fishing_timing(position: float):
 	shake_t = 1.10 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
 	_play_se("catch" if last_rarity != "LEGENDARY" else "legendary")
 	toast = ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch + "  /  SPACE to cast again"
+	if rescue_was_ready and last_rescue_used:
+		toast = "RESCUE! RARE floor / " + last_catch
 	if fever_started: toast = "FEVER! Rarity boosted for 30s / " + last_catch
 	toast_t = result_t
 
@@ -916,6 +987,8 @@ func _reset_fishing():
 	last_catch_weight_kg = 0.0
 	last_catch_variant = "Standard"
 	last_catch_mystery = false
+	last_rescue_used = false
+	rescue_selection_used = false
 	legendary_t = 0.0
 	legendary_stage = 0
 	reveal_t = 0.0
@@ -941,7 +1014,7 @@ func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		toast = "Could not save. Please check available storage."; toast_t = 4; return
-	f.store_string(JSON.stringify({"version":7,"combo":combo,"fever_t":fever_t,"map":current_map,"day":day,"time":time_of_day,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected}))
+	f.store_string(JSON.stringify({"version":8,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected}))
 	toast = "Saved to the tide ledger"; toast_t = 2.4
 
 func _normalize_catch_metadata(raw: Dictionary, species: String, first_capture := true) -> Dictionary:
@@ -1006,6 +1079,10 @@ func _load_game(path: String = SAVE_PATH):
 	hidden_spot_unlocked = bool(data.get("hidden_spot_unlocked", rumor_found and fish_count >= 3))
 	hidden_spot_collected = bool(data.get("hidden_spot_collected", false))
 	combo = clampi(int(data.get("combo", 0)), 0, 999)
+	pity_meter = clampi(int(data.get("pity_meter", data.get("rescue_meter", 0))), 0, PITY_THRESHOLD)
+	low_grade_streak = clampi(int(data.get("low_grade_streak", 0)), 0, PITY_THRESHOLD)
+	rescue_ready = bool(data.get("rescue_ready", pity_meter >= PITY_THRESHOLD))
+	if pity_meter < PITY_THRESHOLD: rescue_ready = false
 	fever_t = clampf(float(data.get("fever_t", 0.0)), 0.0, FEVER_DURATION)
 	fever_active = fever_t > 0.0 and combo >= FEVER_THRESHOLD
 	if not fever_active: fever_t = 0.0
@@ -1192,12 +1269,15 @@ func _draw_hud():
 		_panel(Rect2(188,8,100,30))
 		_text(Vector2(195,21),("FEVER %.0fs" % ceilf(fever_t)) if fever_active else ("CHAIN %d/%d" % [combo, FEVER_THRESHOLD]),10)
 		hud_bar(Vector2(195,27),Vector2(85,4),fever_t / FEVER_DURATION if fever_active else float(combo) / FEVER_THRESHOLD,Color("#efbf69"))
+		_panel(Rect2(188,40,100,18))
+		_text(Vector2(195,53),_pity_label(),8)
 		if fever_flash_t > 0.0:
 			hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fever_flash_t*0.10))
 	if notebook_open:
-		_panel(Rect2(66,51,348,181),true)
+		_panel(Rect2(66,51,348,194),true)
 		_text(Vector2(85,75),"THE TIDE LEDGER",17,true)
 		_text(Vector2(85,94),"Saltmere / " + current_map.capitalize(),11,true)
+		_text(Vector2(85,104),"Rescue: " + ("READY / next catch RARE+" if rescue_ready else "%d/%d unlucky pulls" % [pity_meter, PITY_THRESHOLD]),9,true)
 		# Three-column field guide: every species has a card fallback portrait.
 		var rows := 8
 		for i in range(FISH_SPECIES.size()):
@@ -1205,7 +1285,7 @@ func _draw_hud():
 			var col := i / rows
 			var row := i % rows
 			var x := 82.0 + col * 112.0
-			var y := 108.0 + row * 14.0
+			var y := 114.0 + row * 14.0
 			var owned := int(catches.get(str(fish.name),0))
 			var icon := Color("#b6c7d9") if owned == 0 else _rarity_color(str(fish.rarity))
 			hud.draw_rect(Rect2(x,y-9,8,8),icon)
@@ -1214,9 +1294,9 @@ func _draw_hud():
 			if marker != "": display_name += " " + marker
 			_text(Vector2(x+11,y),display_name,8,true)
 			_text(Vector2(x+85,y),str(owned),8,true)
-		_text(Vector2(85,226),"Rumor: " + ("heard" if rumor_found else "find the weathered notice"),9,true)
-		_text(Vector2(85,239),"? mystery  ~ shimmer  ! gilded  /  N close",8,true)
-		_text(Vector2(85,218),"N to close  /  Movement pauses while reading",10,true)
+		_text(Vector2(85,232),"Rumor: " + ("heard" if rumor_found else "find the weathered notice"),9,true)
+		_text(Vector2(85,241),"? mystery  ~ shimmer  ! gilded  /  N close",8,true)
+		_text(Vector2(85,223),"N to close  /  Movement pauses while reading",10,true)
 
 func _draw_fishing_hud():
 	if fishing_state == FishingState.TIMING:

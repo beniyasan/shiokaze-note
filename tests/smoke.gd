@@ -53,6 +53,22 @@ func run():
 	game._reset_fishing()
 	game._resolve_fishing_timing(0.1)
 	check(game.last_grade=='MISS' and game.combo==0,'miss resets combo')
+	# Soft pity counts consecutive misses/low-grade outcomes and arms one
+	# transparent rescue hook. The hook changes only the rarity floor; the
+	# timing battle is still required for a real catch.
+	game._reset_pity()
+	for i in range(game.PITY_THRESHOLD):
+		game._resolve_fishing_timing(-1.0)
+		game._reset_fishing()
+	check(game.pity_status().meter==game.PITY_THRESHOLD and game.pity_status().ready,'miss streak arms rescue hook')
+	game.current_map='town'; game._build_map('town'); game.rng.seed=9182
+	var rescued_pick: Dictionary = game._pick_species('GOOD', true)
+	check(game._rarity_rank(str(rescued_pick.get('rarity','COMMON')))>=game._rarity_rank('RARE'),'armed rescue raises catch floor to rare')
+	game.pity_meter=2; game.low_grade_streak=2; game.rescue_ready=false
+	game._save_game('user://pity-test.json')
+	game._reset_pity(); game._load_game('user://pity-test.json')
+	check(game.pity_meter==2 and game.low_grade_streak==2 and not game.rescue_ready,'save restores pity meter without arming early')
+	game.pity_meter=game.PITY_THRESHOLD; game.rescue_ready=true
 	game._reset_fishing()
 	game.rng.seed=2026
 	game._finish_cast()
