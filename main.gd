@@ -467,7 +467,7 @@ func pity_status() -> Dictionary:
 
 func _pity_label() -> String:
 	if rescue_ready:
-		return "RESCUE READY  /  RARE+ floor"
+		return "RESCUE READY"
 	return "RESCUE %d/%d" % [pity_meter, PITY_THRESHOLD]
 
 # Keep the variation ranges deliberately broad but believable.  They are

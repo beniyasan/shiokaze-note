@@ -73,6 +73,7 @@ func run():
 	game.rng.seed=2026
 	game._finish_cast()
 	check(game.catches.size()>=1,'catch recorded in ledger')
+	check(game.pity_meter==0 and not game.rescue_ready,'successful rescue catch clears pity meter')
 	var first_species: String = str(game.last_catch)
 	var first_meta: Dictionary = game.get_first_capture_metadata(first_species)
 	check(first_meta.has('day') and first_meta.has('map') and first_meta.has('spot'),'first capture stores where and when')

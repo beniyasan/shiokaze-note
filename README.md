@@ -48,6 +48,16 @@ refresh the timer. A lost fish or elapsed FEVER window resets the chain. Reading
 the ledger and map transitions pause the timer with the fishing loop. Version 6
 saves retain the combo and remaining FEVER time; older saves start with no chain.
 
+## Fair rescue (soft pity)
+
+Unlucky runs are visible rather than hidden. Misses and low-grade catches advance
+a three-step Rescue meter shown in the HUD and tide ledger. When it fills, the
+next successfully landed battle gets a one-shot RARE-or-better species floor
+from the current map and grade-eligible pool; the timing battle still has to be
+won, so rescue never auto-catches a fish. A RARE/EPIC/LEGENDARY or PERFECT catch
+resets the meter, and save files (version 8) retain its progress for a later
+session. Older saves start with an empty meter.
+
 On a fresh clone, import assets before running smoke checks:
 ```sh
 XDG_DATA_HOME=/tmp/godot-data XDG_CACHE_HOME=/tmp/godot-cache XDG_CONFIG_HOME=/tmp/godot-config godot --headless --editor --path . --import --quit
