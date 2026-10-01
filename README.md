@@ -19,6 +19,11 @@ Space starts a cast at the shore or pier. After the bite, the fish battle is a s
 - A three-catch perfect combo unlocks Rainbow Kingfish (LEGENDARY)
 - Five illustrated collection cards can be found in the tide ledger: Sand goby (COMMON), Silver sprat and Coral bream (UNCOMMON), Moonfin trout (RARE), and Rainbow Kingfish (LEGENDARY)
 
+The ledger keeps its compact pixel portraits for a crisp collection strip. Catch
+results use larger, card-framed illustrations cropped from the original
+six-fish concept sheet (`assets/fish_cards/`); `tools/crop_fish_cards.py`
+rebuilds those cards when the sheet is available.
+
 LEGENDARY follows a paced reveal: omen, rising energy, full-screen rainbow light/rays/particles, then a long afterglow. All SE are synthesized with Godot's AudioStreamGenerator and have no external audio-file dependency. The ledger records each catch, and save/load stores versioned position and catch data while rejecting unsafe legacy positions.
 
 Run headless smoke checks with:
