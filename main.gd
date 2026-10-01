@@ -44,6 +44,7 @@ var solids: Array[Rect2] = []
 var landmarks: Array[Dictionary] = []
 var textures: Dictionary = {}
 var fish_portraits: Dictionary = {}
+var fish_cards: Dictionary = {}
 var face := 0
 var walk_time := 0.0
 var walking := false
@@ -114,6 +115,9 @@ func _ready():
 		var portrait := load("res://assets/fish/" + art_name + ".png")
 		if portrait != null:
 			fish_portraits[str(species.name)] = portrait
+		var card := load("res://assets/fish_cards/" + art_name + ".png")
+		if card != null:
+			fish_cards[str(species.name)] = card
 	_build_world()
 	cam.position = player.round()
 	cam.position_smoothing_enabled = false
@@ -529,6 +533,19 @@ func _draw_fish_portrait(center: Vector2, species_name: String, scale: float = 1
 		return
 	var size := Vector2(portrait.get_width(), portrait.get_height()) * scale
 	hud.draw_texture_rect(portrait, Rect2(center - size * 0.5, size), false, modulate)
+
+func _draw_fish_card(center: Vector2, species_name: String, card_size: Vector2, modulate := Color.WHITE):
+	# The concept-sheet illustration is deliberately kept separate from the
+	# tiny pixel portrait used by the ledger. Fit the larger card art without
+	# stretching its hand-pixeled proportions, so fins stay crisp on the reveal.
+	var card: Texture2D = fish_cards.get(species_name)
+	if card == null:
+		_draw_fish_portrait(center, species_name, minf(card_size.x / 96.0, card_size.y / 64.0), modulate)
+		return
+	var source_size := Vector2(card.get_width(), card.get_height())
+	var fit := minf(card_size.x / source_size.x, card_size.y / source_size.y)
+	var draw_size := source_size * fit
+	hud.draw_texture_rect(card, Rect2(center - draw_size * 0.5, draw_size), false, modulate)
 
 func _resolve_fishing_timing(position: float):
 	var grade := "MISS"
@@ -1061,9 +1078,9 @@ func _draw_standard_reveal_result():
 	if t >= 1.42 and t < 1.78:
 		fish_width_scale = absf(cos(flip_p * PI))
 	if face_visible:
-		# The card face uses the species portrait so the reveal resolves into a
-		# real collection entry rather than another generic silhouette.
-		_draw_fish_portrait(center + Vector2(0, -2), last_catch, 1.28)
+		# Resolve into the large concept-sheet illustration. The compact pixel
+		# portrait remains reserved for the ledger strip below.
+		_draw_fish_card(center + Vector2(0, -2), last_catch, Vector2(238, 158))
 	else:
 		_draw_reveal_fish(center, fish_scale, fish_col, false, fish_width_scale)
 	if t < 0.42:
@@ -1140,7 +1157,7 @@ func _draw_legendary_result():
 		_center_text(49,"THE OCEAN AWAKENS",24,Color("#ffe0a4"))
 		_center_text(229,"RAINBOW ENERGY RISING",14,Color("#fff5dc"))
 	else:
-		# A wide ribbon and a large trophy silhouette dominate the final frame.
+		# A wide ribbon and the large concept-sheet trophy card dominate the final frame.
 		hud.draw_colored_polygon(PackedVector2Array([Vector2(14,19),Vector2(466,19),Vector2(455,63),Vector2(24,63)]),Color(0.12,0.05,0.2,0.88))
 		hud.draw_line(Vector2(16,19),Vector2(464,19),Color("#ffe39a"),3)
 		hud.draw_line(Vector2(24,63),Vector2(456,63),Color("#ffe39a"),3)
@@ -1148,21 +1165,20 @@ func _draw_legendary_result():
 		_center_text(211,"RAINBOW KINGFISH",24,Color("#fff3c9"))
 		_center_text(231,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
 		_center_text(258,"SPACE  continue",10,Color("#fff0d8"))
-	# The fish grows from a dark silhouette to a full-width rainbow trophy.
+	# The fish grows from a dark silhouette into the original framed trophy
+	# illustration. Keep the silhouette phase so the existing reveal timing and
+	# suspense beats remain unchanged.
 	var scale := 0.22 + rise * 0.55 + peak * 0.28
-	var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])
-	var transformed := PackedVector2Array()
-	for p in body: transformed.append(center + p * scale)
-	hud.draw_colored_polygon(transformed,Color("#130f32") if t < 2.05 else Color("#fff1c2"))
-	hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-67,0)*scale,center+Vector2(-112,-36)*scale,center+Vector2(-108,35)*scale]),Color("#9184ff") if t >= 2.05 else Color("#130f32"))
-	if t >= 2.05:
-		for k in range(8):
-			var x := -50.0 + k * 14.0
-			var col := Color.from_hsv(fmod(float(k)/8.0+t*0.025,1.0),0.62,1.0)
-			hud.draw_rect(Rect2(center+Vector2(x,-18)*scale,Vector2(13,36)*scale),col)
-		hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-25,-26)*scale,center+Vector2(5,-53)*scale,center+Vector2(31,-26)*scale]),Color("#d0acff"))
-		hud.draw_circle(center+Vector2(57,-8)*scale,5*scale,Color("#162539"))
-		hud.draw_circle(center+Vector2(58,-10)*scale,1.5*scale,Color.WHITE)
+	if t < 2.05:
+		var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])
+		var transformed := PackedVector2Array()
+		for p in body: transformed.append(center + p * scale)
+		hud.draw_colored_polygon(transformed,Color("#130f32"))
+		hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-67,0)*scale,center+Vector2(-112,-36)*scale,center+Vector2(-108,35)*scale]),Color("#130f32"))
+	else:
+		# The card art is intentionally drawn after the background fields and
+		# before the text ribbon so the framed illustration reads as a trophy.
+		_draw_fish_card(center + Vector2(0, -8), "Rainbow Kingfish", Vector2(240, 136))
 	# The initial reveal gets one soft glow, never repeated high-frequency flash.
 	if t >= 2.05 and t < 2.55:
 		var glow := sin((t-2.05)/0.5*PI)*0.20
