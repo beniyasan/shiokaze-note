@@ -110,8 +110,13 @@ var combo := 0
 const FEVER_THRESHOLD := 3
 const FEVER_DURATION := 30.0
 const FEVER_RARITY_BONUS := 0.5
-const PROMOTION_FALSE_CUE_CHANCE := 0.18
+## Cue lies are calibrated per stage so a higher float stays more trustworthy.
+## Rarer fish are rare, so a flat lie rate would make rainbow mostly bait.
+const PROMOTION_FALSE_LOW_CHANCE := 0.18     # RARE+ candidate shows a lower cue (the 逆転 source)
+const PROMOTION_FALSE_PURPLE_CHANCE := 0.06  # COMMON/UNCOMMON candidate shows purple
+const PROMOTION_FALSE_RAINBOW_CHANCE := 0.02 # COMMON/UNCOMMON candidate shows rainbow
 const PROMOTION_REVERSAL_CHANCE := 0.24
+const RARITY_ORDER: Array[String] = ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"]
 ## Soft pity is a transparent rescue hook for an unlucky run.  A miss or a
 ## low-grade (GOOD) catch advances the meter, but the player still has to land
 ## the next battle normally.  Once armed, the hook only changes the species
@@ -506,17 +511,17 @@ func _pick_good_substitute(candidate: Dictionary) -> Dictionary:
 	for fish in _species_pool():
 		if str(fish.get("rarity", "COMMON")) == "RARE": rare_pool.append(fish)
 	if rare_pool.is_empty(): return {}
-	# The substitute is selected at cast time, so GOOD cannot introduce a
-	# second result-time species roll.  Keep the first map-legal RARE stable for
-	# deterministic seeded casts and ledger results.
-	return rare_pool[0].duplicate(true)
+	# Drawn from the cast-time RNG, never at result time, so GOOD cannot add a
+	# second species roll and a seeded cast still reproduces its substitute.
+	# (Always taking the first RARE would funnel every downgrade into one fish.)
+	return rare_pool[rng.randi_range(0, rare_pool.size() - 1)].duplicate(true)
 
 func _candidate_for_grade(candidate: Dictionary, grade: String) -> Dictionary:
 	var resolved := candidate.duplicate(true)
 	# The cast roll is intentionally a PERFECT-pool candidate.  A GOOD timing
-	# result downgrades an EPIC/LEGENDARY candidate to the deterministic RARE
-	# substitute selected at cast time, so a Legendary species never enters the
-	# ledger from a low-grade battle.
+	# result downgrades an EPIC/LEGENDARY candidate to the RARE substitute drawn
+	# at cast time, so a Legendary species never enters the ledger from a
+	# low-grade battle.
 	if grade == "GOOD" and _rarity_rank(str(resolved.get("rarity", "COMMON"))) > _rarity_rank("RARE"):
 		var original_rarity := str(resolved.get("rarity", "COMMON"))
 		var original_species := str(resolved.get("name", "Unknown catch"))
@@ -538,6 +543,34 @@ func _visible_promotion_stage() -> int:
 	var stage := promotion_stage
 	if promotion_reversal: stage = maxi(0, stage - 1)
 	return stage
+
+func _rarity_for_rank(rank: int) -> String:
+	return RARITY_ORDER[clampi(rank, 0, RARITY_ORDER.size() - 1)]
+
+func _final_cue_stage() -> int:
+	# The stage the float ends on once the wait is over: the cap of the cue rank,
+	# stepped back one stage while a reversal is showing.  Result labels compare
+	# the catch against this rather than against whichever frame the bite landed on.
+	var stage := _promotion_max_stage(_rarity_for_rank(promotion_cue_rank))
+	if promotion_reversal: stage = maxi(0, stage - 1)
+	return stage
+
+func _promotion_label_for(result_rarity: String, candidate_rarity: String) -> String:
+	var result_rank := _rarity_rank(result_rarity)
+	var result_stage := _promotion_max_stage(result_rarity)
+	var shown := _final_cue_stage()
+	if shown >= 2 and result_stage < shown:
+		# The float promised more than the catch delivered.  If the cast itself held
+		# a better fish and only the timing grade cost it, that is the player's near
+		# miss, not a lying cue.
+		if _rarity_rank(candidate_rarity) > result_rank:
+			return "惜しい!  PERFECTなら " + candidate_rarity
+		return "ガセ…"
+	# A reversal only counts when it hides something worth celebrating; a COMMON
+	# catch under a stepped-back float is just a COMMON catch.
+	if result_rank >= _rarity_rank("RARE") and result_stage > shown:
+		return "逆転!"
+	return ""
 
 func _apply_rescue_floor(candidate: Dictionary, eligible: Array[Dictionary], _grade: String) -> Dictionary:
 	# The rescue hook is intentionally conservative: it selects from the same
@@ -728,12 +761,16 @@ func _try_fish():
 		# misleading high promotion.  No new random roll occurs while the float is
 		# moving, so the same cast always tells the same visual story.
 		var cue_roll := rng.randf()
-		if cue_roll < PROMOTION_FALSE_CUE_CHANCE and promotion_cue_rank >= 2:
-			promotion_false_cue = true
-			promotion_cue_rank = maxi(0, promotion_cue_rank - 2)
-		elif cue_roll > 1.0 - PROMOTION_FALSE_CUE_CHANCE and promotion_cue_rank <= 1:
+		if promotion_cue_rank >= 2:
+			if cue_roll < PROMOTION_FALSE_LOW_CHANCE:
+				promotion_false_cue = true
+				promotion_cue_rank = maxi(0, promotion_cue_rank - 2)
+		elif cue_roll < PROMOTION_FALSE_RAINBOW_CHANCE:
 			promotion_false_cue = true
 			promotion_cue_rank = 3
+		elif cue_roll < PROMOTION_FALSE_RAINBOW_CHANCE + PROMOTION_FALSE_PURPLE_CHANCE:
+			promotion_false_cue = true
+			promotion_cue_rank = 2
 		promotion_reversal_armed = rng.randf() < PROMOTION_REVERSAL_CHANCE
 		cast_timer = 1.8
 		bite_delay = rng.randf_range(0.72, 1.42)
@@ -763,9 +800,8 @@ func _process_fishing(delta: float):
 		var stage_bias := 0.12 * float(promotion_cue_rank)
 		var cue_progress := clampf(promotion_progress + stage_bias, 0.0, 1.0)
 		var raw_stage := 3 if cue_progress >= 0.86 else (2 if cue_progress >= 0.62 else (1 if cue_progress >= 0.34 else 0))
-		var stage_limit := _promotion_max_stage(promotion_target_rarity)
-		if promotion_false_cue: stage_limit = _promotion_max_stage(str(["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"][promotion_cue_rank]))
-		promotion_stage = mini(raw_stage, stage_limit)
+		# The cue rank already carries any lie, so its cap is the only cap needed.
+		promotion_stage = mini(raw_stage, _promotion_max_stage(_rarity_for_rank(promotion_cue_rank)))
 		if promotion_reversal_armed and promotion_progress > 0.62 and promotion_progress < 0.76: promotion_reversal = true
 		cast_timer = maxf(0.0, cast_timer-delta)
 		if bite_timer >= bite_delay:
@@ -955,9 +991,9 @@ func _resolve_fishing_timing(position: float):
 	var rescue_was_ready := rescue_ready
 	# The species roll belongs to the cast, not to the final timing frame.  This
 	# keeps the promotion cue, the revealed fish, and the ledger in lockstep.
-	# Timing still has explicit effects: PERFECT keeps the clean grade/pity reset
-	# and allows the bounded legendary reveal, while GOOD records a lower-quality
-	# catch and advances the rescue meter when appropriate.
+	# Timing still has explicit effects: PERFECT adopts the candidate as rolled
+	# (including the bounded legendary reveal), while GOOD swaps an EPIC/LEGENDARY
+	# candidate for a RARE and advances the rescue meter when appropriate.
 	promotion_false_cue_revealed = promotion_false_cue
 	var picked: Dictionary = cast_candidate.duplicate(true)
 	if picked.is_empty():
@@ -966,17 +1002,10 @@ func _resolve_fishing_timing(position: float):
 		# that same dictionary for the result.
 		picked = _pick_cast_candidate(rescue_was_ready)
 		cast_candidate = picked.duplicate(true)
+	var candidate_rarity := str(picked.get("rarity", "COMMON"))
 	picked = _candidate_for_grade(picked, grade)
 	var legendary := grade == "PERFECT" and str(picked.get("rarity", "COMMON")) == "LEGENDARY"
-	var result_rank := _rarity_rank(str(picked.get("rarity", "COMMON")))
-	if result_rank > promotion_cue_rank:
-		promotion_result_label = "逆転!"
-	elif result_rank < promotion_cue_rank:
-		promotion_result_label = "ガセ…"
-	elif promotion_reversal:
-		promotion_result_label = "逆転!"
-	else:
-		promotion_result_label = ""
+	promotion_result_label = _promotion_label_for(str(picked.get("rarity", "COMMON")), candidate_rarity)
 	last_catch = str(picked.name)
 	last_rarity = str(picked.rarity)
 	last_rescue_used = rescue_was_ready and rescue_selection_used and _rarity_rank(last_rarity) >= _rarity_rank("RARE")
