@@ -77,6 +77,8 @@ var hidden_spot_collected := false
 var promotion_t := 0.0
 var promotion_stage := 0
 var promotion_reversal := false
+var cast_candidate: Dictionary = {}
+var promotion_target_rarity := "COMMON"
 # Fishing is a short, deterministic-feeling arcade loop: cast, wait for a bite,
 # then tap SPACE while the moving gauge crosses the sweet spot.
 enum FishingState { IDLE, ANTICIPATING, TIMING, RESULT }
@@ -396,7 +398,7 @@ func _update_rumor_gate() -> void:
 func _species_pool() -> Array[Dictionary]:
 	var pool: Array[Dictionary] = []
 	for fish in FISH_SPECIES:
-		if fish.maps.has(current_map) or (fish.maps.has("hidden") and hidden_spot_collected): pool.append(fish)
+		if fish.maps.has(current_map) or (fish.maps.has("hidden") and hidden_spot_collected and current_map == "rocky"): pool.append(fish)
 	return pool
 
 func _pick_species(grade: String, apply_rescue := false) -> Dictionary:
@@ -411,12 +413,13 @@ func _pick_species(grade: String, apply_rescue := false) -> Dictionary:
 	var total := 0.0
 	var weights: Array[float] = []
 	for fish in eligible:
-		var weight := 1.0
+		var weight := 100.0
 		match str(fish.rarity):
-			"UNCOMMON": weight += bonus * 0.8
-			"RARE": weight += bonus * 1.8
-			"EPIC": weight += bonus * 3.0
-			"LEGENDARY": weight += bonus * 4.0
+			"UNCOMMON": weight = 40.0
+			"RARE": weight = 12.0
+			"EPIC": weight = 3.0
+			"LEGENDARY": weight = 0.5
+		weight *= 1.0 + bonus * (0.35 if str(fish.rarity) == "COMMON" else 1.0)
 		weights.append(weight); total += weight
 	var roll := rng.randf() * total
 	for i in range(eligible.size()):
@@ -608,6 +611,8 @@ func _try_fish():
 		promotion_t = 0.0
 		promotion_stage = 0
 		promotion_reversal = false
+		cast_candidate = _pick_species("PERFECT", false)
+		promotion_target_rarity = str(cast_candidate.get("rarity", "COMMON"))
 		cast_timer = 1.8
 		bite_delay = rng.randf_range(0.72, 1.42)
 		bite_timer = 0.0
@@ -633,8 +638,11 @@ func _process_fishing(delta: float):
 		bite_timer += delta
 		promotion_t = bite_timer
 		var promotion_progress := clampf(bite_timer / maxf(0.01, bite_delay), 0.0, 1.0)
-		promotion_stage = 3 if promotion_progress >= 0.86 else (2 if promotion_progress >= 0.62 else (1 if promotion_progress >= 0.34 else 0))
-		if promotion_progress > 0.62 and promotion_progress < 0.76: promotion_reversal = true
+		var target_rank := _rarity_rank(promotion_target_rarity)
+		var stage_bias := 0.12 * float(target_rank)
+		var cue_progress := clampf(promotion_progress + stage_bias, 0.0, 1.0)
+		promotion_stage = 3 if cue_progress >= 0.86 else (2 if cue_progress >= 0.62 else (1 if cue_progress >= 0.34 else 0))
+		if target_rank <= 1 and promotion_progress > 0.62 and promotion_progress < 0.76: promotion_reversal = true
 		cast_timer = maxf(0.0, cast_timer-delta)
 		if bite_timer >= bite_delay:
 			fishing_state = FishingState.TIMING
@@ -821,8 +829,10 @@ func _resolve_fishing_timing(position: float):
 	var rescue_was_ready := rescue_ready
 	rescue_selection_used = false
 	var picked := _pick_species(grade, true)
-	var legendary := grade == "PERFECT" and combo >= 3
-	if legendary and current_map != "rocky": legendary = false
+	var legendary_chance := 0.0
+	if grade == "PERFECT" and combo >= 3 and current_map == "rocky":
+		legendary_chance = 0.08 + (0.12 if fever_active else 0.0) + (0.08 if bait_index == 2 else 0.0)
+	var legendary := rng.randf() < legendary_chance
 	if legendary and hidden_spot_collected and rng.randf() > 0.65: picked = FISH_SPECIES[22]
 	elif legendary: picked = FISH_SPECIES[4]
 	last_catch = str(picked.name)
@@ -1392,7 +1402,7 @@ func _draw_fishing_result():
 		hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.9,0.55,flash_t*0.28))
 	if last_grade != "MISS":
 		var sparkle_color := Color("#ffffff") if last_rarity == "LEGENDARY" else (Color("#f8dc75") if last_rarity == "RARE" else Color("#c6e6b7"))
-		var sparkle_count := 28 if last_rarity == "LEGENDARY" else (14 if last_rarity == "RARE" else 7)
+		var sparkle_count := 28 if last_rarity == "LEGENDARY" else (20 if last_rarity == "EPIC" else (14 if last_rarity == "RARE" else 7))
 		for i in range(sparkle_count):
 			var a := fish_particle_t*2.0 + float(i)*TAU/float(sparkle_count)
 			var q := Vector2(240,108) + Vector2(cos(a),sin(a))* (42.0 + sin(fish_particle_t*5.0+i)*5.0)
@@ -1524,7 +1534,7 @@ func _draw_legendary_result():
 		hud.draw_line(Vector2(24,63),Vector2(456,63),Color("#ffe39a"),3)
 		_center_text(53,"LEGENDARY!!",35,Color("#fff4bd"))
 		var legendary_marker := _metadata_marker(last_catch_metadata)
-		var legendary_name := "RAINBOW KINGFISH" + (" " + legendary_marker if legendary_marker != "" else "")
+		var legendary_name := str(last_catch).to_upper() + (" " + legendary_marker if legendary_marker != "" else "")
 		_center_text(211,legendary_name,24,Color("#fff3c9"))
 		_center_text(231,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
 		_center_text(245,"%.1f cm  /  %.2f kg  /  %s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant],9,Color("#d8d0ff"))
