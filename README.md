@@ -34,7 +34,7 @@ NPC schedules, quests, and the wider offshore/lighthouse progression remain futu
 
 ## Expanded field guide and hidden tide loop
 
-The rebuilt slice includes 23 fish cards across Saltmere town, Amber Beach, and Rocky Shore, with COMMON, UNCOMMON, RARE, EPIC, and LEGENDARY rarity. The ledger opens as a three-column field guide with fallback card portraits for undiscovered species. Casting uses staged promotion cues (blue, gold, purple, rainbow), including a readable false-cue reversal before the bite.
+The rebuilt slice includes 23 fish cards across Saltmere town, Amber Beach, and Rocky Shore, with COMMON, UNCOMMON, RARE, EPIC, and LEGENDARY rarity. The ledger opens as a three-column field guide with fallback card portraits for undiscovered species. Casting rolls one candidate up front and resolves that same fish after the timing battle. Staged promotion cues (blue, gold, purple, rainbow) can occasionally mislead or reverse, with the cue decision fixed for the cast.
 
 A weathered notice beside the Saltmere sign starts Issue #1's rumor loop. After the rumor is heard and three catches are collected, Moonlit Grotto appears as a distinct rocky-shore fishing pool; visiting it completes discovery and can surface Aurora koi.
 
@@ -42,9 +42,12 @@ A weathered notice beside the Saltmere sign starts Issue #1's rumor loop. After 
 
 Three consecutive catches activate a 30-second FEVER window. The HUD shows chain
 progress and remaining time; a warm flash, original chime, and full music layers
-announce activation. FEVER increases higher-rarity weights alongside the selected
-bait, while keeping the map pool and grade eligibility unchanged. Catches do not
-refresh the timer. A lost fish or elapsed FEVER window resets the chain. Reading
+announce activation. FEVER and bait use rarity-sensitive weights: common fish
+retain their baseline, while higher rarities receive progressively stronger
+boosts. A PERFECT timing grade also enables the Rocky Shore legendary roll,
+capped at 5% even with Moonseed; GOOD timing keeps its lower-quality metadata
+and rescue-meter effect. Catches do not refresh the timer. A lost fish or elapsed
+FEVER window resets the chain. Reading
 the ledger and map transitions pause the timer with the fishing loop. Version 6
 saves retain the combo and remaining FEVER time; older saves start with no chain.
 

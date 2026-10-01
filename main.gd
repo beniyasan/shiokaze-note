@@ -77,8 +77,12 @@ var hidden_spot_collected := false
 var promotion_t := 0.0
 var promotion_stage := 0
 var promotion_reversal := false
+var promotion_false_cue := false
+var promotion_reversal_armed := false
+var promotion_cue_rank := 0
 var cast_candidate: Dictionary = {}
 var promotion_target_rarity := "COMMON"
+var cast_legendary_roll := false
 # Fishing is a short, deterministic-feeling arcade loop: cast, wait for a bite,
 # then tap SPACE while the moving gauge crosses the sweet spot.
 enum FishingState { IDLE, ANTICIPATING, TIMING, RESULT }
@@ -104,6 +108,8 @@ var combo := 0
 const FEVER_THRESHOLD := 3
 const FEVER_DURATION := 30.0
 const FEVER_RARITY_BONUS := 0.5
+const PROMOTION_FALSE_CUE_CHANCE := 0.18
+const PROMOTION_REVERSAL_CHANCE := 0.24
 ## Soft pity is a transparent rescue hook for an unlucky run.  A miss or a
 ## low-grade (GOOD) catch advances the meter, but the player still has to land
 ## the next battle normally.  Once armed, the hook only changes the species
@@ -395,18 +401,25 @@ func _update_rumor_gate() -> void:
 	if hidden_spot_unlocked and current_map == "rocky" and player.distance_to(Vector2(690,520)) < 28.0:
 		hidden_spot_collected = true
 
+func _at_hidden_fishing_spot() -> bool:
+	# Aurora koi is tied to the grotto pool itself.  Visiting the grotto unlocks
+	# the pool for the run, but standing at another rocky shoreline must not
+	# silently include hidden fish in its species roll.
+	return current_map == "rocky" and hidden_spot_unlocked and hidden_spot_collected and player.distance_to(Vector2(690,520)) <= 24.0
+
 func _species_pool() -> Array[Dictionary]:
 	var pool: Array[Dictionary] = []
 	for fish in FISH_SPECIES:
-		if fish.maps.has(current_map) or (fish.maps.has("hidden") and hidden_spot_collected and current_map == "rocky"): pool.append(fish)
+		if fish.maps.has(current_map) or (fish.maps.has("hidden") and _at_hidden_fishing_spot()): pool.append(fish)
 	return pool
 
-func _pick_species(grade: String, apply_rescue := false) -> Dictionary:
+func _pick_species(grade: String, apply_rescue := false, exclude_legendary := false) -> Dictionary:
 	if apply_rescue: rescue_selection_used = false
 	var pool := _species_pool()
 	if pool.is_empty(): return FISH_SPECIES[0]
 	var eligible: Array[Dictionary] = []
 	for fish in pool:
+		if exclude_legendary and str(fish.get("rarity", "COMMON")) == "LEGENDARY": continue
 		if grade == "PERFECT" or fish.rarity in ["COMMON","UNCOMMON","RARE"]: eligible.append(fish)
 	if eligible.is_empty(): eligible = pool
 	var bonus := float(BAITS[bait_index].rarity_bonus) + (FEVER_RARITY_BONUS if fever_active else 0.0)
@@ -414,12 +427,16 @@ func _pick_species(grade: String, apply_rescue := false) -> Dictionary:
 	var weights: Array[float] = []
 	for fish in eligible:
 		var weight := 100.0
-		match str(fish.rarity):
+		var rarity := str(fish.rarity)
+		match rarity:
 			"UNCOMMON": weight = 40.0
 			"RARE": weight = 12.0
 			"EPIC": weight = 3.0
 			"LEGENDARY": weight = 0.5
-		weight *= 1.0 + bonus * (0.35 if str(fish.rarity) == "COMMON" else 1.0)
+		# Bait and FEVER are intentionally rarity-sensitive.  Common fish keep
+		# their baseline weight, while the bonus increasingly favours a real
+		# upgrade instead of inflating every rarity by the same amount.
+		weight *= 1.0 + bonus * _rarity_bonus_scale(rarity)
 		weights.append(weight); total += weight
 	var roll := rng.randf() * total
 	for i in range(eligible.size()):
@@ -436,6 +453,40 @@ func _rarity_rank(rarity: String) -> int:
 		"RARE": return 2
 		"UNCOMMON": return 1
 		_: return 0
+
+func _rarity_bonus_scale(rarity: String) -> float:
+	match rarity:
+		"UNCOMMON": return 0.35
+		"RARE": return 0.85
+		"EPIC": return 1.25
+		"LEGENDARY": return 1.45
+		_: return 0.0
+
+func _legendary_chance_for_cast() -> float:
+	# The upcoming bite is eligible for a legendary only on Rocky Shore after
+	# the third chain catch.  FEVER and Moonseed each add a small, bounded nudge;
+	# together they cap the chance at 5% rather than making a legendary routine.
+	if current_map != "rocky" or combo + 1 < FEVER_THRESHOLD: return 0.0
+	var chance := 0.01
+	if fever_active or combo + 1 >= FEVER_THRESHOLD: chance += 0.02
+	if bait_index == 2: chance += 0.02
+	return minf(chance, 0.05)
+
+func _pick_cast_candidate(apply_rescue := false) -> Dictionary:
+	# Keep the explicit legendary roll as the only way a cast can become
+	# legendary; the ordinary perfect-pool pick excludes legendary entries so its
+	# small base weight cannot bypass the five-percent cap.
+	var candidate := _pick_species("PERFECT", apply_rescue, true)
+	cast_legendary_roll = false
+	var chance := _legendary_chance_for_cast()
+	if chance > 0.0 and rng.randf() < chance:
+		var legendary_pool: Array[Dictionary] = []
+		for fish in _species_pool():
+			if str(fish.get("rarity", "COMMON")) == "LEGENDARY": legendary_pool.append(fish)
+		if not legendary_pool.is_empty():
+			candidate = legendary_pool[rng.randi_range(0, legendary_pool.size() - 1)]
+			cast_legendary_roll = true
+	return candidate
 
 func _apply_rescue_floor(candidate: Dictionary, eligible: Array[Dictionary], _grade: String) -> Dictionary:
 	# The rescue hook is intentionally conservative: it selects from the same
@@ -611,8 +662,23 @@ func _try_fish():
 		promotion_t = 0.0
 		promotion_stage = 0
 		promotion_reversal = false
-		cast_candidate = _pick_species("PERFECT", false)
+		promotion_false_cue = false
+		promotion_reversal_armed = false
+		cast_candidate = _pick_cast_candidate(true)
 		promotion_target_rarity = str(cast_candidate.get("rarity", "COMMON"))
+		promotion_cue_rank = _rarity_rank(promotion_target_rarity)
+		# The cue is decided once, at cast time.  A high-rarity candidate can
+		# occasionally look ordinary, and a common/uncommon candidate can flash a
+		# misleading high promotion.  No new random roll occurs while the float is
+		# moving, so the same cast always tells the same visual story.
+		var cue_roll := rng.randf()
+		if cue_roll < PROMOTION_FALSE_CUE_CHANCE and promotion_cue_rank >= 2:
+			promotion_false_cue = true
+			promotion_cue_rank = maxi(0, promotion_cue_rank - 2)
+		elif cue_roll > 1.0 - PROMOTION_FALSE_CUE_CHANCE and promotion_cue_rank <= 1:
+			promotion_false_cue = true
+			promotion_cue_rank = 3
+		promotion_reversal_armed = rng.randf() < PROMOTION_REVERSAL_CHANCE
 		cast_timer = 1.8
 		bite_delay = rng.randf_range(0.72, 1.42)
 		bite_timer = 0.0
@@ -638,11 +704,10 @@ func _process_fishing(delta: float):
 		bite_timer += delta
 		promotion_t = bite_timer
 		var promotion_progress := clampf(bite_timer / maxf(0.01, bite_delay), 0.0, 1.0)
-		var target_rank := _rarity_rank(promotion_target_rarity)
-		var stage_bias := 0.12 * float(target_rank)
+		var stage_bias := 0.12 * float(promotion_cue_rank)
 		var cue_progress := clampf(promotion_progress + stage_bias, 0.0, 1.0)
 		promotion_stage = 3 if cue_progress >= 0.86 else (2 if cue_progress >= 0.62 else (1 if cue_progress >= 0.34 else 0))
-		if target_rank <= 1 and promotion_progress > 0.62 and promotion_progress < 0.76: promotion_reversal = true
+		if promotion_reversal_armed and promotion_progress > 0.62 and promotion_progress < 0.76: promotion_reversal = true
 		cast_timer = maxf(0.0, cast_timer-delta)
 		if bite_timer >= bite_delay:
 			fishing_state = FishingState.TIMING
@@ -827,14 +892,19 @@ func _resolve_fishing_timing(position: float):
 	if fever_started: _start_fever()
 	last_grade = grade
 	var rescue_was_ready := rescue_ready
-	rescue_selection_used = false
-	var picked := _pick_species(grade, true)
-	var legendary_chance := 0.0
-	if grade == "PERFECT" and combo >= 3 and current_map == "rocky":
-		legendary_chance = 0.08 + (0.12 if fever_active else 0.0) + (0.08 if bait_index == 2 else 0.0)
-	var legendary := rng.randf() < legendary_chance
-	if legendary and hidden_spot_collected and rng.randf() > 0.65: picked = FISH_SPECIES[22]
-	elif legendary: picked = FISH_SPECIES[4]
+	# The species roll belongs to the cast, not to the final timing frame.  This
+	# keeps the promotion cue, the revealed fish, and the ledger in lockstep.
+	# Timing still has explicit effects: PERFECT keeps the clean grade/pity reset
+	# and allows the bounded legendary reveal, while GOOD records a lower-quality
+	# catch and advances the rescue meter when appropriate.
+	var picked: Dictionary = cast_candidate.duplicate(true)
+	if picked.is_empty():
+		# Compatibility callers such as _finish_cast may resolve without opening a
+		# visible anticipation state first.  Establish the candidate once, then use
+		# that same dictionary for the result.
+		picked = _pick_cast_candidate(rescue_was_ready)
+		cast_candidate = picked.duplicate(true)
+	var legendary := grade == "PERFECT" and str(picked.get("rarity", "COMMON")) == "LEGENDARY"
 	last_catch = str(picked.name)
 	last_rarity = str(picked.rarity)
 	last_rescue_used = rescue_was_ready and rescue_selection_used and _rarity_rank(last_rarity) >= _rarity_rank("RARE")
@@ -1017,6 +1087,13 @@ func _reset_fishing():
 	challenge_strength = 1
 	challenge_round_event = ""
 	challenge_hint_t = 0.0
+	cast_candidate = {}
+	cast_legendary_roll = false
+	promotion_target_rarity = "COMMON"
+	promotion_cue_rank = 0
+	promotion_false_cue = false
+	promotion_reversal_armed = false
+	promotion_reversal = false
 	toast = "Ready to cast"
 	toast_t = 1.2
 
@@ -1134,7 +1211,7 @@ func _draw():
 		if promotion_stage == 1: float_color = Color("#f0c65a")
 		elif promotion_stage == 2: float_color = Color("#b383ff")
 		elif promotion_stage >= 3: float_color = Color.from_hsv(fmod(elapsed*0.22,1.0),0.72,1.0)
-		if promotion_reversal: float_color = Color("#f7f0cb")
+		if promotion_reversal or promotion_false_cue: float_color = Color("#f7f0cb")
 		draw_circle(float_pos+Vector2(1,1),3.0+sin(elapsed*10)*1.2,float_color)
 
 func _exit_markers() -> Array[Dictionary]:
@@ -1326,6 +1403,7 @@ func _draw_fishing_hud():
 		hud_bar(Vector2(114,98),Vector2(252,8),p,Color("#6c9b91"))
 		var cue: String = ["FLOAT BLUE  /  quiet water", "FLOAT GOLD  /  promotion cue", "FLOAT PURPLE  /  hold your breath", "RAINBOW PROMOTION  /  BITE!"][promotion_stage]
 		if promotion_reversal: cue = "FALSE CUE — the float reverses"
+		elif promotion_false_cue: cue = "FALSE CUE — the promotion misleads"
 		_text(Vector2(114,123), cue, 10)
 		_text(Vector2(114,137), "A staged promotion can still become a false cue", 8)
 	else:

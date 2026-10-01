@@ -25,11 +25,13 @@ func run():
 	game.cycle_bait(-1); game.cycle_rod(-1)
 	game.fishing_state=game.FishingState.IDLE; game._try_fish()
 	check(game.fishing_state==game.FishingState.ANTICIPATING,'fishing bite anticipation starts')
+	var cast_species := str(game.cast_candidate.get('name',''))
 	game._process_fishing(2.0)
 	check(game.fishing_state==game.FishingState.TIMING,'bite opens timing window')
 	game._resolve_fishing_timing(0.5)
 	check(game.fishing_state==game.FishingState.RESULT and game.last_grade=='PERFECT','perfect timing resolves result')
 	check(game.combo==1 and game.last_rarity!='','successful catch increments combo and rarity')
+	check(game.last_catch==cast_species,'cast candidate is the authoritative resolved species')
 	# Standard catches use a deterministic gacha-style reveal instead of
 	# showing the species immediately: unknown -> rarity -> rising -> flip.
 	check(game.reveal_stage==0 and game.reveal_stage_name()=='UNKNOWN','reveal starts as unknown silhouette')
@@ -50,6 +52,25 @@ func run():
 	game._process_fishing(2.0)
 	game._resolve_fishing_timing(0.5)
 	check(game.last_grade=='PERFECT' and game.combo>=1,'perfect timing awards grade and combo')
+	# Promotion lies are configured once per cast, so a seeded cast reproduces
+	# both its misleading cue and its reversal window exactly.
+	game._reset_fishing(); game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530); game.shells=100
+	var false_cue_seed := -1
+	for seed in range(1,512):
+		game._reset_fishing(); game.shells=100; game.rng.seed=seed; game._try_fish()
+		if game.promotion_false_cue and game.promotion_reversal_armed:
+			false_cue_seed = seed; break
+	check(false_cue_seed > 0,'seeded cast finds a false cue and reversal path')
+	if false_cue_seed > 0:
+		var first_cue_rank: int = game.promotion_cue_rank
+		var first_target_rank: int = game._rarity_rank(game.promotion_target_rarity)
+		var first_candidate := str(game.cast_candidate.get('name',''))
+		game._reset_fishing(); game.shells=100; game.rng.seed=false_cue_seed; game._try_fish()
+		check(game.promotion_false_cue and game.promotion_cue_rank==first_cue_rank and game.cast_candidate.get('name','')==first_candidate,'promotion cue is deterministic per cast seed')
+		var reversal_delta: float = game.bite_delay * 0.68
+		game._process_fishing(reversal_delta)
+		check(game.promotion_reversal and first_cue_rank != first_target_rank,'false cue enters its configured reversal window')
+	game._reset_fishing()
 	game._reset_fishing()
 	game._resolve_fishing_timing(0.1)
 	check(game.last_grade=='MISS' and game.combo==0,'miss resets combo')
@@ -190,6 +211,24 @@ func run():
 	check(game.rumor_found,'weathered notice reveals hidden fishing rumor')
 	game.fish_count=3; game._update_rumor_gate(); check(game.hidden_spot_unlocked,'collection gate unlocks hidden spot')
 	game.current_map='rocky'; game._build_map('rocky'); check(game._fishing_spots().size()==3,'hidden grotto adds distinct pool')
+	game.hidden_spot_collected=true; game.player=Vector2(170,590)
+	var rocky_pool: Array = game._species_pool()
+	check(not rocky_pool.any(func(f): return f.rarity=='LEGENDARY' and f.maps.has('hidden')),'hidden fish stay out of ordinary rocky pools')
+	game.player=Vector2(690,520)
+	check(game._species_pool().any(func(f): return f.rarity=='LEGENDARY' and f.maps.has('hidden')),'hidden fish require the actual grotto fishing spot')
+	check(game._legendary_chance_for_cast()<=0.05,'rocky legendary chance is capped at five percent')
+	game.combo=3; game.fever_active=true; game.bait_index=1
+	var fever_legendary_chance: float = game._legendary_chance_for_cast()
+	game.bait_index=2
+	var moonseed_legendary_chance: float = game._legendary_chance_for_cast()
+	check(is_equal_approx(fever_legendary_chance,0.03) and is_equal_approx(moonseed_legendary_chance,0.05) and is_equal_approx(moonseed_legendary_chance-fever_legendary_chance,0.02),'Moonseed adds only a bounded legendary nudge')
+	check(game._rarity_bonus_scale('COMMON')==0.0 and game._rarity_bonus_scale('RARE')>game._rarity_bonus_scale('UNCOMMON') and game._rarity_bonus_scale('EPIC')>game._rarity_bonus_scale('RARE'),'bait and FEVER scales favour higher rarities')
+	# Force a legendary candidate to verify the reveal path without relying on a
+	# statistical roll.  The result must still come from the cast candidate.
+	game._reset_fishing(); game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590); game.combo=2
+	game.cast_candidate=game.FISH_SPECIES[4].duplicate(true)
+	game._resolve_fishing_timing(0.5)
+	check(game.last_rarity=='LEGENDARY' and game.last_catch==game.FISH_SPECIES[4].name and game.result_t>6.0,'forced legendary candidate opens the staged reveal')
 	# Fever is earned through three catches, survives result dismissal, and
 	# expires independently of the fish's battle timer.
 	game._reset_fishing(); game._break_chain()
