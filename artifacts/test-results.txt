@@ -1,5 +1,9 @@
 Godot Engine v4.6.3.stable.official.7d41c59c4 - https://godotengine.org
 
+PASS five fish collection entries are registered
+PASS coral bream rarity metadata is wired
+PASS each collection entry has a portrait asset
+PASS perfect roll can surface coral bream
 PASS spawn is walkable
 PASS inn blocks movement
 PASS sea blocks movement
@@ -38,31 +42,12 @@ PASS first perfect pull wears fish down but does not finish
 PASS rapid repeated inputs cannot skip battle
 PASS six perfect pulls land the combo legendary
 PASS legendary battle lasts at least nine seconds and counts once
-PASS legendary starts its delayed 8.4 second card reveal
-PASS legendary starts sealed with no species spoiler
-PASS legendary stage at 1.11s is RARITY
-PASS legendary toast stays hidden at 1.11s
-PASS legendary stage at 1.91s is RISING
-PASS legendary toast stays hidden at 1.91s
-PASS legendary stage at 3.21s is HOLD
-PASS legendary toast stays hidden at 3.21s
-PASS legendary stage at 3.66s is FLIPPING
-PASS legendary toast stays hidden at 3.66s
-PASS legendary stage at 4.04s is FLIPPING
-PASS legendary toast stays hidden at 4.04s
-PASS legendary stage at 4.06s is CLIMAX
-PASS legendary species appears after the card edge at 4.06s
-PASS legendary stage at 6.21s is AFTERGLOW
-PASS legendary species appears after the card edge at 6.21s
-PASS legendary stage at 8.40s is AFTERGLOW
-PASS legendary species appears after the card edge at 8.40s
-PASS legendary music shares the entire visual timeline
-PASS legendary music leaves a breath before the flip
-PASS legendary music does not wrap after its ending
-PASS early Space cannot skip the legendary reveal
-PASS legendary card is open before continue
-PASS continue resets after the legendary card opens
-PASS repeated legendary restarts as a sealed catch
+PASS legendary starts its 8.4 second staged reveal
+PASS legendary reveals rarity after suspense
+PASS legendary builds rising silhouette
+PASS legendary holds before card flip
+PASS legendary reaches card edge
+PASS legendary reveals face and enters afterglow
 PASS bad pull strains the line without instant failure
 PASS repeated bad pulls can snap the line and reset combo
 PASS reset clears battle and celebration state
