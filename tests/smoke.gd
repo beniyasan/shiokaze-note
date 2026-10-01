@@ -57,9 +57,16 @@ func run():
 	# PERFECT adopts the candidate unchanged.
 	var high_candidate: Dictionary = game.FISH_SPECIES[15].duplicate(true)
 	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game._resolve_fishing_timing(0.34)
-	check(game.last_catch==str(high_candidate.name) and game.last_rarity=='RARE' and game.last_catch_metadata.get('original_rarity','')=='EPIC' and game.result_t<=2.0,'GOOD timing downgrades EPIC candidate without legendary reveal')
+	check(game.last_catch!=str(high_candidate.name) and game.last_rarity=='RARE' and game.last_catch_metadata.get('original_rarity','')=='EPIC' and game.last_catch_metadata.get('downgraded_from_species','')==str(high_candidate.name) and game.result_t<=2.0,'GOOD timing swaps EPIC candidate for a map-legal RARE without legendary reveal')
 	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game._resolve_fishing_timing(0.5)
 	check(game.last_catch==str(high_candidate.name) and game.last_rarity=='EPIC' and game.last_catch_metadata.get('original_rarity','')=='EPIC','PERFECT timing keeps the cast candidate rarity')
+	check(game._promotion_max_stage('COMMON')==1 and game._promotion_max_stage('UNCOMMON')==1 and game._promotion_max_stage('RARE')==2 and game._promotion_max_stage('EPIC')==3 and game._promotion_max_stage('LEGENDARY')==3,'promotion stage cap follows candidate rank')
+	game.promotion_stage=3; game.promotion_reversal=true
+	check(game._visible_promotion_stage()==2,'reversal visibly steps the float back one stage')
+	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game.promotion_cue_rank=3; game._resolve_fishing_timing(0.34)
+	check(game.promotion_result_label=='ガセ…' and game.last_rarity=='RARE','high preview to GOOD low result is labelled false cue')
+	game._reset_fishing(); game.cast_candidate=game.FISH_SPECIES[2].duplicate(true); game.promotion_cue_rank=0; game._resolve_fishing_timing(0.5)
+	check(game.promotion_result_label=='逆転!' and game.last_rarity=='RARE','low preview to PERFECT high result is labelled reversal')
 	# Promotion lies are configured once per cast, so a seeded cast reproduces
 	# both its misleading cue and its reversal window exactly.
 	game._reset_fishing(); game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530); game.shells=100
@@ -242,6 +249,9 @@ func run():
 	game.cast_candidate=game.FISH_SPECIES[4].duplicate(true)
 	game._resolve_fishing_timing(0.5)
 	check(game.last_rarity=='LEGENDARY' and game.last_catch==game.FISH_SPECIES[4].name and game.result_t>6.0,'forced legendary candidate opens the staged reveal')
+	var rainbow_count_before: int = int(game.catches.get('Rainbow Kingfish',0))
+	game._reset_fishing(); game.cast_candidate=game.FISH_SPECIES[4].duplicate(true); game._resolve_fishing_timing(0.34)
+	check(game.last_rarity=='RARE' and game.last_catch!='Rainbow Kingfish' and int(game.catches.get('Rainbow Kingfish',0))==rainbow_count_before,'GOOD legendary candidate becomes a RARE catch without ledgering Legendary species')
 	# Fever is earned through three catches, survives result dismissal, and
 	# expires independently of the fish's battle timer.
 	game._reset_fishing(); game._break_chain()
