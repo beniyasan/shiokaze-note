@@ -17,12 +17,6 @@ Space starts a cast at the shore or pier. After the bite, the fish battle is a s
 - Fish stamina, line tension, escape pressure, pull cooldown and the battle timer are all visible
 - Clean pulls ramp the procedural SE and screen effects; failed pulls strain the line and can snap it
 - A three-catch perfect combo unlocks Rainbow Kingfish (LEGENDARY)
-- Five illustrated collection cards can be found in the tide ledger: Sand goby (COMMON), Silver sprat and Coral bream (UNCOMMON), Moonfin trout (RARE), and Rainbow Kingfish (LEGENDARY)
-
-The ledger keeps its compact pixel portraits for a crisp collection strip. Catch
-results use larger, card-framed illustrations cropped from the original
-six-fish concept sheet (`assets/fish_cards/`); `tools/crop_fish_cards.py`
-rebuilds those cards when the sheet is available.
 
 LEGENDARY follows a paced reveal: omen, rising energy, full-screen rainbow light/rays/particles, then a long afterglow. All SE are synthesized with Godot's AudioStreamGenerator and have no external audio-file dependency. The ledger records each catch, and save/load stores versioned position and catch data while rejecting unsafe legacy positions.
 
@@ -37,3 +31,9 @@ XDG_DATA_HOME=/tmp/godot-data XDG_CACHE_HOME=/tmp/godot-cache XDG_CONFIG_HOME=/t
 The first connected region has three focused maps: Saltmere town, Amber beach, and Rocky shore. Exits connect town south to beach north, town east to rocky west, and beach east to rocky shore (with matching return entrances). A short pixel fade runs during each transition. The active map is written into the save file alongside day, time, fish count, catch ledger, and player position; older saves default to town.
 
 NPC schedules, quests, and the wider offshore/lighthouse progression remain future work.
+
+## Expanded field guide and hidden tide loop
+
+The rebuilt slice includes 23 fish cards across Saltmere town, Amber Beach, and Rocky Shore, with COMMON, UNCOMMON, RARE, EPIC, and LEGENDARY rarity. The ledger opens as a three-column field guide with fallback card portraits for undiscovered species. Casting uses staged promotion cues (blue, gold, purple, rainbow), including a readable false-cue reversal before the bite.
+
+A weathered notice beside the Saltmere sign starts Issue #1's rumor loop. After the rumor is heard and three catches are collected, Moonlit Grotto appears as a distinct rocky-shore fishing pool; visiting it completes discovery and can surface Aurora koi.

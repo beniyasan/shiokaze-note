@@ -152,7 +152,6 @@ func set_enabled(value: bool) -> void:
 	elif mode == MODE_SILENT:
 		if _stream_player != null and _stream_player.is_inside_tree():
 			_stream_player.play()
-			_playback = _stream_player.get_stream_playback() as AudioStreamGeneratorPlayback
 		start_field()
 
 func get_snapshot() -> Dictionary:
@@ -192,7 +191,7 @@ func _set_target_mode(next_mode: String) -> void:
 func _process(delta: float) -> void:
 	if not _enabled:
 		return
-	if _playback == null and _stream_player != null:
+	if _playback == null and _stream_player != null and _stream_player.playing:
 		_playback = _stream_player.get_stream_playback() as AudioStreamGeneratorPlayback
 	_update_transport(delta)
 	_pump_audio()

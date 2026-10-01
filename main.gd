@@ -2,18 +2,6 @@ extends Node2D
 
 const FishingChallengeScript = preload("res://fishing_challenge.gd")
 const MusicDirectorScript = preload("res://audio/music_director.gd")
-const LegendaryRevealTiming = preload("res://legendary_reveal_timing.gd")
-
-# The tide ledger treats every species as a small collectable card.  The
-# portraits are intentionally compact, palette-limited PNGs so they stay crisp
-# at the 480x270 viewport and still read on the paper ledger.
-const FISH_SPECIES := [
-	{"name":"Sand goby", "rarity":"COMMON", "art":"sand_goby", "description":"A shy bottom-dweller that loves warm sand."},
-	{"name":"Silver sprat", "rarity":"UNCOMMON", "art":"silver_sprat", "description":"A bright schooling fish that flashes at the surface."},
-	{"name":"Coral bream", "rarity":"UNCOMMON", "art":"coral_bream", "description":"A reef wanderer with sunset stripes."},
-	{"name":"Moonfin trout", "rarity":"RARE", "art":"moonfin_trout", "description":"Its crescent fin glows under a clear night tide."},
-	{"name":"Rainbow Kingfish", "rarity":"LEGENDARY", "art":"rainbow_kingfish", "description":"A once-in-a-season trophy from the deep."}
-]
 
 # Original v2 world dimensions retained; viewport now shows a walkable slice.
 const TILE := 16
@@ -43,14 +31,26 @@ var props: Array[Dictionary] = []
 var solids: Array[Rect2] = []
 var landmarks: Array[Dictionary] = []
 var textures: Dictionary = {}
-var fish_portraits: Dictionary = {}
-var fish_cards: Dictionary = {}
 var face := 0
 var walk_time := 0.0
 var walking := false
 var elapsed := 0.0
 var cast_timer := 0.0
 var catches: Dictionary = {}
+# Expanded coastal field guide: five original entries plus eighteen approved species.
+const FISH_SPECIES: Array[Dictionary] = [
+ {"name":"Silver sprat","rarity":"COMMON","maps":["town","beach"]}, {"name":"Sand goby","rarity":"COMMON","maps":["town","beach"]}, {"name":"Moonfin trout","rarity":"RARE","maps":["beach","rocky"]}, {"name":"Old boot","rarity":"COMMON","maps":["town"]}, {"name":"Rainbow Kingfish","rarity":"LEGENDARY","maps":["rocky"]},
+ {"name":"Amber anchovy","rarity":"COMMON","maps":["beach"]}, {"name":"Dune flounder","rarity":"COMMON","maps":["beach"]}, {"name":"Tidepool blenny","rarity":"UNCOMMON","maps":["beach"]}, {"name":"Glass shrimp","rarity":"UNCOMMON","maps":["beach","rocky"]}, {"name":"Copper mackerel","rarity":"RARE","maps":["beach"]},
+ {"name":"Saltwater eel","rarity":"UNCOMMON","maps":["town","rocky"]}, {"name":"Lantern squid","rarity":"RARE","maps":["rocky"]}, {"name":"Blackglass bass","rarity":"RARE","maps":["rocky"]}, {"name":"Storm sardine","rarity":"UNCOMMON","maps":["rocky"]}, {"name":"Gullfin","rarity":"COMMON","maps":["town","rocky"]},
+ {"name":"Lighthouse ray","rarity":"EPIC","maps":["rocky"]}, {"name":"Tidemark carp","rarity":"UNCOMMON","maps":["town"]}, {"name":"Sea lavender perch","rarity":"RARE","maps":["beach","rocky"]}, {"name":"Pearl puffer","rarity":"EPIC","maps":["beach","rocky"]}, {"name":"Night sailfish","rarity":"EPIC","maps":["rocky"]},
+ {"name":"Crown snapper","rarity":"EPIC","maps":["town","rocky"]}, {"name":"Singing herring","rarity":"RARE","maps":["town","beach"]}, {"name":"Aurora koi","rarity":"LEGENDARY","maps":["hidden"]}
+]
+var rumor_found := false
+var hidden_spot_unlocked := false
+var hidden_spot_collected := false
+var promotion_t := 0.0
+var promotion_stage := 0
+var promotion_reversal := false
 # Fishing is a short, deterministic-feeling arcade loop: cast, wait for a bite,
 # then tap SPACE while the moving gauge crosses the sweet spot.
 enum FishingState { IDLE, ANTICIPATING, TIMING, RESULT }
@@ -110,14 +110,6 @@ func _ready():
 	hero = load("res://assets/hero.png")
 	for asset in ["cottage", "inn", "shop", "tree0", "tree1", "tree2", "barrel", "sign", "rock", "well", "reeds"]:
 		textures[asset] = load("res://assets/" + asset + ".png")
-	for species in FISH_SPECIES:
-		var art_name := str(species.get("art", ""))
-		var portrait := load("res://assets/fish/" + art_name + ".png")
-		if portrait != null:
-			fish_portraits[str(species.name)] = portrait
-		var card := load("res://assets/fish_cards/" + art_name + ".png")
-		if card != null:
-			fish_cards[str(species.name)] = card
 	_build_world()
 	cam.position = player.round()
 	cam.position_smoothing_enabled = false
@@ -167,6 +159,7 @@ func _build_town():
 	_add_prop("cottage", Vector2(254,228), Rect2(-25,-29,50,25))
 	_add_prop("well", Vector2(366,401), Rect2(-10,-16,20,14))
 	_add_prop("sign", Vector2(468,381), Rect2(-6,-9,12,9))
+	landmarks.append({"kind":"rumor_sign","pos":Vector2(468,381),"label":"Weathered notice"})
 	for pos in [Vector2(296,323),Vector2(306,337),Vector2(582,337),Vector2(475,452)]:
 		_add_prop("barrel",pos,Rect2(-7,-17,14,16))
 	var tree_positions: Array[Vector2] = [Vector2(183,298),Vector2(194,232),Vector2(313,228),Vector2(316,280),Vector2(463,260),Vector2(498,278),Vector2(593,292),Vector2(172,378),Vector2(206,400),Vector2(286,410),Vector2(608,387),Vector2(663,359)]
@@ -208,7 +201,8 @@ func _build_rocky():
 		{"kind":"breakwater","pos":Vector2(310,420),"label":"Stone Breakwater"},
 		{"kind":"pool","pos":Vector2(170,585),"label":"Blackglass Pool"},
 		{"kind":"pool","pos":Vector2(520,573),"label":"Gull's Pool"},
-		{"kind":"lighthouse","pos":Vector2(704,154),"label":"Farwatch Lighthouse"}
+		{"kind":"lighthouse","pos":Vector2(704,154),"label":"Farwatch Lighthouse"},
+		{"kind":"hidden_pool","pos":Vector2(690,520),"label":"Moonlit Grotto"}
 	]
 	_add_prop("inn", Vector2(585,170), Rect2(-32,-40,64,37))
 	_add_prop("sign", Vector2(120,102), Rect2(-6,-9,12,9))
@@ -271,6 +265,7 @@ func _process(delta):
 		return
 	if Input.is_action_just_pressed("notebook"):
 		notebook_open = not notebook_open
+	_update_rumor_gate()
 	var dir := Input.get_vector("move_left", "move_right", "move_up", "move_down")
 	walking = dir.length() > 0 and not notebook_open and fishing_state == FishingState.IDLE
 	if walking:
@@ -339,11 +334,38 @@ func _fishing_spots() -> Array[Dictionary]:
 			{"pos":Vector2(300,487),"label":"North Tide Pool"},
 			{"pos":Vector2(620,487),"label":"South Tide Pool"}
 		]
-		"rocky": return [
-			{"pos":Vector2(170,590),"label":"Blackglass Pool"},
-			{"pos":Vector2(520,578),"label":"Gull's Pool"}
-		]
+		"rocky":
+			var spots: Array[Dictionary] = [{"pos":Vector2(170,590),"label":"Blackglass Pool"},{"pos":Vector2(520,578),"label":"Gull's Pool"}]
+			if hidden_spot_unlocked: spots.append({"pos":Vector2(690,520),"label":"Moonlit Grotto"})
+			return spots
 		_: return []
+
+func _update_rumor_gate() -> void:
+	if not rumor_found and current_map == "town" and player.distance_to(Vector2(468,381)) < 34.0:
+		rumor_found = true
+		toast = "The weathered notice whispers of a moonlit grotto"; toast_t = 3.0
+	if rumor_found and not hidden_spot_unlocked and fish_count >= 3:
+		hidden_spot_unlocked = true
+		toast = "A hidden fishing spot is now marked on the rocky shore"; toast_t = 3.0
+	if hidden_spot_unlocked and current_map == "rocky" and player.distance_to(Vector2(690,520)) < 28.0:
+		hidden_spot_collected = true
+
+func _species_pool() -> Array[Dictionary]:
+	var pool: Array[Dictionary] = []
+	for fish in FISH_SPECIES:
+		if fish.maps.has(current_map) or (fish.maps.has("hidden") and hidden_spot_collected): pool.append(fish)
+	return pool
+
+func _pick_species(grade: String) -> Dictionary:
+	var pool := _species_pool()
+	if pool.is_empty(): return FISH_SPECIES[0]
+	var eligible: Array[Dictionary] = []
+	for fish in pool:
+		if grade == "PERFECT" or fish.rarity in ["COMMON","UNCOMMON","RARE"]: eligible.append(fish)
+	if eligible.is_empty(): eligible = pool
+	# Weighted rarity: epic/legendary stay special, while every map has commons.
+	var index := rng.randi_range(0, eligible.size()-1)
+	return eligible[index]
 
 func _try_fish():
 	if notebook_open: return
@@ -353,6 +375,9 @@ func _try_fish():
 	if fishing_state != FishingState.IDLE: return
 	if _can_fish():
 		fishing_state = FishingState.ANTICIPATING
+		promotion_t = 0.0
+		promotion_stage = 0
+		promotion_reversal = false
 		cast_timer = 1.8
 		bite_delay = rng.randf_range(0.72, 1.42)
 		bite_timer = 0.0
@@ -367,6 +392,10 @@ func _try_fish():
 func _process_fishing(delta: float):
 	if fishing_state == FishingState.ANTICIPATING:
 		bite_timer += delta
+		promotion_t = bite_timer
+		var promotion_progress := clampf(bite_timer / maxf(0.01, bite_delay), 0.0, 1.0)
+		promotion_stage = 3 if promotion_progress >= 0.86 else (2 if promotion_progress >= 0.62 else (1 if promotion_progress >= 0.34 else 0))
+		if promotion_progress > 0.62 and promotion_progress < 0.76: promotion_reversal = true
 		cast_timer = maxf(0.0, cast_timer-delta)
 		if bite_timer >= bite_delay:
 			fishing_state = FishingState.TIMING
@@ -435,23 +464,25 @@ func _process_fishing(delta: float):
 			_reset_fishing()
 		if last_rarity == "LEGENDARY":
 			var previous_legendary_t := legendary_t
-			legendary_t = minf(legendary_t + delta, LegendaryRevealTiming.DURATION)
+			legendary_t = minf(legendary_t + delta, 6.0)
+			# Keep the generic reveal state in sync for deterministic probes and
+			# future result skins; legendary keeps its established six-second arc.
 			reveal_t = legendary_t
 			reveal_stage = _reveal_stage_at(reveal_t, last_rarity)
-			legendary_stage = reveal_stage
-			if previous_legendary_t < LegendaryRevealTiming.RARITY_AT and legendary_t >= LegendaryRevealTiming.RARITY_AT:
-				_play_se("seal")
-			if previous_legendary_t < LegendaryRevealTiming.RISE_AT and legendary_t >= LegendaryRevealTiming.RISE_AT:
+			# The catch is deliberately paced: a small omen, rising energy, a
+			# full-screen climax, then a long rainbow afterglow.
+			if previous_legendary_t < 0.82 and legendary_t >= 0.82:
+				legendary_stage = maxi(legendary_stage, 1)
 				_play_se("rise")
-			if previous_legendary_t < LegendaryRevealTiming.HOLD_AT and legendary_t >= LegendaryRevealTiming.HOLD_AT:
-				_play_se("suspense")
-			if previous_legendary_t < LegendaryRevealTiming.FLIP_AT and legendary_t >= LegendaryRevealTiming.FLIP_AT:
-				_play_se("flip")
-			if previous_legendary_t < LegendaryRevealTiming.REVEAL_AT and legendary_t >= LegendaryRevealTiming.REVEAL_AT:
+				flash_t = maxf(flash_t, 0.42)
+				shake_t = maxf(shake_t, 0.65)
+			if previous_legendary_t < 2.05 and legendary_t >= 2.05:
+				legendary_stage = maxi(legendary_stage, 2)
 				_play_se("peak")
-				shake_t = maxf(shake_t, 0.7)
-				toast = "BIG CATCH!!  " + last_catch + "  /  SPACE to continue"
-			if previous_legendary_t < LegendaryRevealTiming.AFTERGLOW_AT and legendary_t >= LegendaryRevealTiming.AFTERGLOW_AT:
+				flash_t = maxf(flash_t, 1.35)
+				shake_t = maxf(shake_t, 1.8)
+			if previous_legendary_t < 3.75 and legendary_t >= 3.75:
+				legendary_stage = maxi(legendary_stage, 3)
 				_play_se("after")
 		elif last_grade != "MISS":
 			var previous_reveal_t := reveal_t
@@ -469,7 +500,10 @@ func _process_fishing(delta: float):
 # standard catches fit the same two-second result window they had before.
 func _reveal_stage_at(time: float, rarity: String) -> int:
 	if rarity == "LEGENDARY":
-		return LegendaryRevealTiming.stage_at(time)
+		if time < 0.82: return 0 # unknown omen
+		if time < 2.05: return 1 # rarity and energy rising
+		if time < 3.75: return 2 # full-screen reveal
+		return 3 # afterglow
 	if time < 0.42: return 0 # card back and ???
 	if time < 0.82: return 1 # rarity seal
 	if time < 1.42: return 2 # growing silhouette/light
@@ -480,12 +514,9 @@ func reveal_stage_name() -> String:
 	if last_rarity == "LEGENDARY":
 		match reveal_stage:
 			0: return "UNKNOWN"
-			1: return "RARITY"
-			2: return "RISING"
-			3: return "HOLD"
-			4: return "FLIPPING"
-			5: return "CLIMAX"
-			6: return "AFTERGLOW"
+			1: return "RISING"
+			2: return "CLIMAX"
+			3: return "AFTERGLOW"
 			_: return "UNKNOWN"
 	match reveal_stage:
 		0: return "UNKNOWN"
@@ -499,53 +530,9 @@ func _rarity_color(rarity: String) -> Color:
 	match rarity:
 		"RARE": return Color("#72c7e8")
 		"UNCOMMON": return Color("#8bd59c")
+		"EPIC": return Color("#d19cff")
 		"LEGENDARY": return Color("#f6c76b")
 		_: return Color("#b7c3d7")
-
-func _fish_info(species_name: String) -> Dictionary:
-	for species in FISH_SPECIES:
-		if str(species.get("name", "")) == species_name:
-			return species
-	return {"name": species_name, "rarity": "COMMON", "art": "", "description": "A fish from the Saltmere tide."}
-
-func _fish_rarity(species_name: String) -> String:
-	return str(_fish_info(species_name).get("rarity", "COMMON"))
-
-func _fish_description(species_name: String) -> String:
-	return str(_fish_info(species_name).get("description", ""))
-
-func _roll_fish_species(grade: String, roll: float) -> String:
-	# Perfect pulls can surface the rarer cards more often, while every normal
-	# cast still has a clear path to the new Coral bream card.
-	if grade == "PERFECT":
-		if roll > 0.74: return "Moonfin trout"
-		if roll > 0.50: return "Coral bream"
-		if roll > 0.25: return "Silver sprat"
-		return "Sand goby"
-	if roll > 0.86: return "Silver sprat"
-	if roll > 0.61: return "Coral bream"
-	return "Sand goby"
-
-func _draw_fish_portrait(center: Vector2, species_name: String, scale: float = 1.0, modulate := Color.WHITE):
-	var portrait: Texture2D = fish_portraits.get(species_name)
-	if portrait == null:
-		_draw_reveal_fish(center, scale, _rarity_color(_fish_rarity(species_name)), true)
-		return
-	var size := Vector2(portrait.get_width(), portrait.get_height()) * scale
-	hud.draw_texture_rect(portrait, Rect2(center - size * 0.5, size), false, modulate)
-
-func _draw_fish_card(center: Vector2, species_name: String, card_size: Vector2, modulate := Color.WHITE):
-	# The concept-sheet illustration is deliberately kept separate from the
-	# tiny pixel portrait used by the ledger. Fit the larger card art without
-	# stretching its hand-pixeled proportions, so fins stay crisp on the reveal.
-	var card: Texture2D = fish_cards.get(species_name)
-	if card == null:
-		_draw_fish_portrait(center, species_name, minf(card_size.x / 96.0, card_size.y / 64.0), modulate)
-		return
-	var source_size := Vector2(card.get_width(), card.get_height())
-	var fit := minf(card_size.x / source_size.x, card_size.y / source_size.y)
-	var draw_size := source_size * fit
-	hud.draw_texture_rect(card, Rect2(center - draw_size * 0.5, draw_size), false, modulate)
 
 func _resolve_fishing_timing(position: float):
 	var grade := "MISS"
@@ -568,26 +555,28 @@ func _resolve_fishing_timing(position: float):
 		return
 	combo += 1
 	last_grade = grade
-	var roll := rng.randf()
+	var picked := _pick_species(grade)
 	var legendary := grade == "PERFECT" and combo >= 3
-	var result := "Rainbow Kingfish" if legendary else _roll_fish_species(grade, roll)
-	last_catch = result
-	last_rarity = _fish_rarity(result)
+	if legendary and current_map != "rocky": legendary = false
+	if legendary and hidden_spot_collected and rng.randf() > 0.65: picked = FISH_SPECIES[22]
+	elif legendary: picked = FISH_SPECIES[4]
+	last_catch = str(picked.name)
+	last_rarity = str(picked.rarity)
 	_music_call("set_combo", [combo])
 	_music_call("play_fanfare", [legendary])
 	fish_count += 1
-	catches[result] = int(catches.get(result,0))+1
+	catches[last_catch] = int(catches.get(last_catch,0))+1
 	fishing_state = FishingState.RESULT
 	cast_timer = 0.0
 	legendary_t = 0.0
 	legendary_stage = 0
 	reveal_t = 0.0
 	reveal_stage = 0
-	result_t = LegendaryRevealTiming.DURATION if legendary else 2.0
+	result_t = 6.2 if last_rarity == "LEGENDARY" else 2.0
 	flash_t = 0.90 if last_rarity == "LEGENDARY" else (0.32 if last_rarity == "RARE" else 0.18)
 	shake_t = 1.10 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
-	_play_se("omen" if legendary else "catch")
-	toast = "A sealed catch... something waits inside" if legendary else grade + "!  " + last_catch + "  /  SPACE to cast again"
+	_play_se("catch" if last_rarity != "LEGENDARY" else "legendary")
+	toast = ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch + "  /  SPACE to cast again"
 	toast_t = result_t
 
 func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
@@ -679,14 +668,6 @@ func _play_se(kind: String):
 			base = 520.0; duration = 0.34; volume = 0.26; sweep = 180.0; tones = [780.0]
 		"legendary":
 			base = 330.0; duration = 0.52; volume = 0.36; sweep = 260.0; tones = [495.0, 660.0, 990.0]
-		"omen":
-			base = 146.8; duration = 0.56; volume = 0.24; sweep = 18.0; tones = [220.0]
-		"seal":
-			base = 440.0; duration = 0.42; volume = 0.26; tones = [660.0, 880.0]
-		"suspense":
-			base = 110.0; duration = 0.28; volume = 0.12; sweep = -22.0
-		"flip":
-			base = 350.0; duration = 0.32; volume = 0.27; sweep = 880.0
 		"rise":
 			base = 620.0; duration = 0.44; volume = 0.38; sweep = 480.0; tones = [930.0, 1240.0]
 		"peak":
@@ -746,7 +727,7 @@ func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		toast = "Could not save. Please check available storage."; toast_t = 4; return
-	f.store_string(JSON.stringify({"version":4,"map":current_map,"day":day,"time":time_of_day,"fish":fish_count,"x":player.x,"y":player.y,"catches":catches}))
+	f.store_string(JSON.stringify({"version":4,"map":current_map,"day":day,"time":time_of_day,"fish":fish_count,"x":player.x,"y":player.y,"catches":catches,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected}))
 	toast = "Saved to the tide ledger"; toast_t = 2.4
 
 func _load_game(path: String = SAVE_PATH):
@@ -761,6 +742,9 @@ func _load_game(path: String = SAVE_PATH):
 	var saved_pos := Vector2(float(data.get("x",368)),float(data.get("y",372)))
 	if _walkable(saved_pos): player = saved_pos
 	if data.get("catches",{}) is Dictionary: catches = data.get("catches",{})
+	rumor_found = bool(data.get("rumor_found", false))
+	hidden_spot_unlocked = bool(data.get("hidden_spot_unlocked", rumor_found and fish_count >= 3))
+	hidden_spot_collected = bool(data.get("hidden_spot_collected", false))
 	toast = "Welcome back to Saltmere"; toast_t = 3
 
 func _draw():
@@ -792,7 +776,12 @@ func _draw():
 		var float_pos := player.round()+Vector2(15,32+int(sin(elapsed*6)))
 		draw_line(player.round()+Vector2(7,-9),player.round()+Vector2(12,-23),Color("#80674a"))
 		draw_line(player.round()+Vector2(12,-23),float_pos,Color("#d1d6b2"))
-		draw_circle(float_pos+Vector2(1,1),3.0+sin(elapsed*10)*1.2,Color("#edb17b"))
+		var float_color := Color("#6db7ff")
+		if promotion_stage == 1: float_color = Color("#f0c65a")
+		elif promotion_stage == 2: float_color = Color("#b383ff")
+		elif promotion_stage >= 3: float_color = Color.from_hsv(fmod(elapsed*0.22,1.0),0.72,1.0)
+		if promotion_reversal: float_color = Color("#f7f0cb")
+		draw_circle(float_pos+Vector2(1,1),3.0+sin(elapsed*10)*1.2,float_color)
 
 func _exit_markers() -> Array[Dictionary]:
 	# Exit markers are deliberately kept in world space so they remain visible as
@@ -861,6 +850,10 @@ func _draw_map_landmarks():
 		elif kind == "pool":
 			draw_circle(p,16.0,Color("#4f9291")); draw_circle(p-Vector2(3,3),11.0,Color("#80b9a7"))
 			draw_arc(p,16.0,0,TAU,16,Color("#d0d3a4"),2.0)
+		elif kind == "hidden_pool":
+			draw_circle(p,19.0,Color("#2d426c")); draw_circle(p-Vector2(3,3),13.0,Color("#8065b4"))
+			draw_arc(p,19.0,0,TAU,20,Color("#e1c6ff"),2.0)
+			if hidden_spot_unlocked: draw_string(ThemeDB.fallback_font,p+Vector2(-45,29),str(landmark.label),HORIZONTAL_ALIGNMENT_CENTER,90,8,Color("#c6b4df"))
 		elif kind == "lighthouse":
 			# Farwatch is a distant silhouette for now; the west trail can become
 			# an actual route when the offshore map is added.
@@ -928,23 +921,26 @@ func _draw_hud():
 	elif fishing_state == FishingState.RESULT:
 		_draw_fishing_result()
 	if notebook_open:
-		_panel(Rect2(48,43,384,190),true)
+		_panel(Rect2(66,51,348,181),true)
 		_text(Vector2(85,75),"THE TIDE LEDGER",17,true)
 		_text(Vector2(85,94),"Saltmere / " + current_map.capitalize(),11,true)
-		var row := 116
-		for species in FISH_SPECIES:
-			var species_name := str(species.get("name", ""))
-			var rarity := str(species.get("rarity", "COMMON"))
-			var portrait: Texture2D = fish_portraits.get(species_name)
-			# Five tiny portraits make the ledger feel like a collection page. The
-			# paper strip remains readable even before a species has been caught.
-			hud.draw_rect(Rect2(82,row-12,38,24),Color("#d4c397"))
-			if portrait != null:
-				hud.draw_texture_rect(portrait,Rect2(84,row-10,34,22),false)
-			_text(Vector2(128,row-2),"%s  %s  x%d" % [species_name,rarity,int(catches.get(species_name,0))],9,true)
-			row += 20
-		_text(Vector2(85,218),"Shore or pier: SPACE to cast",9,true)
-		_text(Vector2(85,229),"N to close  /  Movement pauses while reading",9,true)
+		# Three-column field guide: every species has a card fallback portrait.
+		var rows := 8
+		for i in range(FISH_SPECIES.size()):
+			var fish: Dictionary = FISH_SPECIES[i]
+			var col := i / rows
+			var row := i % rows
+			var x := 82.0 + col * 112.0
+			var y := 108.0 + row * 14.0
+			var owned := int(catches.get(str(fish.name),0))
+			var icon := Color("#b6c7d9") if owned == 0 else _rarity_color(str(fish.rarity))
+			hud.draw_rect(Rect2(x,y-9,8,8),icon)
+			var display_name := str(fish.name) if owned > 0 else "????????"
+			_text(Vector2(x+11,y),display_name,8,true)
+			_text(Vector2(x+85,y),str(owned),8,true)
+		_text(Vector2(85,226),"Rumor: " + ("heard" if rumor_found else "find the weathered notice"),9,true)
+		_text(Vector2(85,239),"SPACE to cast  /  N to close",9,true)
+		_text(Vector2(85,218),"N to close  /  Movement pauses while reading",10,true)
 
 func _draw_fishing_hud():
 	if fishing_state == FishingState.TIMING:
@@ -962,7 +958,10 @@ func _draw_fishing_hud():
 	if fishing_state == FishingState.ANTICIPATING:
 		var p := clampf(bite_timer / maxf(0.01,bite_delay), 0.0, 1.0)
 		hud_bar(Vector2(114,98),Vector2(252,8),p,Color("#6c9b91"))
-		_text(Vector2(114,123), "Listen for the splash...", 10)
+		var cue: String = ["FLOAT BLUE  /  quiet water", "FLOAT GOLD  /  promotion cue", "FLOAT PURPLE  /  hold your breath", "RAINBOW PROMOTION  /  BITE!"][promotion_stage]
+		if promotion_reversal: cue = "FALSE CUE — the float reverses"
+		_text(Vector2(114,123), cue, 10)
+		_text(Vector2(114,137), "A staged promotion can still become a false cue", 8)
 	else:
 		if challenge_live:
 			_text(Vector2(114,86), fishing_challenge.round_label(), 9)
@@ -1077,13 +1076,12 @@ func _draw_standard_reveal_result():
 	var fish_width_scale := 1.0
 	if t >= 1.42 and t < 1.78:
 		fish_width_scale = absf(cos(flip_p * PI))
+	_draw_reveal_fish(center, fish_scale, fish_col, face_visible, fish_width_scale)
 	if face_visible:
-		# Resolve into the large concept-sheet illustration. The compact pixel
-		# portrait remains reserved for the ledger strip below.
-		# Leave a clean text band beneath the art inside the reveal card.
-		_draw_fish_card(center + Vector2(0, -16), last_catch, Vector2(230, 136))
-	else:
-		_draw_reveal_fish(center, fish_scale, fish_col, false, fish_width_scale)
+		# Coloured bands remain subtle so the card and name carry the reveal.
+		for k in range(5):
+			var band_x := -38.0 + float(k) * 18.0
+			hud.draw_line(center + Vector2(band_x, -13) * fish_scale, center + Vector2(band_x + 5, 16) * fish_scale, Color(1.0, 0.92, 0.70, 0.42), 2.0)
 	if t < 0.42:
 		_center_text(68, "???", 28, Color("#e7edf7"))
 		_center_text(207, "A hidden tide catch", 10, Color("#b4c5db"))
@@ -1158,10 +1156,7 @@ func _draw_legendary_result():
 		_center_text(49,"THE OCEAN AWAKENS",24,Color("#ffe0a4"))
 		_center_text(229,"RAINBOW ENERGY RISING",14,Color("#fff5dc"))
 	else:
-		# Draw the card before the title copy so the name/combo band remains
-		# legible even when the cream illustration reaches its lower edge.
-		_draw_fish_card(center + Vector2(0, -8), "Rainbow Kingfish", Vector2(240, 136))
-		# A wide ribbon and the large concept-sheet trophy card dominate the final frame.
+		# A wide ribbon and a large trophy silhouette dominate the final frame.
 		hud.draw_colored_polygon(PackedVector2Array([Vector2(14,19),Vector2(466,19),Vector2(455,63),Vector2(24,63)]),Color(0.12,0.05,0.2,0.88))
 		hud.draw_line(Vector2(16,19),Vector2(464,19),Color("#ffe39a"),3)
 		hud.draw_line(Vector2(24,63),Vector2(456,63),Color("#ffe39a"),3)
@@ -1169,20 +1164,21 @@ func _draw_legendary_result():
 		_center_text(211,"RAINBOW KINGFISH",24,Color("#fff3c9"))
 		_center_text(231,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
 		_center_text(258,"SPACE  continue",10,Color("#fff0d8"))
-	# The fish grows from a dark silhouette into the original framed trophy
-	# illustration. Keep the silhouette phase so the existing reveal timing and
-	# suspense beats remain unchanged.
+	# The fish grows from a dark silhouette to a full-width rainbow trophy.
 	var scale := 0.22 + rise * 0.55 + peak * 0.28
-	if t < 2.05:
-		var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])
-		var transformed := PackedVector2Array()
-		for p in body: transformed.append(center + p * scale)
-		hud.draw_colored_polygon(transformed,Color("#130f32"))
-		hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-67,0)*scale,center+Vector2(-112,-36)*scale,center+Vector2(-108,35)*scale]),Color("#130f32"))
-	else:
-		# Card art was drawn before the title copy above; keep this branch as the
-		# visual handoff from the silhouette phase without drawing a second card.
-		pass
+	var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])
+	var transformed := PackedVector2Array()
+	for p in body: transformed.append(center + p * scale)
+	hud.draw_colored_polygon(transformed,Color("#130f32") if t < 2.05 else Color("#fff1c2"))
+	hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-67,0)*scale,center+Vector2(-112,-36)*scale,center+Vector2(-108,35)*scale]),Color("#9184ff") if t >= 2.05 else Color("#130f32"))
+	if t >= 2.05:
+		for k in range(8):
+			var x := -50.0 + k * 14.0
+			var col := Color.from_hsv(fmod(float(k)/8.0+t*0.025,1.0),0.62,1.0)
+			hud.draw_rect(Rect2(center+Vector2(x,-18)*scale,Vector2(13,36)*scale),col)
+		hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-25,-26)*scale,center+Vector2(5,-53)*scale,center+Vector2(31,-26)*scale]),Color("#d0acff"))
+		hud.draw_circle(center+Vector2(57,-8)*scale,5*scale,Color("#162539"))
+		hud.draw_circle(center+Vector2(58,-10)*scale,1.5*scale,Color.WHITE)
 	# The initial reveal gets one soft glow, never repeated high-frequency flash.
 	if t >= 2.05 and t < 2.55:
 		var glow := sin((t-2.05)/0.5*PI)*0.20
