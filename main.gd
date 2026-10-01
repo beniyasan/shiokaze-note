@@ -1080,7 +1080,8 @@ func _draw_standard_reveal_result():
 	if face_visible:
 		# Resolve into the large concept-sheet illustration. The compact pixel
 		# portrait remains reserved for the ledger strip below.
-		_draw_fish_card(center + Vector2(0, -2), last_catch, Vector2(238, 158))
+		# Leave a clean text band beneath the art inside the reveal card.
+		_draw_fish_card(center + Vector2(0, -16), last_catch, Vector2(230, 136))
 	else:
 		_draw_reveal_fish(center, fish_scale, fish_col, false, fish_width_scale)
 	if t < 0.42:
@@ -1157,6 +1158,9 @@ func _draw_legendary_result():
 		_center_text(49,"THE OCEAN AWAKENS",24,Color("#ffe0a4"))
 		_center_text(229,"RAINBOW ENERGY RISING",14,Color("#fff5dc"))
 	else:
+		# Draw the card before the title copy so the name/combo band remains
+		# legible even when the cream illustration reaches its lower edge.
+		_draw_fish_card(center + Vector2(0, -8), "Rainbow Kingfish", Vector2(240, 136))
 		# A wide ribbon and the large concept-sheet trophy card dominate the final frame.
 		hud.draw_colored_polygon(PackedVector2Array([Vector2(14,19),Vector2(466,19),Vector2(455,63),Vector2(24,63)]),Color(0.12,0.05,0.2,0.88))
 		hud.draw_line(Vector2(16,19),Vector2(464,19),Color("#ffe39a"),3)
@@ -1176,9 +1180,9 @@ func _draw_legendary_result():
 		hud.draw_colored_polygon(transformed,Color("#130f32"))
 		hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-67,0)*scale,center+Vector2(-112,-36)*scale,center+Vector2(-108,35)*scale]),Color("#130f32"))
 	else:
-		# The card art is intentionally drawn after the background fields and
-		# before the text ribbon so the framed illustration reads as a trophy.
-		_draw_fish_card(center + Vector2(0, -8), "Rainbow Kingfish", Vector2(240, 136))
+		# Card art was drawn before the title copy above; keep this branch as the
+		# visual handoff from the silhouette phase without drawing a second card.
+		pass
 	# The initial reveal gets one soft glow, never repeated high-frequency flash.
 	if t >= 2.05 and t < 2.55:
 		var glow := sin((t-2.05)/0.5*PI)*0.20
