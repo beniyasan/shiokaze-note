@@ -86,6 +86,12 @@ var battle_tension := 0.0
 var battle_escape := 0.0
 var battle_direction := 1.0
 var combo := 0
+const FEVER_THRESHOLD := 3
+const FEVER_DURATION := 30.0
+const FEVER_RARITY_BONUS := 0.5
+var fever_active := false
+var fever_t := 0.0
+var fever_flash_t := 0.0
 var last_grade := ""
 var last_catch := ""
 var last_rarity := ""
@@ -100,7 +106,7 @@ var legendary_stage := 0
 # from result_t so the existing result/input pacing stays intact.
 var reveal_t := 0.0
 var reveal_stage := 0
-var fishing_challenge: FishingChallenge
+var fishing_challenge: RefCounted
 var challenge_strength := 1
 var challenge_round_event := ""
 var challenge_hint_t := 0.0
@@ -378,7 +384,7 @@ func _pick_species(grade: String) -> Dictionary:
 	for fish in pool:
 		if grade == "PERFECT" or fish.rarity in ["COMMON","UNCOMMON","RARE"]: eligible.append(fish)
 	if eligible.is_empty(): eligible = pool
-	var bonus := float(BAITS[bait_index].rarity_bonus)
+	var bonus := float(BAITS[bait_index].rarity_bonus) + (FEVER_RARITY_BONUS if fever_active else 0.0)
 	var total := 0.0
 	var weights: Array[float] = []
 	for fish in eligible:
@@ -436,6 +442,15 @@ func _try_fish():
 		toast = "Cast from the water's edge or the end of the pier"; toast_t = 3.0
 
 func _process_fishing(delta: float):
+	# Notebook and map transitions pause fishing; the same pause applies here.
+	# Thirty seconds leaves room for the reveal and another full tug-of-war.
+	fever_flash_t = maxf(0.0, fever_flash_t - delta)
+	if fever_active:
+		fever_t = maxf(0.0, fever_t - delta)
+		if fever_t <= 0.0:
+			_break_chain()
+			toast = "FEVER ended / Build another three-catch chain"
+			toast_t = 2.0
 	if fishing_state == FishingState.ANTICIPATING:
 		bite_timer += delta
 		promotion_t = bite_timer
@@ -580,12 +595,27 @@ func _rarity_color(rarity: String) -> Color:
 		"LEGENDARY": return Color("#f6c76b")
 		_: return Color("#b7c3d7")
 
+func _start_fever() -> void:
+	fever_active = true
+	fever_t = FEVER_DURATION
+	fever_flash_t = 1.0
+	_music_call("set_fever", [true])
+	_play_se("fever")
+
+func _break_chain() -> void:
+	combo = 0
+	fever_active = false
+	fever_t = 0.0
+	fever_flash_t = 0.0
+	_music_call("set_fever", [false])
+	_music_call("set_combo", [0])
+
 func _resolve_fishing_timing(position: float):
 	var grade := "MISS"
 	if position >= 0.42 and position <= 0.62: grade = "PERFECT"
 	elif position >= 0.26 and position <= 0.80: grade = "GOOD"
 	if grade == "MISS":
-		combo = 0
+		_break_chain()
 		last_catch = "The fish got away"
 		last_rarity = ""
 		last_grade = grade
@@ -600,6 +630,8 @@ func _resolve_fishing_timing(position: float):
 		toast_t = result_t
 		return
 	combo += 1
+	var fever_started := combo >= FEVER_THRESHOLD and not fever_active
+	if fever_started: _start_fever()
 	last_grade = grade
 	var picked := _pick_species(grade)
 	var legendary := grade == "PERFECT" and combo >= 3
@@ -624,6 +656,7 @@ func _resolve_fishing_timing(position: float):
 	shake_t = 1.10 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
 	_play_se("catch" if last_rarity != "LEGENDARY" else "legendary")
 	toast = ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch + "  /  SPACE to cast again"
+	if fever_started: toast = "FEVER! Rarity boosted for 30s / " + last_catch
 	toast_t = result_t
 
 func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
@@ -634,7 +667,7 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	# gauge grade.  A missed beat strains the same authoritative line model as a
 	# missed gold-zone pull; it never bypasses the existing escape/tension rules.
 	if fishing_challenge != null and not fishing_challenge.done:
-		var challenge_result := fishing_challenge.accept(position, counter_axis)
+		var challenge_result: Dictionary = fishing_challenge.accept(position, counter_axis)
 		challenge_round_event = str(challenge_result.get("event", ""))
 		challenge_hint_t = 1.1
 		if not bool(challenge_result.get("success", false)):
@@ -713,6 +746,8 @@ func _play_se(kind: String):
 			base = 150.0; duration = 0.28; volume = 0.22; sweep = -55.0
 		"catch":
 			base = 520.0; duration = 0.34; volume = 0.26; sweep = 180.0; tones = [780.0]
+		"fever":
+			base = 392.0; duration = 0.55; volume = 0.28; sweep = 392.0; tones = [523.2, 659.2]
 		"legendary":
 			base = 330.0; duration = 0.52; volume = 0.36; sweep = 260.0; tones = [495.0, 660.0, 990.0]
 		"rise":
@@ -737,7 +772,7 @@ func _play_se(kind: String):
 
 func _finish_cast():
 	# Compatibility helper for old saves/tests: resolve a generous GOOD hit.
-	if fishing_state == FishingState.IDLE: combo = 0
+	if fishing_state == FishingState.IDLE: _break_chain()
 	_resolve_fishing_timing(0.5)
 
 func _reset_fishing():
@@ -774,7 +809,7 @@ func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		toast = "Could not save. Please check available storage."; toast_t = 4; return
-	f.store_string(JSON.stringify({"version":5,"map":current_map,"day":day,"time":time_of_day,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected}))
+	f.store_string(JSON.stringify({"version":6,"combo":combo,"fever_t":fever_t,"map":current_map,"day":day,"time":time_of_day,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected}))
 	toast = "Saved to the tide ledger"; toast_t = 2.4
 
 func _load_game(path: String = SAVE_PATH):
@@ -795,6 +830,13 @@ func _load_game(path: String = SAVE_PATH):
 	rumor_found = bool(data.get("rumor_found", false))
 	hidden_spot_unlocked = bool(data.get("hidden_spot_unlocked", rumor_found and fish_count >= 3))
 	hidden_spot_collected = bool(data.get("hidden_spot_collected", false))
+	combo = clampi(int(data.get("combo", 0)), 0, 999)
+	fever_t = clampf(float(data.get("fever_t", 0.0)), 0.0, FEVER_DURATION)
+	fever_active = fever_t > 0.0 and combo >= FEVER_THRESHOLD
+	if not fever_active: fever_t = 0.0
+	fever_flash_t = 0.0
+	_music_call("set_fever", [fever_active])
+	_music_call("set_combo", [combo])
 	toast = "Welcome back to Saltmere"; toast_t = 3
 
 func _draw():
@@ -970,6 +1012,13 @@ func _draw_hud():
 		_draw_fishing_hud()
 	elif fishing_state == FishingState.RESULT:
 		_draw_fishing_result()
+	if not notebook_open:
+		# Draw after the result card so the timer cannot be hidden by its reveal.
+		_panel(Rect2(188,8,100,30))
+		_text(Vector2(195,21),("FEVER %.0fs" % ceilf(fever_t)) if fever_active else ("CHAIN %d/%d" % [combo, FEVER_THRESHOLD]),10)
+		hud_bar(Vector2(195,27),Vector2(85,4),fever_t / FEVER_DURATION if fever_active else float(combo) / FEVER_THRESHOLD,Color("#efbf69"))
+		if fever_flash_t > 0.0:
+			hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fever_flash_t*0.10))
 	if notebook_open:
 		_panel(Rect2(66,51,348,181),true)
 		_text(Vector2(85,75),"THE TIDE LEDGER",17,true)
@@ -1000,7 +1049,7 @@ func _draw_fishing_hud():
 			var start := Vector2(240,126) + Vector2(cos(a),sin(a))* (140.0 + power * 55.0)
 			var end := Vector2(240,126) + Vector2(cos(a),sin(a))* 350.0
 			hud.draw_line(start,end,Color.from_hsv(float(i)/14.0,0.55,1.0,0.10+power*0.46),2.0+power*3.0)
-	var challenge_live := fishing_challenge != null and not fishing_challenge.done
+	var challenge_live: bool = fishing_challenge != null and not fishing_challenge.done
 	var challenge_offset := 30 if challenge_live else 0
 	var panel := Rect2(96,48,288,160 + challenge_offset)
 	_panel(panel)
@@ -1042,7 +1091,7 @@ func _challenge_prompt() -> String:
 		"SHRINKING RING": return "SPACE inside the shrinking ring"
 		"MOVING SAFE ZONE": return "SPACE while the safe zone overlaps"
 		"TIDE SLALOM":
-			var lane := fishing_challenge.safe_lane()
+			var lane: float = fishing_challenge.safe_lane()
 			if lane < -0.5: return "HOLD LEFT, then SPACE"
 			if lane > 0.5: return "HOLD RIGHT, then SPACE"
 			return "CENTER, then SPACE"

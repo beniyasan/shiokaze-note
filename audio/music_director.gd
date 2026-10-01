@@ -43,6 +43,7 @@ var mode_mix := 0.0
 var target_mode_mix := 0.0
 var pending_combo := 0
 var active_combo := 0
+var fever_active := false
 var elapsed := 0.0
 var _sample_cursor := 0.0
 var _last_beat := -1
@@ -85,7 +86,13 @@ func _create_player() -> void:
 	_playback = _stream_player.get_stream_playback() as AudioStreamGeneratorPlayback
 
 func start_field() -> void:
-	_set_target_mode(MODE_FIELD)
+	_set_target_mode(MODE_FISHING if fever_active else MODE_FIELD)
+
+func set_fever(value: bool) -> void:
+	fever_active = value
+	# Fanfare remains authoritative; its return route observes this flag.
+	if mode != MODE_FANFARE and target_mode != MODE_FANFARE:
+		_set_target_mode(MODE_FISHING if value else MODE_FIELD)
 
 func start_fishing(combo: int = 0) -> void:
 	pending_combo = clampi(combo, 0, 99)
@@ -160,6 +167,7 @@ func get_snapshot() -> Dictionary:
 		"target_mode": target_mode,
 		"combo": active_combo,
 		"pending_combo": pending_combo,
+		"fever": fever_active,
 		"muted": _muted,
 		"volume_db": _music_volume_db,
 		"beat": maxi(0, _last_beat),
@@ -223,7 +231,7 @@ func _update_transport(delta: float) -> void:
 				fanfare_finished.emit()
 			# Return to field on the next smooth fade. Integration may call
 			# start_field() sooner when it knows the result screen is closed.
-			_set_target_mode(MODE_FIELD)
+			_set_target_mode(MODE_FISHING if fever_active else MODE_FIELD)
 	if _fade_out_seconds > 0.0:
 		_fade_out_elapsed += delta
 		var fade := clampf(1.0 - _fade_out_elapsed / _fade_out_seconds, 0.0, 1.0)
@@ -235,7 +243,7 @@ func _update_transport(delta: float) -> void:
 	if beat != _last_beat:
 		_last_beat = beat
 		if target_mode == MODE_FISHING or mode == MODE_FISHING:
-			var next_layer := clampi(pending_combo, 0, MAX_COMBO_LAYER)
+			var next_layer := MAX_COMBO_LAYER if fever_active else clampi(pending_combo, 0, MAX_COMBO_LAYER)
 			if next_layer != active_combo:
 				active_combo = next_layer
 				combo_layer_changed.emit(active_combo)

@@ -89,7 +89,7 @@ func run():
 	# Battle lasts through multiple spaced inputs; a single tap is not a catch.
 	game.transition_active=false
 	game.notebook_open=false
-	game._reset_fishing(); game.combo=2
+	game._reset_fishing(); game._break_chain(); game.combo=2
 	game.player=Vector2(170,590)
 	game._try_fish(); game._process_fishing(2.0)
 	check(game.fish_hp_max==12 and game.timing_timer==20.0,'battle starts with stamina and a 20 second limit')
@@ -139,13 +139,13 @@ func run():
 		var recovered = challenge.accept(challenge.target_center(),challenge.safe_lane())
 		check(recovered.success,'challenge %s can recover at its visible target' % starting_name)
 	# A combo-two battle wires the chain into the live timing state.
-	game._reset_fishing(); game.combo=2; game.player=Vector2(170,590)
+	game._reset_fishing(); game._break_chain(); game.combo=2; game.player=Vector2(170,590)
 	game._try_fish(); game._process_fishing(2.0)
 	check(game.fishing_challenge != null and game.fishing_challenge.rounds.size()==4,'bite configures the four-round challenge chain')
 	# Use the real moving gauge at 60fps, rather than injecting perfect positions.
 	# This proves each rotated chain can be caught through the normal key path.
 	for seed in range(4):
-		game._reset_fishing(); game.combo=2
+		game._reset_fishing(); game._break_chain(); game.combo=2
 		game._try_fish(); game._process_fishing(2.0)
 		game.fishing_challenge.configure(3,2,seed)
 		for frame in range(1200):
@@ -162,6 +162,48 @@ func run():
 	check(game.rumor_found,'weathered notice reveals hidden fishing rumor')
 	game.fish_count=3; game._update_rumor_gate(); check(game.hidden_spot_unlocked,'collection gate unlocks hidden spot')
 	game.current_map='rocky'; game._build_map('rocky'); check(game._fishing_spots().size()==3,'hidden grotto adds distinct pool')
+	# Fever is earned through three catches, survives result dismissal, and
+	# expires independently of the fish's battle timer.
+	game._reset_fishing(); game._break_chain()
+	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530)
+	game.bait_index=0
+	for i in range(3):
+		game._resolve_fishing_timing(0.34)
+		check(game.combo==i+1 and game.fever_active==(i==2),'fever threshold catch %d' % (i+1))
+		game._reset_fishing()
+	check(game.fever_t==game.FEVER_DURATION,'result dismissal preserves fever window')
+	check(game.music.get_snapshot().fever,'fever enables music cue')
+	game.music._update_transport(1.0)
+	check(game.music.get_snapshot().combo==4,'fever activates maximum music layer')
+	var rare_normal=0
+	var rare_fever=0
+	game.fever_active=false; game.rng.seed=4401
+	for i in range(2000):
+		if game._pick_species('GOOD').rarity=='RARE': rare_normal+=1
+	game.fever_active=true; game.rng.seed=4401
+	for i in range(2000):
+		var picked=game._pick_species('GOOD')
+		if picked.rarity=='RARE': rare_fever+=1
+		if not picked.maps.has('town') or picked.rarity in ['EPIC','LEGENDARY']: failures+=1
+	check(rare_fever>rare_normal+80,'fever raises seeded rare catch frequency without bypassing pool/grade')
+	var remaining=game.fever_t
+	game._process_fishing(1.0)
+	check(is_equal_approx(game.fever_t,remaining-1.0),'fever countdown advances while idle')
+	game.bait_index=1; game.rod_index=2
+	game._save_game('user://fever-test.json')
+	var saved_fever=game.fever_t
+	game._break_chain(); game.bait_index=0; game.rod_index=0
+	game._load_game('user://fever-test.json')
+	check(game.combo==3 and game.fever_active and is_equal_approx(game.fever_t,saved_fever),'save restores combo and remaining fever')
+	check(game.bait_index==1 and game.rod_index==2 and game.catches.size()>0,'fever save preserves loadout and ledger')
+	game._process_fishing(game.FEVER_DURATION+0.1)
+	check(not game.fever_active and game.combo==0 and game.fever_t==0.0,'fever timeout resets chain')
+	check(not game.music.get_snapshot().fever,'fever timeout clears music cue')
+	game._reset_fishing(); game.combo=2; game._resolve_fishing_timing(0.34)
+	game._reset_fishing(); game._resolve_fishing_timing(-1.0)
+	check(not game.fever_active and game.combo==0 and game.fever_t==0.0,'miss ends fever and resets chain')
+	game._load_game('user://legacy-test.json')
+	check(not game.fever_active and game.combo==0,'legacy saves default to no fever')
 	game.queue_free()
 	await process_frame
 	print('RESULT: %d failure(s)' % failures)
