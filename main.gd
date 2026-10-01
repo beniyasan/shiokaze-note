@@ -18,6 +18,19 @@ var transition_spawn := Vector2.ZERO
 var transition_fade := 0.0
 var speed := 78.0
 var fish_count := 0
+var shells := 12
+var bait_index := 0
+var rod_index := 0
+const BAITS: Array[Dictionary] = [
+ {"name":"Worm","cost":0,"rarity_bonus":0.0,"tension_bonus":0.0},
+ {"name":"Glowbait","cost":2,"rarity_bonus":0.14,"tension_bonus":0.06},
+ {"name":"Moonseed","cost":4,"rarity_bonus":0.28,"tension_bonus":0.12}
+]
+const RODS: Array[Dictionary] = [
+ {"name":"Reed Rod","tension_mult":1.0,"escape_mult":1.0},
+ {"name":"Fiberglass Rod","tension_mult":0.82,"escape_mult":0.90},
+ {"name":"Stormglass Rod","tension_mult":0.68,"escape_mult":0.82}
+]
 var day := 1
 var time_of_day := 0.35
 var notebook_open := false
@@ -275,6 +288,8 @@ func _process(delta):
 		else: face = 1 if dir.y < 0 else 0
 		_check_map_exit()
 	if not notebook_open:
+		if Input.is_action_just_pressed("bait_next"): cycle_bait()
+		if Input.is_action_just_pressed("rod_next"): cycle_rod()
 		if Input.is_action_just_pressed("fish") and fishing_state == FishingState.IDLE:
 			_try_fish()
 		_process_fishing(delta)
@@ -363,9 +378,35 @@ func _pick_species(grade: String) -> Dictionary:
 	for fish in pool:
 		if grade == "PERFECT" or fish.rarity in ["COMMON","UNCOMMON","RARE"]: eligible.append(fish)
 	if eligible.is_empty(): eligible = pool
-	# Weighted rarity: epic/legendary stay special, while every map has commons.
-	var index := rng.randi_range(0, eligible.size()-1)
-	return eligible[index]
+	var bonus := float(BAITS[bait_index].rarity_bonus)
+	var total := 0.0
+	var weights: Array[float] = []
+	for fish in eligible:
+		var weight := 1.0
+		match str(fish.rarity):
+			"UNCOMMON": weight += bonus * 0.8
+			"RARE": weight += bonus * 1.8
+			"EPIC": weight += bonus * 3.0
+			"LEGENDARY": weight += bonus * 4.0
+		weights.append(weight); total += weight
+	var roll := rng.randf() * total
+	for i in range(eligible.size()):
+		roll -= weights[i]
+		if roll <= 0.0: return eligible[i]
+	return eligible.back()
+
+func bait_name() -> String: return str(BAITS[bait_index].name)
+func rod_name() -> String: return str(RODS[rod_index].name)
+func cycle_bait(step: int = 1) -> void:
+	if fishing_state != FishingState.IDLE: return
+	bait_index = posmod(bait_index + step, BAITS.size())
+	toast = "%s selected (%d shells, rarity +%d%%)" % [bait_name(), int(BAITS[bait_index].cost), int(BAITS[bait_index].rarity_bonus * 100.0)]
+	toast_t = 2.0
+func cycle_rod(step: int = 1) -> void:
+	if fishing_state != FishingState.IDLE: return
+	rod_index = posmod(rod_index + step, RODS.size())
+	toast = "%s selected (line strain x%.2f)" % [rod_name(), float(RODS[rod_index].tension_mult)]
+	toast_t = 2.0
 
 func _try_fish():
 	if notebook_open: return
@@ -374,6 +415,11 @@ func _try_fish():
 		return
 	if fishing_state != FishingState.IDLE: return
 	if _can_fish():
+		var bait_cost := int(BAITS[bait_index].cost)
+		if shells < bait_cost:
+			toast = "Need %d shells for %s (you have %d)" % [bait_cost, bait_name(), shells]; toast_t = 2.5
+			return
+		shells -= bait_cost
 		fishing_state = FishingState.ANTICIPATING
 		promotion_t = 0.0
 		promotion_stage = 0
@@ -409,7 +455,7 @@ func _process_fishing(delta: float):
 			pull_cooldown = 1.0
 			perfect_pulls = 0
 			direction_timer = 2.0
-			battle_tension = 0.22
+			battle_tension = clampf(0.22 + float(BAITS[bait_index].tension_bonus), 0.0, 0.9)
 			battle_escape = 0.0
 			battle_direction = -1.0 if rng.randf() < 0.5 else 1.0
 			timing_timer = 20.0
@@ -448,8 +494,8 @@ func _process_fishing(delta: float):
 		if fishing_challenge != null and not fishing_challenge.done:
 			fishing_challenge.tick(delta, counter)
 			challenge_hint_t = maxf(0.0, challenge_hint_t-delta)
-		battle_escape = clampf(battle_escape + delta * (-0.035 if countering else (0.095 if straining else 0.055)), 0.0, 1.0)
-		battle_tension = clampf(battle_tension + delta * (-0.045 if countering else (0.07 if straining else -0.014)), 0.0, 1.0)
+		battle_escape = clampf(battle_escape + delta * (-0.035 if countering else (0.095 if straining else 0.055)) * float(RODS[rod_index].escape_mult), 0.0, 1.0)
+		battle_tension = clampf(battle_tension + delta * (-0.045 if countering else (0.07 if straining else -0.014)) * float(RODS[rod_index].tension_mult), 0.0, 1.0)
 		gauge += delta * (1.25 + battle_tension * 0.75) * gauge_direction
 		if gauge >= 1.0: gauge = 1.0; gauge_direction = -1.0
 		if gauge <= 0.0: gauge = 0.0; gauge_direction = 1.0
@@ -565,6 +611,7 @@ func _resolve_fishing_timing(position: float):
 	_music_call("set_combo", [combo])
 	_music_call("play_fanfare", [legendary])
 	fish_count += 1
+	shells += 1
 	catches[last_catch] = int(catches.get(last_catch,0))+1
 	fishing_state = FishingState.RESULT
 	cast_timer = 0.0
@@ -609,7 +656,7 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	if position >= 0.42 and position <= 0.62: grade = "PERFECT"
 	elif position >= 0.26 and position <= 0.80: grade = "GOOD"
 	if grade == "MISS":
-		battle_tension = clampf(battle_tension + 0.33, 0.0, 1.0)
+		battle_tension = clampf(battle_tension + 0.33 * float(RODS[rod_index].tension_mult), 0.0, 1.0)
 		battle_escape = clampf(battle_escape + 0.16, 0.0, 1.0)
 		shake_t = 0.28
 		_play_se("danger")
@@ -727,7 +774,7 @@ func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		toast = "Could not save. Please check available storage."; toast_t = 4; return
-	f.store_string(JSON.stringify({"version":4,"map":current_map,"day":day,"time":time_of_day,"fish":fish_count,"x":player.x,"y":player.y,"catches":catches,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected}))
+	f.store_string(JSON.stringify({"version":5,"map":current_map,"day":day,"time":time_of_day,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected}))
 	toast = "Saved to the tide ledger"; toast_t = 2.4
 
 func _load_game(path: String = SAVE_PATH):
@@ -738,6 +785,9 @@ func _load_game(path: String = SAVE_PATH):
 	if loaded_map in ["town","beach","rocky"] and loaded_map != current_map:
 		current_map = loaded_map; _build_map(current_map)
 	day = maxi(1,int(data.get("day",1))); fish_count = maxi(0,int(data.get("fish",0)))
+	shells = maxi(0, int(data.get("shells", 12)))
+	bait_index = clampi(int(data.get("bait", 0)), 0, BAITS.size()-1)
+	rod_index = clampi(int(data.get("rod", 0)), 0, RODS.size()-1)
 	time_of_day = clampf(float(data.get("time",0.35)),0.0,1.0)
 	var saved_pos := Vector2(float(data.get("x",368)),float(data.get("y",372)))
 	if _walkable(saved_pos): player = saved_pos
@@ -905,9 +955,9 @@ func _text(pos: Vector2, value: String, size := 11, paper := false):
 func _draw_hud():
 	_panel(Rect2(8,8,174,34))
 	_text(Vector2(16,22),"SALTMERE  /  " + _map_display_name(),11)
-	_text(Vector2(16,35),"Day %02d    Fish %02d" % [day,fish_count],10)
+	_text(Vector2(16,35),"Day %02d    Fish %02d  Shells %02d" % [day,fish_count,shells],10)
 	_panel(Rect2(294,8,178,22))
-	_text(Vector2(302,23),"[N] Ledger   [F6] Save",10)
+	_text(Vector2(302,23),"[N] Ledger   [B] Bait: %s   [R] Rod: %s" % [bait_name(), rod_name()],10)
 	_panel(Rect2(8,244,464,19))
 	_text(Vector2(15,257),toast if toast_t>0 else _map_hint(),10)
 	var nearby_exit := _exit_hint()
@@ -915,7 +965,7 @@ func _draw_hud():
 		_panel(Rect2(286,218,184,20))
 		_text(Vector2(294,232),nearby_exit,10)
 	if _can_fish() and not notebook_open and fishing_state == FishingState.IDLE:
-		_panel(Rect2(172,218,138,20)); _text(Vector2(182,232),"SPACE  Cast your line",11)
+		_panel(Rect2(172,218,138,20)); _text(Vector2(182,232),"SPACE Cast  /  B bait  /  R rod",10)
 	if fishing_state == FishingState.ANTICIPATING or fishing_state == FishingState.TIMING:
 		_draw_fishing_hud()
 	elif fishing_state == FishingState.RESULT:
