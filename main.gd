@@ -511,10 +511,16 @@ func get_catch_metadata(species: String) -> Dictionary:
 func _ledger_marker(species: String, owned: int) -> String:
 	if owned <= 0: return "?"
 	var metadata := get_first_capture_metadata(species)
-	if bool(metadata.get("mystery", false)): return "?"
+	return _metadata_marker(metadata)
+
+func _metadata_marker(metadata: Dictionary) -> String:
+	# Mystery takes precedence over cosmetic variants.  Keep the fallback marker
+	# explicit so old/hand-authored saves still render an unknown catch clearly.
+	if bool(metadata.get("mystery", false)):
+		var mystery_marker := str(metadata.get("mystery_marker", "?"))
+		return mystery_marker if mystery_marker != "" else "?"
 	var variant_marker := str(metadata.get("variant_marker", ""))
-	if variant_marker != "": return variant_marker
-	return ""
+	return variant_marker
 
 func bait_name() -> String: return str(BAITS[bait_index].name)
 func rod_name() -> String: return str(RODS[rod_index].name)
@@ -1366,7 +1372,10 @@ func _draw_standard_reveal_result():
 		_center_text(207, "TURNING THE CARD...", 10, Color("#e3e7ee"))
 	else:
 		_center_text(62, last_rarity, 16, rarity_col.lightened(0.18))
-		var reveal_marker := _ledger_marker(last_catch, 1)
+		# Repeats can roll a different cosmetic variant; reveal the current catch
+		# marker while the ledger keeps its immutable first-capture marker.
+		var reveal_marker := _metadata_marker(last_catch_metadata)
+		if reveal_marker == "": reveal_marker = _ledger_marker(last_catch, 1)
 		var reveal_name := last_catch + (" " + reveal_marker if reveal_marker != "" else "")
 		_center_text(207, reveal_name, 19, Color("#fff0c6"))
 		_center_text(225, "%s  /  COMBO x%d" % [last_rarity, combo], 10, Color("#d3deec"))
@@ -1434,7 +1443,9 @@ func _draw_legendary_result():
 		hud.draw_line(Vector2(16,19),Vector2(464,19),Color("#ffe39a"),3)
 		hud.draw_line(Vector2(24,63),Vector2(456,63),Color("#ffe39a"),3)
 		_center_text(53,"LEGENDARY!!",35,Color("#fff4bd"))
-		_center_text(211,"RAINBOW KINGFISH",24,Color("#fff3c9"))
+		var legendary_marker := _metadata_marker(last_catch_metadata)
+		var legendary_name := "RAINBOW KINGFISH" + (" " + legendary_marker if legendary_marker != "" else "")
+		_center_text(211,legendary_name,24,Color("#fff3c9"))
 		_center_text(231,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
 		_center_text(245,"%.1f cm  /  %.2f kg  /  %s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant],9,Color("#d8d0ff"))
 		_center_text(258,"SPACE  continue",10,Color("#fff0d8"))
