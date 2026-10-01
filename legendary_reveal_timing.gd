@@ -17,3 +17,4 @@ static func stage_at(time: float) -> int:
 	if time < REVEAL_AT: return 4 # card back turns to its edge
 	if time < AFTERGLOW_AT: return 5 # face opens into the rainbow climax
 	return 6 # sustained afterglow
+
