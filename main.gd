@@ -2,6 +2,7 @@ extends Node2D
 
 const FishingChallengeScript = preload("res://fishing_challenge.gd")
 const MusicDirectorScript = preload("res://audio/music_director.gd")
+const LegendaryRevealTiming = preload("res://legendary_reveal_timing.gd")
 
 # The tide ledger treats every species as a small collectable card.  The
 # portraits are intentionally compact, palette-limited PNGs so they stay crisp
@@ -430,25 +431,23 @@ func _process_fishing(delta: float):
 			_reset_fishing()
 		if last_rarity == "LEGENDARY":
 			var previous_legendary_t := legendary_t
-			legendary_t = minf(legendary_t + delta, 6.0)
-			# Keep the generic reveal state in sync for deterministic probes and
-			# future result skins; legendary keeps its established six-second arc.
+			legendary_t = minf(legendary_t + delta, LegendaryRevealTiming.DURATION)
 			reveal_t = legendary_t
 			reveal_stage = _reveal_stage_at(reveal_t, last_rarity)
-			# The catch is deliberately paced: a small omen, rising energy, a
-			# full-screen climax, then a long rainbow afterglow.
-			if previous_legendary_t < 0.82 and legendary_t >= 0.82:
-				legendary_stage = maxi(legendary_stage, 1)
+			legendary_stage = reveal_stage
+			if previous_legendary_t < LegendaryRevealTiming.RARITY_AT and legendary_t >= LegendaryRevealTiming.RARITY_AT:
+				_play_se("seal")
+			if previous_legendary_t < LegendaryRevealTiming.RISE_AT and legendary_t >= LegendaryRevealTiming.RISE_AT:
 				_play_se("rise")
-				flash_t = maxf(flash_t, 0.42)
-				shake_t = maxf(shake_t, 0.65)
-			if previous_legendary_t < 2.05 and legendary_t >= 2.05:
-				legendary_stage = maxi(legendary_stage, 2)
+			if previous_legendary_t < LegendaryRevealTiming.HOLD_AT and legendary_t >= LegendaryRevealTiming.HOLD_AT:
+				_play_se("suspense")
+			if previous_legendary_t < LegendaryRevealTiming.FLIP_AT and legendary_t >= LegendaryRevealTiming.FLIP_AT:
+				_play_se("flip")
+			if previous_legendary_t < LegendaryRevealTiming.REVEAL_AT and legendary_t >= LegendaryRevealTiming.REVEAL_AT:
 				_play_se("peak")
-				flash_t = maxf(flash_t, 1.35)
-				shake_t = maxf(shake_t, 1.8)
-			if previous_legendary_t < 3.75 and legendary_t >= 3.75:
-				legendary_stage = maxi(legendary_stage, 3)
+				shake_t = maxf(shake_t, 0.7)
+				toast = "BIG CATCH!!  " + last_catch + "  /  SPACE to continue"
+			if previous_legendary_t < LegendaryRevealTiming.AFTERGLOW_AT and legendary_t >= LegendaryRevealTiming.AFTERGLOW_AT:
 				_play_se("after")
 		elif last_grade != "MISS":
 			var previous_reveal_t := reveal_t
@@ -466,10 +465,7 @@ func _process_fishing(delta: float):
 # standard catches fit the same two-second result window they had before.
 func _reveal_stage_at(time: float, rarity: String) -> int:
 	if rarity == "LEGENDARY":
-		if time < 0.82: return 0 # unknown omen
-		if time < 2.05: return 1 # rarity and energy rising
-		if time < 3.75: return 2 # full-screen reveal
-		return 3 # afterglow
+		return LegendaryRevealTiming.stage_at(time)
 	if time < 0.42: return 0 # card back and ???
 	if time < 0.82: return 1 # rarity seal
 	if time < 1.42: return 2 # growing silhouette/light
@@ -480,9 +476,12 @@ func reveal_stage_name() -> String:
 	if last_rarity == "LEGENDARY":
 		match reveal_stage:
 			0: return "UNKNOWN"
-			1: return "RISING"
-			2: return "CLIMAX"
-			3: return "AFTERGLOW"
+			1: return "RARITY"
+			2: return "RISING"
+			3: return "HOLD"
+			4: return "FLIPPING"
+			5: return "CLIMAX"
+			6: return "AFTERGLOW"
 			_: return "UNKNOWN"
 	match reveal_stage:
 		0: return "UNKNOWN"
@@ -567,11 +566,11 @@ func _resolve_fishing_timing(position: float):
 	legendary_stage = 0
 	reveal_t = 0.0
 	reveal_stage = 0
-	result_t = 6.2 if last_rarity == "LEGENDARY" else 2.0
+	result_t = LegendaryRevealTiming.DURATION if legendary else 2.0
 	flash_t = 0.90 if last_rarity == "LEGENDARY" else (0.32 if last_rarity == "RARE" else 0.18)
 	shake_t = 1.10 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
-	_play_se("catch" if last_rarity != "LEGENDARY" else "legendary")
-	toast = ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch + "  /  SPACE to cast again"
+	_play_se("omen" if legendary else "catch")
+	toast = "A sealed catch... something waits inside" if legendary else grade + "!  " + last_catch + "  /  SPACE to cast again"
 	toast_t = result_t
 
 func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
@@ -663,6 +662,14 @@ func _play_se(kind: String):
 			base = 520.0; duration = 0.34; volume = 0.26; sweep = 180.0; tones = [780.0]
 		"legendary":
 			base = 330.0; duration = 0.52; volume = 0.36; sweep = 260.0; tones = [495.0, 660.0, 990.0]
+		"omen":
+			base = 146.8; duration = 0.56; volume = 0.24; sweep = 18.0; tones = [220.0]
+		"seal":
+			base = 440.0; duration = 0.42; volume = 0.26; tones = [660.0, 880.0]
+		"suspense":
+			base = 110.0; duration = 0.28; volume = 0.12; sweep = -22.0
+		"flip":
+			base = 350.0; duration = 0.32; volume = 0.27; sweep = 880.0
 		"rise":
 			base = 620.0; duration = 0.44; volume = 0.38; sweep = 480.0; tones = [930.0, 1240.0]
 		"peak":
