@@ -57,11 +57,22 @@ func run():
 	game.rng.seed=2026
 	game._finish_cast()
 	check(game.catches.size()>=1,'catch recorded in ledger')
+	var first_species: String = str(game.last_catch)
+	var first_meta: Dictionary = game.get_first_capture_metadata(first_species)
+	check(first_meta.has('day') and first_meta.has('map') and first_meta.has('spot'),'first capture stores where and when')
+	check(float(first_meta.get('size_cm',0.0))>0.0 and float(first_meta.get('weight_kg',0.0))>0.0,'first capture stores size and weight variation')
+	check(first_meta.has('variant') and first_meta.has('mystery_marker'),'first capture stores variant and mystery markers')
+	var first_size := float(first_meta.get('size_cm',0.0))
+	# A repeat updates the current reveal while leaving the discovery record intact.
+	game._record_catch_metadata({'name':first_species,'rarity':str(first_meta.get('rarity','COMMON'))},'GOOD')
+	check(is_equal_approx(float(game.get_first_capture_metadata(first_species).get('size_cm',0.0)),first_size) and game.catch_latest.has(first_species),'first capture metadata is immutable across repeats')
 	var saved_fish=game.fish_count
 	game._save_game('user://smoke-test.json')
 	game.player=Vector2(368,372); game.fish_count=999; game.catches={}
+	game.catch_metadata={}; game.first_capture_metadata={}; game.catch_latest={}
 	game._load_game('user://smoke-test.json')
 	check(game.fish_count==saved_fish and game.catches.size()>=1,'save restores ledger and count')
+	check(game.get_first_capture_metadata(first_species).has('size_cm') and is_equal_approx(float(game.get_first_capture_metadata(first_species).get('size_cm',0.0)),first_size),'save restores first capture metadata')
 	check(game.player.distance_to(Vector2(500,530))<2,'save restores valid position')
 	game.player=Vector2(368,372); game.cast_timer=0; game._try_fish()
 	check(game.cast_timer==0,'inland cast rejected')

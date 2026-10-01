@@ -50,6 +50,18 @@ var walking := false
 var elapsed := 0.0
 var cast_timer := 0.0
 var catches: Dictionary = {}
+# Catch depth lives alongside the compact species -> count ledger.  The first
+# record is intentionally immutable so a repeat catch cannot erase the moment
+# a species was discovered.  `catch_latest` powers the current reveal while
+# `catch_metadata`/`first_capture_metadata` are the durable first-capture API.
+var catch_metadata: Dictionary = {}
+var first_capture_metadata: Dictionary = {}
+var catch_latest: Dictionary = {}
+var last_catch_metadata: Dictionary = {}
+var last_catch_size_cm := 0.0
+var last_catch_weight_kg := 0.0
+var last_catch_variant := "Standard"
+var last_catch_mystery := false
 # Expanded coastal field guide: five original entries plus eighteen approved species.
 const FISH_SPECIES: Array[Dictionary] = [
  {"name":"Silver sprat","rarity":"COMMON","maps":["town","beach"]}, {"name":"Sand goby","rarity":"COMMON","maps":["town","beach"]}, {"name":"Moonfin trout","rarity":"RARE","maps":["beach","rocky"]}, {"name":"Old boot","rarity":"COMMON","maps":["town"]}, {"name":"Rainbow Kingfish","rarity":"LEGENDARY","maps":["rocky"]},
@@ -401,6 +413,109 @@ func _pick_species(grade: String) -> Dictionary:
 		if roll <= 0.0: return eligible[i]
 	return eligible.back()
 
+# Keep the variation ranges deliberately broad but believable.  They are
+# derived from rarity rather than adding 23 hand-maintained fields to the
+# species cards, so old saves and future species remain compatible.
+func _fish_size_range(rarity: String) -> Vector2:
+	match rarity:
+		"UNCOMMON": return Vector2(24.0, 54.0)
+		"RARE": return Vector2(36.0, 76.0)
+		"EPIC": return Vector2(52.0, 104.0)
+		"LEGENDARY": return Vector2(88.0, 168.0)
+		_: return Vector2(14.0, 38.0)
+
+func _fish_weight_range(rarity: String) -> Vector2:
+	match rarity:
+		"UNCOMMON": return Vector2(0.35, 1.65)
+		"RARE": return Vector2(0.80, 3.80)
+		"EPIC": return Vector2(2.20, 8.80)
+		"LEGENDARY": return Vector2(7.50, 24.0)
+		_: return Vector2(0.08, 0.72)
+
+func _nearest_fishing_spot_label() -> String:
+	var nearest := "Open water"
+	var distance := INF
+	for spot in _fishing_spots():
+		var d := player.distance_to(spot.pos)
+		if d < distance:
+			distance = d
+			nearest = str(spot.label)
+	return nearest
+
+func _roll_catch_variant(rarity: String, grade: String) -> Dictionary:
+	# Variants are light-touch markers, not a second rarity system.  A perfect
+	# pull gives a small shimmer chance and the rarer cards can very occasionally
+	# receive the gilded marker.  The mystery flag is retained for the ledger so
+	# callers can render an unknown marker without exposing hidden species data.
+	var variant := "Standard"
+	var variant_marker := ""
+	var roll := rng.randf()
+	if roll < (0.035 if rarity in ["EPIC", "LEGENDARY"] else 0.018):
+		variant = "Gilded"
+		variant_marker = "!"
+	elif roll < (0.16 if grade == "PERFECT" else 0.09):
+		variant = "Shimmer"
+		variant_marker = "~"
+	return {"variant":variant,"variant_marker":variant_marker,"mystery":false,"mystery_marker":""}
+
+func _capture_metadata(fish: Dictionary, grade: String) -> Dictionary:
+	var rarity := str(fish.get("rarity", "COMMON"))
+	var size_range := _fish_size_range(rarity)
+	var weight_range := _fish_weight_range(rarity)
+	var variant_data := _roll_catch_variant(rarity, grade)
+	var size_cm := snappedf(rng.randf_range(size_range.x, size_range.y), 0.1)
+	var weight_kg := snappedf(rng.randf_range(weight_range.x, weight_range.y), 0.01)
+	var fish_name := str(fish.get("name", "Unknown catch"))
+	return {
+		"species": fish_name,
+		"rarity": rarity,
+		"size_cm": size_cm,
+		"weight_kg": weight_kg,
+		"variant": str(variant_data.variant),
+		"variant_marker": str(variant_data.variant_marker),
+		"mystery": bool(variant_data.mystery),
+		"mystery_marker": str(variant_data.mystery_marker),
+		"map": current_map,
+		"location": current_map,
+		"spot": _nearest_fishing_spot_label(),
+		"day": day,
+		"time": time_of_day,
+		"grade": grade,
+		"first_capture": true
+	}
+
+func _record_catch_metadata(fish: Dictionary, grade: String) -> Dictionary:
+	var fish_name := str(fish.get("name", "Unknown catch"))
+	var metadata := _capture_metadata(fish, grade)
+	# First-capture metadata is immutable.  The latest record still changes on
+	# every catch, allowing each reveal to show its own size and variant.
+	if not catch_metadata.has(fish_name):
+		catch_metadata[fish_name] = metadata.duplicate(true)
+		first_capture_metadata[fish_name] = metadata.duplicate(true)
+	else:
+		metadata["first_capture"] = false
+	catch_latest[fish_name] = metadata.duplicate(true)
+	last_catch_metadata = metadata.duplicate(true)
+	last_catch_size_cm = float(metadata.get("size_cm", 0.0))
+	last_catch_weight_kg = float(metadata.get("weight_kg", 0.0))
+	last_catch_variant = str(metadata.get("variant", "Standard"))
+	last_catch_mystery = bool(metadata.get("mystery", false))
+	return metadata
+
+func get_first_capture_metadata(species: String) -> Dictionary:
+	return (first_capture_metadata.get(species, {}) as Dictionary).duplicate(true)
+
+func get_catch_metadata(species: String) -> Dictionary:
+	return (catch_metadata.get(species, {}) as Dictionary).duplicate(true)
+
+func _ledger_marker(species: String, owned: int) -> String:
+	if owned <= 0: return "?"
+	var metadata := get_first_capture_metadata(species)
+	if bool(metadata.get("mystery", false)): return "?"
+	var variant_marker := str(metadata.get("variant_marker", ""))
+	if variant_marker != "": return variant_marker
+	return ""
+
 func bait_name() -> String: return str(BAITS[bait_index].name)
 func rod_name() -> String: return str(RODS[rod_index].name)
 func cycle_bait(step: int = 1) -> void:
@@ -619,6 +734,11 @@ func _resolve_fishing_timing(position: float):
 		last_catch = "The fish got away"
 		last_rarity = ""
 		last_grade = grade
+		last_catch_metadata = {}
+		last_catch_size_cm = 0.0
+		last_catch_weight_kg = 0.0
+		last_catch_variant = "Standard"
+		last_catch_mystery = true
 		fishing_state = FishingState.RESULT
 		cast_timer = 0.0
 		result_t = 1.3
@@ -645,6 +765,7 @@ func _resolve_fishing_timing(position: float):
 	fish_count += 1
 	shells += 1
 	catches[last_catch] = int(catches.get(last_catch,0))+1
+	_record_catch_metadata(picked, grade)
 	fishing_state = FishingState.RESULT
 	cast_timer = 0.0
 	legendary_t = 0.0
@@ -784,6 +905,11 @@ func _reset_fishing():
 	last_grade = ""
 	last_catch = ""
 	last_rarity = ""
+	last_catch_metadata = {}
+	last_catch_size_cm = 0.0
+	last_catch_weight_kg = 0.0
+	last_catch_variant = "Standard"
+	last_catch_mystery = false
 	legendary_t = 0.0
 	legendary_stage = 0
 	reveal_t = 0.0
@@ -809,8 +935,27 @@ func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		toast = "Could not save. Please check available storage."; toast_t = 4; return
-	f.store_string(JSON.stringify({"version":6,"combo":combo,"fever_t":fever_t,"map":current_map,"day":day,"time":time_of_day,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected}))
+	f.store_string(JSON.stringify({"version":7,"combo":combo,"fever_t":fever_t,"map":current_map,"day":day,"time":time_of_day,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected}))
 	toast = "Saved to the tide ledger"; toast_t = 2.4
+
+func _normalize_catch_metadata(raw: Dictionary, species: String, first_capture := true) -> Dictionary:
+	var metadata := raw.duplicate(true)
+	metadata["species"] = str(metadata.get("species", species))
+	metadata["rarity"] = str(metadata.get("rarity", "COMMON"))
+	metadata["size_cm"] = maxf(0.0, float(metadata.get("size_cm", 0.0)))
+	metadata["weight_kg"] = maxf(0.0, float(metadata.get("weight_kg", 0.0)))
+	metadata["variant"] = str(metadata.get("variant", "Standard"))
+	metadata["variant_marker"] = str(metadata.get("variant_marker", ""))
+	metadata["mystery"] = bool(metadata.get("mystery", false))
+	metadata["mystery_marker"] = str(metadata.get("mystery_marker", ""))
+	metadata["map"] = str(metadata.get("map", metadata.get("location", "town")))
+	metadata["location"] = str(metadata.get("location", metadata["map"]))
+	metadata["spot"] = str(metadata.get("spot", "Open water"))
+	metadata["day"] = maxi(1, int(metadata.get("day", 1)))
+	metadata["time"] = clampf(float(metadata.get("time", 0.35)), 0.0, 1.0)
+	metadata["grade"] = str(metadata.get("grade", "GOOD"))
+	metadata["first_capture"] = first_capture
+	return metadata
 
 func _load_game(path: String = SAVE_PATH):
 	if not FileAccess.file_exists(path): return
@@ -827,6 +972,30 @@ func _load_game(path: String = SAVE_PATH):
 	var saved_pos := Vector2(float(data.get("x",368)),float(data.get("y",372)))
 	if _walkable(saved_pos): player = saved_pos
 	if data.get("catches",{}) is Dictionary: catches = data.get("catches",{})
+	catch_metadata.clear()
+	first_capture_metadata.clear()
+	catch_latest.clear()
+	var saved_metadata = data.get("catch_metadata", data.get("first_capture_metadata", {}))
+	if saved_metadata is Dictionary:
+		for species in saved_metadata:
+			if saved_metadata[species] is Dictionary:
+				var metadata := _normalize_catch_metadata(saved_metadata[species], str(species), true)
+				catch_metadata[str(species)] = metadata
+				first_capture_metadata[str(species)] = metadata.duplicate(true)
+	var saved_first = data.get("first_capture_metadata", {})
+	if saved_first is Dictionary:
+		for species in saved_first:
+			if saved_first[species] is Dictionary:
+				var first := _normalize_catch_metadata(saved_first[species], str(species), true)
+				first_capture_metadata[str(species)] = first
+				if not catch_metadata.has(str(species)): catch_metadata[str(species)] = first.duplicate(true)
+	var saved_latest = data.get("catch_latest", {})
+	if saved_latest is Dictionary:
+		for species in saved_latest:
+			if saved_latest[species] is Dictionary:
+				catch_latest[str(species)] = _normalize_catch_metadata(saved_latest[species], str(species), false)
+	for species in catch_metadata:
+		if not catch_latest.has(species): catch_latest[species] = catch_metadata[species].duplicate(true)
 	rumor_found = bool(data.get("rumor_found", false))
 	hidden_spot_unlocked = bool(data.get("hidden_spot_unlocked", rumor_found and fish_count >= 3))
 	hidden_spot_collected = bool(data.get("hidden_spot_collected", false))
@@ -1034,11 +1203,13 @@ func _draw_hud():
 			var owned := int(catches.get(str(fish.name),0))
 			var icon := Color("#b6c7d9") if owned == 0 else _rarity_color(str(fish.rarity))
 			hud.draw_rect(Rect2(x,y-9,8,8),icon)
+			var marker := _ledger_marker(str(fish.name), owned)
 			var display_name := str(fish.name) if owned > 0 else "????????"
+			if marker != "": display_name += " " + marker
 			_text(Vector2(x+11,y),display_name,8,true)
 			_text(Vector2(x+85,y),str(owned),8,true)
 		_text(Vector2(85,226),"Rumor: " + ("heard" if rumor_found else "find the weathered notice"),9,true)
-		_text(Vector2(85,239),"SPACE to cast  /  N to close",9,true)
+		_text(Vector2(85,239),"? mystery  ~ shimmer  ! gilded  /  N close",8,true)
 		_text(Vector2(85,218),"N to close  /  Movement pauses while reading",10,true)
 
 func _draw_fishing_hud():
@@ -1195,8 +1366,11 @@ func _draw_standard_reveal_result():
 		_center_text(207, "TURNING THE CARD...", 10, Color("#e3e7ee"))
 	else:
 		_center_text(62, last_rarity, 16, rarity_col.lightened(0.18))
-		_center_text(207, last_catch, 19, Color("#fff0c6"))
+		var reveal_marker := _ledger_marker(last_catch, 1)
+		var reveal_name := last_catch + (" " + reveal_marker if reveal_marker != "" else "")
+		_center_text(207, reveal_name, 19, Color("#fff0c6"))
 		_center_text(225, "%s  /  COMBO x%d" % [last_rarity, combo], 10, Color("#d3deec"))
+		_center_text(239, "%.1f cm  /  %.2f kg  /  %s%s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant, "  NEW" if bool(last_catch_metadata.get("first_capture", false)) else ""], 9, Color("#c8d8e8"))
 		_center_text(250, "SPACE  continue", 10, Color("#fff0d8"))
 	# A single low-alpha wash at the flip keeps the card readable and avoids
 	# the rapid flashing that makes ordinary catches tiring to watch.
@@ -1262,6 +1436,7 @@ func _draw_legendary_result():
 		_center_text(53,"LEGENDARY!!",35,Color("#fff4bd"))
 		_center_text(211,"RAINBOW KINGFISH",24,Color("#fff3c9"))
 		_center_text(231,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
+		_center_text(245,"%.1f cm  /  %.2f kg  /  %s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant],9,Color("#d8d0ff"))
 		_center_text(258,"SPACE  continue",10,Color("#fff0d8"))
 	# The fish grows from a dark silhouette to a full-width rainbow trophy.
 	var scale := 0.22 + rise * 0.55 + peak * 0.28
