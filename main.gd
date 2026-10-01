@@ -77,6 +77,14 @@ var hidden_spot_collected := false
 var promotion_t := 0.0
 var promotion_stage := 0
 var promotion_reversal := false
+var promotion_false_cue := false
+var promotion_false_cue_revealed := false
+var promotion_reversal_armed := false
+var promotion_cue_rank := 0
+var cast_candidate: Dictionary = {}
+var cast_good_candidate: Dictionary = {}
+var promotion_target_rarity := "COMMON"
+var promotion_result_label := ""
 # Fishing is a short, deterministic-feeling arcade loop: cast, wait for a bite,
 # then tap SPACE while the moving gauge crosses the sweet spot.
 enum FishingState { IDLE, ANTICIPATING, TIMING, RESULT }
@@ -102,6 +110,13 @@ var combo := 0
 const FEVER_THRESHOLD := 3
 const FEVER_DURATION := 30.0
 const FEVER_RARITY_BONUS := 0.5
+## Cue lies are calibrated per stage so a higher float stays more trustworthy.
+## Rarer fish are rare, so a flat lie rate would make rainbow mostly bait.
+const PROMOTION_FALSE_LOW_CHANCE := 0.18     # RARE+ candidate shows a lower cue (the 逆転 source)
+const PROMOTION_FALSE_PURPLE_CHANCE := 0.06  # COMMON/UNCOMMON candidate shows purple
+const PROMOTION_FALSE_RAINBOW_CHANCE := 0.02 # COMMON/UNCOMMON candidate shows rainbow
+const PROMOTION_REVERSAL_CHANCE := 0.24
+const RARITY_ORDER: Array[String] = ["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"]
 ## Soft pity is a transparent rescue hook for an unlucky run.  A miss or a
 ## low-grade (GOOD) catch advances the meter, but the player still has to land
 ## the next battle normally.  Once armed, the hook only changes the species
@@ -393,30 +408,42 @@ func _update_rumor_gate() -> void:
 	if hidden_spot_unlocked and current_map == "rocky" and player.distance_to(Vector2(690,520)) < 28.0:
 		hidden_spot_collected = true
 
+func _at_hidden_fishing_spot() -> bool:
+	# Aurora koi is tied to the grotto pool itself.  Visiting the grotto unlocks
+	# the pool for the run, but standing at another rocky shoreline must not
+	# silently include hidden fish in its species roll.
+	return current_map == "rocky" and hidden_spot_unlocked and hidden_spot_collected and player.distance_to(Vector2(690,520)) <= 24.0
+
 func _species_pool() -> Array[Dictionary]:
 	var pool: Array[Dictionary] = []
 	for fish in FISH_SPECIES:
-		if fish.maps.has(current_map) or (fish.maps.has("hidden") and hidden_spot_collected): pool.append(fish)
+		if fish.maps.has(current_map) or (fish.maps.has("hidden") and _at_hidden_fishing_spot()): pool.append(fish)
 	return pool
 
-func _pick_species(grade: String, apply_rescue := false) -> Dictionary:
+func _pick_species(grade: String, apply_rescue := false, exclude_legendary := false) -> Dictionary:
 	if apply_rescue: rescue_selection_used = false
 	var pool := _species_pool()
 	if pool.is_empty(): return FISH_SPECIES[0]
 	var eligible: Array[Dictionary] = []
 	for fish in pool:
+		if exclude_legendary and str(fish.get("rarity", "COMMON")) == "LEGENDARY": continue
 		if grade == "PERFECT" or fish.rarity in ["COMMON","UNCOMMON","RARE"]: eligible.append(fish)
 	if eligible.is_empty(): eligible = pool
 	var bonus := float(BAITS[bait_index].rarity_bonus) + (FEVER_RARITY_BONUS if fever_active else 0.0)
 	var total := 0.0
 	var weights: Array[float] = []
 	for fish in eligible:
-		var weight := 1.0
-		match str(fish.rarity):
-			"UNCOMMON": weight += bonus * 0.8
-			"RARE": weight += bonus * 1.8
-			"EPIC": weight += bonus * 3.0
-			"LEGENDARY": weight += bonus * 4.0
+		var weight := 100.0
+		var rarity := str(fish.rarity)
+		match rarity:
+			"UNCOMMON": weight = 40.0
+			"RARE": weight = 12.0
+			"EPIC": weight = 3.0
+			"LEGENDARY": weight = 0.5
+		# Bait and FEVER are intentionally rarity-sensitive.  Common fish keep
+		# their baseline weight, while the bonus increasingly favours a real
+		# upgrade instead of inflating every rarity by the same amount.
+		weight *= 1.0 + bonus * _rarity_bonus_scale(rarity)
 		weights.append(weight); total += weight
 	var roll := rng.randf() * total
 	for i in range(eligible.size()):
@@ -433,6 +460,117 @@ func _rarity_rank(rarity: String) -> int:
 		"RARE": return 2
 		"UNCOMMON": return 1
 		_: return 0
+
+func _rarity_bonus_scale(rarity: String) -> float:
+	match rarity:
+		"UNCOMMON": return 0.35
+		"RARE": return 0.85
+		"EPIC": return 1.25
+		"LEGENDARY": return 1.45
+		_: return 0.0
+
+func _legendary_chance_for_cast() -> float:
+	# The upcoming bite is eligible for a legendary only on Rocky Shore after
+	# the third chain catch.  FEVER and Moonseed each add a small, bounded nudge;
+	# together they cap the chance at 5% rather than making a legendary routine.
+	if current_map != "rocky" or combo + 1 < FEVER_THRESHOLD: return 0.0
+	var chance := 0.01
+	if fever_active: chance += 0.02
+	if bait_index == 2: chance += 0.02
+	return minf(chance, 0.05)
+
+func _pick_cast_candidate(apply_rescue := false) -> Dictionary:
+	# Keep the explicit legendary roll as the only way a cast can become
+	# legendary; the ordinary perfect-pool pick excludes legendary entries so its
+	# small base weight cannot bypass the five-percent cap.
+	var candidate := _pick_species("PERFECT", apply_rescue, true)
+	var chance := _legendary_chance_for_cast()
+	if chance > 0.0 and rng.randf() < chance:
+		var legendary_pool: Array[Dictionary] = []
+		for fish in _species_pool():
+			if str(fish.get("rarity", "COMMON")) == "LEGENDARY": legendary_pool.append(fish)
+		if not legendary_pool.is_empty():
+			# Preserve the existing grotto reward split: Aurora koi is a 35%
+			# hidden-spot reward, while Rainbow Kingfish remains the usual result.
+			if _at_hidden_fishing_spot() and rng.randf() < 0.35:
+				for fish in legendary_pool:
+					if str(fish.get("name", "")) == "Aurora koi":
+						candidate = fish
+						return candidate
+			for fish in legendary_pool:
+				if str(fish.get("name", "")) == "Rainbow Kingfish":
+					candidate = fish
+					return candidate
+			candidate = legendary_pool[0]
+	return candidate
+
+func _pick_good_substitute(candidate: Dictionary) -> Dictionary:
+	if _rarity_rank(str(candidate.get("rarity", "COMMON"))) <= _rarity_rank("RARE"):
+		return {}
+	var rare_pool: Array[Dictionary] = []
+	for fish in _species_pool():
+		if str(fish.get("rarity", "COMMON")) == "RARE": rare_pool.append(fish)
+	if rare_pool.is_empty(): return {}
+	# Drawn from the cast-time RNG, never at result time, so GOOD cannot add a
+	# second species roll and a seeded cast still reproduces its substitute.
+	# (Always taking the first RARE would funnel every downgrade into one fish.)
+	return rare_pool[rng.randi_range(0, rare_pool.size() - 1)].duplicate(true)
+
+func _candidate_for_grade(candidate: Dictionary, grade: String) -> Dictionary:
+	var resolved := candidate.duplicate(true)
+	# The cast roll is intentionally a PERFECT-pool candidate.  A GOOD timing
+	# result downgrades an EPIC/LEGENDARY candidate to the RARE substitute drawn
+	# at cast time, so a Legendary species never enters the ledger from a
+	# low-grade battle.
+	if grade == "GOOD" and _rarity_rank(str(resolved.get("rarity", "COMMON"))) > _rarity_rank("RARE"):
+		var original_rarity := str(resolved.get("rarity", "COMMON"))
+		var original_species := str(resolved.get("name", "Unknown catch"))
+		var substitute := cast_good_candidate.duplicate(true)
+		if substitute.is_empty(): substitute = _pick_good_substitute(resolved)
+		if not substitute.is_empty():
+			substitute["original_rarity"] = original_rarity
+			substitute["downgraded_from_species"] = original_species
+			resolved = substitute
+	return resolved
+
+func _promotion_max_stage(rarity: String) -> int:
+	var rank := _rarity_rank(rarity)
+	if rank <= 1: return 1 # COMMON / UNCOMMON: gold at most
+	if rank == 2: return 2 # RARE: purple at most
+	return 3 # EPIC / LEGENDARY: rainbow
+
+func _visible_promotion_stage() -> int:
+	var stage := promotion_stage
+	if promotion_reversal: stage = maxi(0, stage - 1)
+	return stage
+
+func _rarity_for_rank(rank: int) -> String:
+	return RARITY_ORDER[clampi(rank, 0, RARITY_ORDER.size() - 1)]
+
+func _final_cue_stage() -> int:
+	# The stage the float ends on once the wait is over: the cap of the cue rank,
+	# stepped back one stage while a reversal is showing.  Result labels compare
+	# the catch against this rather than against whichever frame the bite landed on.
+	var stage := _promotion_max_stage(_rarity_for_rank(promotion_cue_rank))
+	if promotion_reversal: stage = maxi(0, stage - 1)
+	return stage
+
+func _promotion_label_for(result_rarity: String, candidate_rarity: String) -> String:
+	var result_rank := _rarity_rank(result_rarity)
+	var result_stage := _promotion_max_stage(result_rarity)
+	var shown := _final_cue_stage()
+	if shown >= 2 and result_stage < shown:
+		# The float promised more than the catch delivered.  If the cast itself held
+		# a better fish and only the timing grade cost it, that is the player's near
+		# miss, not a lying cue.
+		if _rarity_rank(candidate_rarity) > result_rank:
+			return "惜しい!  PERFECTなら " + candidate_rarity
+		return "ガセ…"
+	# A reversal only counts when it hides something worth celebrating; a COMMON
+	# catch under a stepped-back float is just a COMMON catch.
+	if result_rank >= _rarity_rank("RARE") and result_stage > shown:
+		return "逆転!"
+	return ""
 
 func _apply_rescue_floor(candidate: Dictionary, eligible: Array[Dictionary], _grade: String) -> Dictionary:
 	# The rescue hook is intentionally conservative: it selects from the same
@@ -526,6 +664,8 @@ func _capture_metadata(fish: Dictionary, grade: String) -> Dictionary:
 	return {
 		"species": fish_name,
 		"rarity": rarity,
+		"original_rarity": str(fish.get("original_rarity", rarity)),
+		"downgraded_from_species": str(fish.get("downgraded_from_species", "")),
 		"size_cm": size_cm,
 		"weight_kg": weight_kg,
 		"variant": str(variant_data.variant),
@@ -608,6 +748,30 @@ func _try_fish():
 		promotion_t = 0.0
 		promotion_stage = 0
 		promotion_reversal = false
+		promotion_false_cue = false
+		promotion_false_cue_revealed = false
+		promotion_reversal_armed = false
+		promotion_result_label = ""
+		cast_candidate = _pick_cast_candidate(true)
+		cast_good_candidate = _pick_good_substitute(cast_candidate)
+		promotion_target_rarity = str(cast_candidate.get("rarity", "COMMON"))
+		promotion_cue_rank = _rarity_rank(promotion_target_rarity)
+		# The cue is decided once, at cast time.  A high-rarity candidate can
+		# occasionally look ordinary, and a common/uncommon candidate can flash a
+		# misleading high promotion.  No new random roll occurs while the float is
+		# moving, so the same cast always tells the same visual story.
+		var cue_roll := rng.randf()
+		if promotion_cue_rank >= 2:
+			if cue_roll < PROMOTION_FALSE_LOW_CHANCE:
+				promotion_false_cue = true
+				promotion_cue_rank = maxi(0, promotion_cue_rank - 2)
+		elif cue_roll < PROMOTION_FALSE_RAINBOW_CHANCE:
+			promotion_false_cue = true
+			promotion_cue_rank = 3
+		elif cue_roll < PROMOTION_FALSE_RAINBOW_CHANCE + PROMOTION_FALSE_PURPLE_CHANCE:
+			promotion_false_cue = true
+			promotion_cue_rank = 2
+		promotion_reversal_armed = rng.randf() < PROMOTION_REVERSAL_CHANCE
 		cast_timer = 1.8
 		bite_delay = rng.randf_range(0.72, 1.42)
 		bite_timer = 0.0
@@ -633,8 +797,12 @@ func _process_fishing(delta: float):
 		bite_timer += delta
 		promotion_t = bite_timer
 		var promotion_progress := clampf(bite_timer / maxf(0.01, bite_delay), 0.0, 1.0)
-		promotion_stage = 3 if promotion_progress >= 0.86 else (2 if promotion_progress >= 0.62 else (1 if promotion_progress >= 0.34 else 0))
-		if promotion_progress > 0.62 and promotion_progress < 0.76: promotion_reversal = true
+		var stage_bias := 0.12 * float(promotion_cue_rank)
+		var cue_progress := clampf(promotion_progress + stage_bias, 0.0, 1.0)
+		var raw_stage := 3 if cue_progress >= 0.86 else (2 if cue_progress >= 0.62 else (1 if cue_progress >= 0.34 else 0))
+		# The cue rank already carries any lie, so its cap is the only cap needed.
+		promotion_stage = mini(raw_stage, _promotion_max_stage(_rarity_for_rank(promotion_cue_rank)))
+		if promotion_reversal_armed and promotion_progress > 0.62 and promotion_progress < 0.76: promotion_reversal = true
 		cast_timer = maxf(0.0, cast_timer-delta)
 		if bite_timer >= bite_delay:
 			fishing_state = FishingState.TIMING
@@ -793,6 +961,8 @@ func _resolve_fishing_timing(position: float):
 	if position >= 0.42 and position <= 0.62: grade = "PERFECT"
 	elif position >= 0.26 and position <= 0.80: grade = "GOOD"
 	if grade == "MISS":
+		promotion_false_cue_revealed = promotion_false_cue
+		promotion_result_label = ""
 		_break_chain()
 		_advance_pity("MISS")
 		last_catch = "The fish got away"
@@ -819,12 +989,23 @@ func _resolve_fishing_timing(position: float):
 	if fever_started: _start_fever()
 	last_grade = grade
 	var rescue_was_ready := rescue_ready
-	rescue_selection_used = false
-	var picked := _pick_species(grade, true)
-	var legendary := grade == "PERFECT" and combo >= 3
-	if legendary and current_map != "rocky": legendary = false
-	if legendary and hidden_spot_collected and rng.randf() > 0.65: picked = FISH_SPECIES[22]
-	elif legendary: picked = FISH_SPECIES[4]
+	# The species roll belongs to the cast, not to the final timing frame.  This
+	# keeps the promotion cue, the revealed fish, and the ledger in lockstep.
+	# Timing still has explicit effects: PERFECT adopts the candidate as rolled
+	# (including the bounded legendary reveal), while GOOD swaps an EPIC/LEGENDARY
+	# candidate for a RARE and advances the rescue meter when appropriate.
+	promotion_false_cue_revealed = promotion_false_cue
+	var picked: Dictionary = cast_candidate.duplicate(true)
+	if picked.is_empty():
+		# Compatibility callers such as _finish_cast may resolve without opening a
+		# visible anticipation state first.  Establish the candidate once, then use
+		# that same dictionary for the result.
+		picked = _pick_cast_candidate(rescue_was_ready)
+		cast_candidate = picked.duplicate(true)
+	var candidate_rarity := str(picked.get("rarity", "COMMON"))
+	picked = _candidate_for_grade(picked, grade)
+	var legendary := grade == "PERFECT" and str(picked.get("rarity", "COMMON")) == "LEGENDARY"
+	promotion_result_label = _promotion_label_for(str(picked.get("rarity", "COMMON")), candidate_rarity)
 	last_catch = str(picked.name)
 	last_rarity = str(picked.rarity)
 	last_rescue_used = rescue_was_ready and rescue_selection_used and _rarity_rank(last_rarity) >= _rarity_rank("RARE")
@@ -1007,6 +1188,15 @@ func _reset_fishing():
 	challenge_strength = 1
 	challenge_round_event = ""
 	challenge_hint_t = 0.0
+	cast_candidate = {}
+	cast_good_candidate = {}
+	promotion_target_rarity = "COMMON"
+	promotion_cue_rank = 0
+	promotion_false_cue = false
+	promotion_false_cue_revealed = false
+	promotion_reversal_armed = false
+	promotion_reversal = false
+	promotion_result_label = ""
 	toast = "Ready to cast"
 	toast_t = 1.2
 
@@ -1021,6 +1211,8 @@ func _normalize_catch_metadata(raw: Dictionary, species: String, first_capture :
 	var metadata := raw.duplicate(true)
 	metadata["species"] = str(metadata.get("species", species))
 	metadata["rarity"] = str(metadata.get("rarity", "COMMON"))
+	metadata["original_rarity"] = str(metadata.get("original_rarity", metadata["rarity"]))
+	metadata["downgraded_from_species"] = str(metadata.get("downgraded_from_species", ""))
 	metadata["size_cm"] = maxf(0.0, float(metadata.get("size_cm", 0.0)))
 	metadata["weight_kg"] = maxf(0.0, float(metadata.get("weight_kg", 0.0)))
 	metadata["variant"] = str(metadata.get("variant", "Standard"))
@@ -1121,10 +1313,10 @@ func _draw():
 		draw_line(player.round()+Vector2(7,-9),player.round()+Vector2(12,-23),Color("#80674a"))
 		draw_line(player.round()+Vector2(12,-23),float_pos,Color("#d1d6b2"))
 		var float_color := Color("#6db7ff")
-		if promotion_stage == 1: float_color = Color("#f0c65a")
-		elif promotion_stage == 2: float_color = Color("#b383ff")
-		elif promotion_stage >= 3: float_color = Color.from_hsv(fmod(elapsed*0.22,1.0),0.72,1.0)
-		if promotion_reversal: float_color = Color("#f7f0cb")
+		var visible_stage := _visible_promotion_stage()
+		if visible_stage == 1: float_color = Color("#f0c65a")
+		elif visible_stage == 2: float_color = Color("#b383ff")
+		elif visible_stage >= 3: float_color = Color.from_hsv(fmod(elapsed*0.22,1.0),0.72,1.0)
 		draw_circle(float_pos+Vector2(1,1),3.0+sin(elapsed*10)*1.2,float_color)
 
 func _exit_markers() -> Array[Dictionary]:
@@ -1314,10 +1506,9 @@ func _draw_fishing_hud():
 	if fishing_state == FishingState.ANTICIPATING:
 		var p := clampf(bite_timer / maxf(0.01,bite_delay), 0.0, 1.0)
 		hud_bar(Vector2(114,98),Vector2(252,8),p,Color("#6c9b91"))
-		var cue: String = ["FLOAT BLUE  /  quiet water", "FLOAT GOLD  /  promotion cue", "FLOAT PURPLE  /  hold your breath", "RAINBOW PROMOTION  /  BITE!"][promotion_stage]
-		if promotion_reversal: cue = "FALSE CUE — the float reverses"
+		var cue: String = ["FLOAT BLUE  /  quiet water", "FLOAT GOLD  /  promotion cue", "FLOAT PURPLE  /  hold your breath", "RAINBOW PROMOTION  /  BITE!"][_visible_promotion_stage()]
 		_text(Vector2(114,123), cue, 10)
-		_text(Vector2(114,137), "A staged promotion can still become a false cue", 8)
+		_text(Vector2(114,137), "Read the float, then trust your timing", 8)
 	else:
 		if challenge_live:
 			_text(Vector2(114,86), fishing_challenge.round_label(), 9)
@@ -1387,12 +1578,16 @@ func _draw_fishing_result():
 		_text(Vector2(116,133),last_rarity + "  /  COMBO x" + str(combo),13 if last_rarity == "LEGENDARY" else 11)
 	else:
 		_text(Vector2(116,133),"Combo reset",11)
-	_text(Vector2(116,155),"SPACE  cast again",11)
+	if promotion_result_label != "" or promotion_false_cue_revealed:
+		_text(Vector2(116,147),promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED",9)
+		_text(Vector2(116,160),"SPACE  cast again",10)
+	else:
+		_text(Vector2(116,155),"SPACE  cast again",11)
 	if flash_t > 0.0:
 		hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.9,0.55,flash_t*0.28))
 	if last_grade != "MISS":
 		var sparkle_color := Color("#ffffff") if last_rarity == "LEGENDARY" else (Color("#f8dc75") if last_rarity == "RARE" else Color("#c6e6b7"))
-		var sparkle_count := 28 if last_rarity == "LEGENDARY" else (14 if last_rarity == "RARE" else 7)
+		var sparkle_count := 28 if last_rarity == "LEGENDARY" else (20 if last_rarity == "EPIC" else (14 if last_rarity == "RARE" else 7))
 		for i in range(sparkle_count):
 			var a := fish_particle_t*2.0 + float(i)*TAU/float(sparkle_count)
 			var q := Vector2(240,108) + Vector2(cos(a),sin(a))* (42.0 + sin(fish_particle_t*5.0+i)*5.0)
@@ -1460,7 +1655,11 @@ func _draw_standard_reveal_result():
 		_center_text(207, reveal_name, 19, Color("#fff0c6"))
 		_center_text(225, "%s  /  COMBO x%d" % [last_rarity, combo], 10, Color("#d3deec"))
 		_center_text(239, "%.1f cm  /  %.2f kg  /  %s%s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant, "  NEW" if bool(last_catch_metadata.get("first_capture", false)) else ""], 9, Color("#c8d8e8"))
-		_center_text(250, "SPACE  continue", 10, Color("#fff0d8"))
+		if promotion_result_label != "" or promotion_false_cue_revealed:
+			_center_text(250, promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED", 9, Color("#f7f0cb"))
+			_center_text(260, "SPACE  continue", 9, Color("#fff0d8"))
+		else:
+			_center_text(250, "SPACE  continue", 10, Color("#fff0d8"))
 	# A single low-alpha wash at the flip keeps the card readable and avoids
 	# the rapid flashing that makes ordinary catches tiring to watch.
 	if t >= 1.42 and t < 1.78:
@@ -1524,11 +1723,14 @@ func _draw_legendary_result():
 		hud.draw_line(Vector2(24,63),Vector2(456,63),Color("#ffe39a"),3)
 		_center_text(53,"LEGENDARY!!",35,Color("#fff4bd"))
 		var legendary_marker := _metadata_marker(last_catch_metadata)
-		var legendary_name := "RAINBOW KINGFISH" + (" " + legendary_marker if legendary_marker != "" else "")
+		var legendary_name := str(last_catch).to_upper() + (" " + legendary_marker if legendary_marker != "" else "")
 		_center_text(211,legendary_name,24,Color("#fff3c9"))
 		_center_text(231,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
 		_center_text(245,"%.1f cm  /  %.2f kg  /  %s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant],9,Color("#d8d0ff"))
-		_center_text(258,"SPACE  continue",10,Color("#fff0d8"))
+		if promotion_result_label != "" or promotion_false_cue_revealed:
+			_center_text(258,(promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED") + "  /  SPACE",9,Color("#f7f0cb"))
+		else:
+			_center_text(258,"SPACE  continue",10,Color("#fff0d8"))
 	# The fish grows from a dark silhouette to a full-width rainbow trophy.
 	var scale := 0.22 + rise * 0.55 + peak * 0.28
 	var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])

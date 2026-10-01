@@ -34,7 +34,7 @@ NPC schedules, quests, and the wider offshore/lighthouse progression remain futu
 
 ## Expanded field guide and hidden tide loop
 
-The rebuilt slice includes 23 fish cards across Saltmere town, Amber Beach, and Rocky Shore, with COMMON, UNCOMMON, RARE, EPIC, and LEGENDARY rarity. The ledger opens as a three-column field guide with fallback card portraits for undiscovered species. Casting uses staged promotion cues (blue, gold, purple, rainbow), including a readable false-cue reversal before the bite.
+The rebuilt slice includes 23 fish cards across Saltmere town, Amber Beach, and Rocky Shore, with COMMON, UNCOMMON, RARE, EPIC, and LEGENDARY rarity. The ledger opens as a three-column field guide with fallback card portraits for undiscovered species. Casting rolls one PERFECT-pool candidate up front. PERFECT timing keeps that candidate; GOOD timing swaps an EPIC/LEGENDARY candidate for a RARE drawn from the map's RARE pool at cast time, so low-grade results never register a Legendary species. Staged promotion cues are capped by the cue's rank (gold for COMMON/UNCOMMON, purple for RARE, rainbow for EPIC/LEGENDARY). Lies are calibrated per stage so a higher float stays more trustworthy: a RARE+ fish can look one or two stages lower (18%), while a COMMON/UNCOMMON fish shows purple 6% of the time and rainbow only 2%. A reversal (24% of casts) steps the float back one stage mid-wait. The result card names what happened: “逆転!” when a RARE+ catch beat the float, “ガセ…” when the float promised more than the catch, and “惜しい! PERFECTなら …” when an honest cue was cut down by a GOOD pull.
 
 A weathered notice beside the Saltmere sign starts Issue #1's rumor loop. After the rumor is heard and three catches are collected, Moonlit Grotto appears as a distinct rocky-shore fishing pool; visiting it completes discovery and can surface Aurora koi.
 
@@ -42,9 +42,14 @@ A weathered notice beside the Saltmere sign starts Issue #1's rumor loop. After 
 
 Three consecutive catches activate a 30-second FEVER window. The HUD shows chain
 progress and remaining time; a warm flash, original chime, and full music layers
-announce activation. FEVER increases higher-rarity weights alongside the selected
-bait, while keeping the map pool and grade eligibility unchanged. Catches do not
-refresh the timer. A lost fish or elapsed FEVER window resets the chain. Reading
+announce activation. FEVER and bait use rarity-sensitive weights: common fish
+retain their baseline, while higher rarities receive progressively stronger
+boosts. On Rocky Shore, a cast after two chain catches rolls for a legendary
+candidate: 1% base, +2% during FEVER, +2% with Moonseed (5% cap). The roll
+happens at cast time; PERFECT timing keeps the legendary, while GOOD timing
+swaps it for a RARE catch and keeps its lower-quality metadata and
+rescue-meter effect. Catches do not refresh the timer. A lost fish or elapsed
+FEVER window resets the chain. Reading
 the ledger and map transitions pause the timer with the fishing loop. Version 6
 saves retain the combo and remaining FEVER time; older saves start with no chain.
 

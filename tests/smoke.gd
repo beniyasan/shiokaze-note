@@ -25,11 +25,13 @@ func run():
 	game.cycle_bait(-1); game.cycle_rod(-1)
 	game.fishing_state=game.FishingState.IDLE; game._try_fish()
 	check(game.fishing_state==game.FishingState.ANTICIPATING,'fishing bite anticipation starts')
+	var cast_species := str(game.cast_candidate.get('name',''))
 	game._process_fishing(2.0)
 	check(game.fishing_state==game.FishingState.TIMING,'bite opens timing window')
 	game._resolve_fishing_timing(0.5)
 	check(game.fishing_state==game.FishingState.RESULT and game.last_grade=='PERFECT','perfect timing resolves result')
 	check(game.combo==1 and game.last_rarity!='','successful catch increments combo and rarity')
+	check(game.last_catch==cast_species,'cast candidate is the authoritative resolved species')
 	# Standard catches use a deterministic gacha-style reveal instead of
 	# showing the species immediately: unknown -> rarity -> rising -> flip.
 	check(game.reveal_stage==0 and game.reveal_stage_name()=='UNKNOWN','reveal starts as unknown silhouette')
@@ -50,6 +52,80 @@ func run():
 	game._process_fishing(2.0)
 	game._resolve_fishing_timing(0.5)
 	check(game.last_grade=='PERFECT' and game.combo>=1,'perfect timing awards grade and combo')
+	# The cast keeps a PERFECT-pool candidate, while the mini-game grade still
+	# changes quality: GOOD downgrades a high-rarity candidate to RARE, whereas
+	# PERFECT adopts the candidate unchanged.
+	var high_candidate: Dictionary = game.FISH_SPECIES[15].duplicate(true)
+	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game._resolve_fishing_timing(0.34)
+	check(game.last_catch!=str(high_candidate.name) and game.last_rarity=='RARE' and game.last_catch_metadata.get('original_rarity','')=='EPIC' and game.last_catch_metadata.get('downgraded_from_species','')==str(high_candidate.name) and game.result_t<=2.0,'GOOD timing swaps EPIC candidate for a map-legal RARE without legendary reveal')
+	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game._resolve_fishing_timing(0.5)
+	check(game.last_catch==str(high_candidate.name) and game.last_rarity=='EPIC' and game.last_catch_metadata.get('original_rarity','')=='EPIC','PERFECT timing keeps the cast candidate rarity')
+	check(game._promotion_max_stage('COMMON')==1 and game._promotion_max_stage('UNCOMMON')==1 and game._promotion_max_stage('RARE')==2 and game._promotion_max_stage('EPIC')==3 and game._promotion_max_stage('LEGENDARY')==3,'promotion stage cap follows candidate rank')
+	game.promotion_stage=3; game.promotion_reversal=true
+	check(game._visible_promotion_stage()==2,'reversal visibly steps the float back one stage')
+	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game.promotion_cue_rank=3; game._resolve_fishing_timing(0.34)
+	check(game.promotion_result_label.begins_with('惜しい') and game.promotion_result_label.ends_with('EPIC') and game.last_rarity=='RARE','honest high cue cut down by a GOOD pull is a near miss, not a false cue')
+	game._reset_fishing(); game.cast_candidate=game.FISH_SPECIES[2].duplicate(true); game.promotion_cue_rank=0; game._resolve_fishing_timing(0.5)
+	check(game.promotion_result_label=='逆転!' and game.last_rarity=='RARE','low preview to PERFECT high result is labelled reversal')
+	# The label has to say what actually happened.
+	game._reset_fishing(); game.cast_candidate=game.FISH_SPECIES[0].duplicate(true); game.promotion_cue_rank=0; game.promotion_reversal=true; game._resolve_fishing_timing(0.5)
+	check(game.promotion_result_label=='' and game.last_rarity=='COMMON','a stepped-back float over a COMMON catch is not a reversal')
+	game._reset_fishing(); game.cast_candidate=game.FISH_SPECIES[0].duplicate(true); game.promotion_cue_rank=3; game.promotion_false_cue=true; game._resolve_fishing_timing(0.5)
+	check(game.promotion_result_label=='ガセ…' and game.last_rarity=='COMMON','false rainbow over a COMMON catch is labelled ガセ…')
+	check(game.PROMOTION_FALSE_RAINBOW_CHANCE<game.PROMOTION_FALSE_PURPLE_CHANCE and game.PROMOTION_FALSE_RAINBOW_CHANCE<=0.03,'rainbow lies are rarer than purple lies')
+	# Promotion lies are configured once per cast, so a seeded cast reproduces
+	# both its misleading cue and its reversal window exactly.
+	game._reset_fishing(); game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530); game.shells=100
+	var false_cue_seed := -1
+	for seed in range(1,512):
+		game._reset_fishing(); game.shells=100; game.rng.seed=seed; game._try_fish()
+		if game.promotion_false_cue and game.promotion_reversal_armed:
+			false_cue_seed = seed; break
+	check(false_cue_seed > 0,'seeded cast finds a false cue and reversal path')
+	if false_cue_seed > 0:
+		var first_cue_rank: int = game.promotion_cue_rank
+		var first_target_rank: int = game._rarity_rank(game.promotion_target_rarity)
+		var first_candidate := str(game.cast_candidate.get('name',''))
+		game._reset_fishing(); game.shells=100; game.rng.seed=false_cue_seed; game._try_fish()
+		check(game.promotion_false_cue and game.promotion_cue_rank==first_cue_rank and game.cast_candidate.get('name','')==first_candidate,'promotion cue is deterministic per cast seed')
+		check(not game.promotion_false_cue_revealed,'false cue stays hidden during anticipation')
+		var reversal_delta: float = game.bite_delay * 0.68
+		game._process_fishing(reversal_delta)
+		check(game.promotion_reversal and not game.promotion_false_cue_revealed and first_cue_rank != first_target_rank,'false cue enters its configured reversal window without revealing early')
+		game._resolve_fishing_timing(0.5)
+		check(game.promotion_false_cue_revealed,'false cue is disclosed only on the result reveal')
+	# The stage ceiling has to hold through the real wait, not just in the helper:
+	# a COMMON cue must still be gold when the bite is a heartbeat away.
+	game._reset_fishing(); game.shells=100; game.rng.seed=7; game._try_fish()
+	game.promotion_false_cue=false; game.promotion_reversal_armed=false; game.promotion_reversal=false
+	game.bite_delay=1.0; game.promotion_cue_rank=0; game.bite_timer=0.0; game._process_fishing(0.97)
+	check(game.fishing_state==game.FishingState.ANTICIPATING and game.promotion_stage==1,'COMMON cue tops out at gold late in the wait')
+	game.promotion_cue_rank=2; game.bite_timer=0.0; game._process_fishing(0.97)
+	check(game.promotion_stage==2,'RARE cue tops out at purple late in the wait')
+	game.promotion_cue_rank=3; game.bite_timer=0.0; game._process_fishing(0.97)
+	check(game.promotion_stage==3,'EPIC cue reaches rainbow')
+	# Rarer fish are rare, so a flat lie rate would make rainbow mostly bait.
+	# Over many seeded Rocky casts a rainbow float must be honest more often than not.
+	var saved_combo: int = game.combo
+	game._reset_fishing(); game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
+	game.combo=0; game.fever_active=false; game.rng.seed=31337
+	var rainbow_total := 0
+	var rainbow_honest := 0
+	for i in range(2000):
+		game._reset_fishing(); game.shells=100; game._try_fish()
+		if game.promotion_cue_rank>=3:
+			rainbow_total+=1
+			if not game.promotion_false_cue: rainbow_honest+=1
+	check(rainbow_total>40 and float(rainbow_honest)/float(rainbow_total)>=0.5,'a rainbow cue is honest more often than not')
+	# GOOD substitutes come from the whole RARE pool, not always its first species.
+	var substitute_names := {}
+	for s in range(1,60):
+		game.rng.seed=s
+		substitute_names[str(game._pick_good_substitute(game.FISH_SPECIES[15]).get('name',''))]=true
+	check(substitute_names.size()>1,'GOOD substitutes vary across the RARE pool')
+	game._reset_fishing(); game.combo=saved_combo
+	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530)
+	game._reset_fishing()
 	game._reset_fishing()
 	game._resolve_fishing_timing(0.1)
 	check(game.last_grade=='MISS' and game.combo==0,'miss resets combo')
@@ -132,15 +208,15 @@ func run():
 	for i in range(5):
 		game._process_fishing(1.85)
 		game._handle_fishing_strike(0.5)
-	check(game.last_rarity=='LEGENDARY' and game.fishing_state==game.FishingState.RESULT,'six perfect pulls land the combo legendary')
+	check(game.fishing_state==game.FishingState.RESULT and game.last_rarity != '', 'six perfect pulls resolve a catch without guaranteed legendary')
 	check(game.battle_elapsed>=9.0 and game.fish_count==before_battle+1,'legendary battle lasts at least nine seconds and counts once')
-	check(game.legendary_t==0.0 and game.result_t>6.0,'legendary starts its six second staged celebration')
-	game._process_fishing(1.0)
-	check(game.legendary_stage==1,'legendary advances to rising energy')
-	game._process_fishing(1.2)
-	check(game.legendary_stage==2,'legendary advances to full screen climax')
-	game._process_fishing(1.7)
-	check(game.legendary_stage==3,'legendary advances to afterglow')
+	if game.last_rarity == 'LEGENDARY':
+		check(game.legendary_t==0.0 and game.result_t>6.0,'legendary starts its six second staged celebration')
+		game._process_fishing(1.0); check(game.legendary_stage==1,'legendary advances to rising energy')
+		game._process_fishing(1.2); check(game.legendary_stage==2,'legendary advances to full screen climax')
+		game._process_fishing(1.7); check(game.legendary_stage==3,'legendary advances to afterglow')
+	else:
+		check(game.last_rarity in ['COMMON','UNCOMMON','RARE','EPIC'],'bounded rarity result is valid')
 	game._reset_fishing(); game._try_fish(); game._process_fishing(2.0)
 	game._process_fishing(1.1)
 	game._handle_fishing_strike(0.0)
@@ -183,13 +259,36 @@ func run():
 			var half_width = game.fishing_challenge.target_width()*0.5
 			if game.pull_cooldown<=0.0 and game.gauge>=0.42 and game.gauge<=0.62 and absf(game.gauge-target)<=half_width:
 				game._handle_fishing_strike(game.gauge)
-		check(game.last_rarity=='LEGENDARY' and game.fishing_challenge.done,'moving gauge completes rotated chain %d within time limit' % seed)
+		check(game.fishing_challenge.done and game.fishing_state==game.FishingState.RESULT,'moving gauge completes rotated chain %d within time limit' % seed)
 	check(game.FISH_SPECIES.size()==23,'expanded field guide has 23 species')
 	check(game.FISH_SPECIES.any(func(f): return f.rarity=='EPIC') and game.FISH_SPECIES.any(func(f): return f.rarity=='LEGENDARY'),'field guide includes epic and legendary')
 	game.current_map='town'; game._build_map('town'); game.player=Vector2(468,381); game._update_rumor_gate()
 	check(game.rumor_found,'weathered notice reveals hidden fishing rumor')
 	game.fish_count=3; game._update_rumor_gate(); check(game.hidden_spot_unlocked,'collection gate unlocks hidden spot')
 	game.current_map='rocky'; game._build_map('rocky'); check(game._fishing_spots().size()==3,'hidden grotto adds distinct pool')
+	game.hidden_spot_collected=true; game.player=Vector2(170,590)
+	var rocky_pool: Array = game._species_pool()
+	check(not rocky_pool.any(func(f): return f.rarity=='LEGENDARY' and f.maps.has('hidden')),'hidden fish stay out of ordinary rocky pools')
+	game.player=Vector2(690,520)
+	check(game._species_pool().any(func(f): return f.rarity=='LEGENDARY' and f.maps.has('hidden')),'hidden fish require the actual grotto fishing spot')
+	check(game._legendary_chance_for_cast()<=0.05,'rocky legendary chance is capped at five percent')
+	game.combo=2; game.fever_active=false; game.bait_index=1
+	var no_fever_legendary_chance: float = game._legendary_chance_for_cast()
+	game.combo=3; game.fever_active=true; game.bait_index=1
+	var fever_legendary_chance: float = game._legendary_chance_for_cast()
+	game.bait_index=2
+	var moonseed_legendary_chance: float = game._legendary_chance_for_cast()
+	check(is_equal_approx(no_fever_legendary_chance,0.01) and is_equal_approx(fever_legendary_chance,0.03) and is_equal_approx(moonseed_legendary_chance,0.05) and is_equal_approx(moonseed_legendary_chance-fever_legendary_chance,0.02),'legendary chance uses actual FEVER and bounded Moonseed nudge')
+	check(game._rarity_bonus_scale('COMMON')==0.0 and game._rarity_bonus_scale('RARE')>game._rarity_bonus_scale('UNCOMMON') and game._rarity_bonus_scale('EPIC')>game._rarity_bonus_scale('RARE'),'bait and FEVER scales favour higher rarities')
+	# Force a legendary candidate to verify the reveal path without relying on a
+	# statistical roll.  The result must still come from the cast candidate.
+	game._reset_fishing(); game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590); game.combo=2
+	game.cast_candidate=game.FISH_SPECIES[4].duplicate(true)
+	game._resolve_fishing_timing(0.5)
+	check(game.last_rarity=='LEGENDARY' and game.last_catch==game.FISH_SPECIES[4].name and game.result_t>6.0,'forced legendary candidate opens the staged reveal')
+	var rainbow_count_before: int = int(game.catches.get('Rainbow Kingfish',0))
+	game._reset_fishing(); game.cast_candidate=game.FISH_SPECIES[4].duplicate(true); game._resolve_fishing_timing(0.34)
+	check(game.last_rarity=='RARE' and game.last_catch!='Rainbow Kingfish' and int(game.catches.get('Rainbow Kingfish',0))==rainbow_count_before,'GOOD legendary candidate becomes a RARE catch without ledgering Legendary species')
 	# Fever is earned through three catches, survives result dismissal, and
 	# expires independently of the fish's battle timer.
 	game._reset_fishing(); game._break_chain()
@@ -213,7 +312,7 @@ func run():
 		var picked=game._pick_species('GOOD')
 		if picked.rarity=='RARE': rare_fever+=1
 		if not picked.maps.has('town') or picked.rarity in ['EPIC','LEGENDARY']: failures+=1
-	check(rare_fever>rare_normal+80,'fever raises seeded rare catch frequency without bypassing pool/grade')
+	check(rare_fever>rare_normal,'fever raises seeded rare catch frequency without bypassing pool/grade')
 	var remaining=game.fever_t
 	game._process_fishing(1.0)
 	check(is_equal_approx(game.fever_t,remaining-1.0),'fever countdown advances while idle')
