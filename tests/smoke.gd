@@ -11,6 +11,7 @@ func run():
 	check(game.FISH_SPECIES.size()==5,'five fish collection entries are registered')
 	check(game._fish_rarity('Coral bream')=='UNCOMMON','coral bream rarity metadata is wired')
 	check(game.fish_portraits.size()==5,'each collection entry has a portrait asset')
+	check(game.fish_cards.size()==5,'each collection entry has a large concept card asset')
 	check(game._roll_fish_species('PERFECT',0.60)=='Coral bream','perfect roll can surface coral bream')
 	check(game._walkable(game.player),'spawn is walkable')
 	check(not game._walkable(Vector2(240,300)),'inn blocks movement')
