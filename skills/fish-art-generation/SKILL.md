@@ -42,9 +42,12 @@ pixels. Leave transparent breathing room around the silhouette; a soft water
 shadow is fine, but do not add a solid rectangle, frame, label, or drop-shadow
 background.
 
-The staged catch reveal draws a procedural polygon silhouette before the card
-flips. Keep the asset's proportions compatible with that silhouette: a broad
-body, a distinct tail on one side, and fins that do not depend on fine antialiasing.
+The staged catch reveal draws a generic procedural polygon silhouette before
+the card flips, so the species stays hidden while rarity and timing cues play.
+After the flip it prefers the matching transparent `_v2` encyclopedia card
+art, then falls back to the compact portrait for partial/legacy bundles. Keep
+the asset's proportions compatible with that silhouette: a broad body, a
+distinct tail on one side, and fins that do not depend on fine antialiasing.
 Do not use text baked into the portrait. The reveal supplies the fish name,
 rarity, size, weight, variant, and crown marker after the flip.
 
@@ -142,8 +145,9 @@ dictionary.
 `<stem>_v2.png` followed by the legacy `<stem>.png`. Missing or unreadable
 files are ignored. Callers then fall through as follows:
 
-1. Encyclopedia card: transparent card illustration.
-2. Card fallback: compact portrait fitted without stretching.
+1. Encyclopedia card: transparent card illustration (also preferred for the
+   revealed catch face).
+2. Catch reveal fallback: compact portrait fitted without stretching.
 3. Final fallback: the existing procedural icon/silhouette, so the ledger and
    fishing loop still work.
 
