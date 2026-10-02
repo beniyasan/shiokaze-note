@@ -2574,11 +2574,10 @@ func _draw_legendary_result():
 	if t >= 2.05:
 		legendary_art_revealed = _draw_reveal_art(center, str(last_catch), Vector2(206, 138) * (0.72 + peak * 0.28), 1.0)
 	if not legendary_art_revealed:
-		var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])
-		var transformed := PackedVector2Array()
-		for p in body: transformed.append(center + p * scale)
-		hud.draw_colored_polygon(transformed,Color("#130f32") if t < 2.05 else Color("#fff1c2"))
-		hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-67,0)*scale,center+Vector2(-112,-36)*scale,center+Vector2(-108,35)*scale]),Color("#9184ff") if t >= 2.05 else Color("#130f32"))
+		# Old saves can still lack a card; reuse the improved generic silhouette
+		# rather than reviving the old flat body/tail fallback. The rainbow
+		# treatment below remains a legendary-only cue for that path.
+		_draw_reveal_fish(center, scale, Color("#130f32") if t < 2.05 else Color("#fff1c2"), t >= 2.05)
 		if t >= 2.05:
 			for k in range(8):
 				var x := -50.0 + k * 14.0
