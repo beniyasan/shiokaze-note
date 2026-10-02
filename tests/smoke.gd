@@ -54,6 +54,10 @@ func run():
 	# Standard catches use a deterministic gacha-style reveal instead of
 	# showing the species immediately: unknown -> rarity -> rising -> flip.
 	check(game.reveal_stage==0 and game.reveal_stage_name()=='UNKNOWN','reveal starts as unknown silhouette')
+	# Nothing rarity-correlated may show while the card is face-down: not the
+	# toast bar, not the SELL/REGISTER prompt (it carries the sale value).
+	check(not game.catch_reveal_complete() and game.catch_choice_pending(),'sell/register prompt is held back while the card is face-down')
+	check(game.toast=='' and game.toast_t==0.0 and game.result_toast_pending.contains(cast_species),'catch toast waits for the reveal instead of naming the fish')
 	game._process_fishing(0.45)
 	check(game.reveal_stage==1 and game.reveal_stage_name()=='RARITY','reveal shows rarity seal')
 	game._process_fishing(0.40)
@@ -62,6 +66,7 @@ func run():
 	check(game.reveal_stage==3 and game.reveal_stage_name()=='FLIPPING','reveal starts card flip')
 	game._process_fishing(0.40)
 	check(game.reveal_stage==4 and game.reveal_stage_name()=='REVEALED','reveal resolves fish name')
+	check(game.catch_reveal_complete() and game.toast.contains(cast_species) and game.result_toast_pending=='','toast and prompt appear once the card has flipped')
 	game._reset_fishing()
 	game.notebook_open=true; game._try_fish()
 	check(game.cast_timer==0,'notebook prevents casting')
@@ -108,9 +113,60 @@ func run():
 		game._resolve_fishing_timing(0.5)
 		check(game.promotion_false_cue_revealed,'false cue is disclosed only on the result reveal')
 	game._reset_fishing()
+	# Rarer fish are rare, so a flat lie rate would make rainbow mostly bait.
+	# Over many seeded Rocky casts a rainbow float must be honest more often than not.
+	var saved_combo: int = game.combo
+	game._reset_fishing(); game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
+	game.combo=0; game.fever_active=false; game.rng.seed=31337
+	# The species pool follows the tide, so the lie rate must follow the pool:
+	# check a pool with several EPIC species and the town's single-EPIC pool.
+	var honesty_envs := [['rocky',Vector2(170,590),0.50,'clear','summer'],['rocky',Vector2(170,590),0.95,'clear','autumn'],['town',Vector2(500,530),0.50,'clear','spring'],['town',Vector2(500,530),0.50,'overcast','winter']]
+	for env in honesty_envs:
+		game.current_map=str(env[0]); game._build_map(str(env[0])); game.player=env[1]
+		game.time_of_day=float(env[2]); game.weather=str(env[3]); game.season=str(env[4])
+		game.combo=0; game.fever_active=false; game.rng.seed=31337
+		var rainbow_total := 0
+		var rainbow_honest := 0
+		var purple_total := 0
+		var purple_honest := 0
+		for i in range(4000):
+			game._reset_fishing(); game.shells=100; game._try_fish()
+			if game.promotion_cue_rank>=3:
+				rainbow_total+=1
+				if not game.promotion_false_cue: rainbow_honest+=1
+			elif game.promotion_cue_rank==2:
+				purple_total+=1
+				if not game.promotion_false_cue: purple_honest+=1
+		var rainbow_rate := float(rainbow_honest)/float(maxi(1,rainbow_total))
+		var purple_rate := float(purple_honest)/float(maxi(1,purple_total))
+		check(rainbow_total>20 and rainbow_rate>=0.6,'a rainbow cue is mostly honest on %s %s/%s (%d/%d)' % [str(env[0]),str(env[3]),str(env[4]),rainbow_honest,rainbow_total])
+		check(purple_total>40 and purple_rate>=0.5,'a purple cue is honest more often than not on %s %s/%s (%d/%d)' % [str(env[0]),str(env[3]),str(env[4]),purple_honest,purple_total])
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
+	check(game._candidate_share_at_least(0)>0.99 and game._candidate_share_at_least(3)<game._candidate_share_at_least(2),'candidate rank shares are a decreasing probability')
+	# GOOD substitutes come from the whole RARE pool, not always its first species.
+	var substitute_names := {}
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
+	game.time_of_day=0.95; game.weather='clear'; game.season='autumn'
+	for seed_value in range(1,60):
+		game.rng.seed=seed_value
+		substitute_names[str(game._pick_good_substitute(game.FISH_SPECIES[15]).get('name',''))]=true
+	check(substitute_names.size()>1,'GOOD substitutes vary across the RARE pool')
+	game._reset_fishing(); game.combo=saved_combo
+	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530)
+	game._reset_fishing()
 	game._reset_fishing()
 	game._resolve_fishing_timing(0.1)
 	check(game.last_grade=='MISS' and game.combo==0,'miss resets combo')
+	# A broken chain says how close FEVER was instead of silently resetting.
+	game._reset_fishing(); game._break_chain(); game.combo=2; game._resolve_fishing_timing(-1.0)
+	check(game.chain_break_text.begins_with('惜しい') and game.toast.contains('one more catch for FEVER'),'losing a two-catch chain reads as a near miss for FEVER')
+	game._reset_fishing(); game._break_chain(); game.combo=1; game._resolve_fishing_timing(-1.0)
+	check(game.chain_break_text.contains('2 more for FEVER'),'a one-catch chain reports how many more catches FEVER needed')
+	game._reset_fishing(); game._break_chain(); game.combo=0; game._resolve_fishing_timing(-1.0)
+	check(game.chain_break_text=='' and not game.toast.contains('FEVER'),'a miss without a chain stays quiet')
+	game._reset_fishing(); game.combo=4; game.fever_active=true; game.fever_t=10.0; game._resolve_fishing_timing(-1.0)
+	check(game.chain_break_text.contains('FEVER lost') and not game.fever_active,'a miss during FEVER reports the lost chain')
+	game._reset_fishing(); check(game.chain_break_text=='','the chain-break note clears with the next cast')
 	game._reset_fishing()
 	# Soft pity counts consecutive misses/low-grade outcomes and arms one
 	# transparent rescue hook. The hook changes only the rarity floor; the
@@ -155,8 +211,7 @@ func run():
 	check(bool(game.last_catch_metadata.get('crown', false)),'first capture is marked as crown')
 	var first_size := float(first_meta.get('size_cm',0.0))
 	check(bool(first_meta.get('crown', false)) and first_meta.has('record_size_cm'),'first capture persists crown metadata')
-	check(game.best_records.has(first_species) and float(game.best_records[first_species].get('size_cm',0.0))>=first_size,'first capture creates a size record')
-	check(game.best_records[first_species].has('map') and game.best_records[first_species].has('spot'),'crown record keeps its catch location')
+	check(not game.best_records.has(first_species),'an unregistered first capture is only a crown candidate')
 	check(game._record_is_better({'size_cm':42.0,'weight_kg':2.0},{'size_cm':42.0,'weight_kg':1.9}),'heavier equal-size specimen can take the crown')
 	check(not game._record_is_better({'size_cm':41.9,'weight_kg':9.0},{'size_cm':42.0,'weight_kg':1.0}),'smaller specimen cannot displace a size crown')
 	# A catch remains on the result card until the player explicitly chooses a
@@ -166,13 +221,19 @@ func run():
 	var pending_shells: int = game.shells
 	var pending_count := int(game.catches.get(first_species,0))
 	var pending_value: int = game.pending_catch_sell_value()
+	var pending_register_value: int = game.pending_catch_register_value()
+	var pending_rarity := str(first_meta.get('rarity','COMMON'))
+	check(pending_register_value==game.REGISTER_BASE_REWARD+int(game.REGISTER_FIRST_BONUS[pending_rarity])+game.REGISTER_CROWN_BONUS,'registering a first-capture crown pays the base reward plus both bonuses')
+	check(pending_register_value>1 and game._register_value({'rarity':'COMMON','first_capture':false,'crown':false})==game.REGISTER_BASE_REWARD,'a plain repeat registers for the base reward only')
 	game._save_game('user://pending-catch.json')
 	game._reset_fishing()
 	game._load_game('user://pending-catch.json')
 	check(game.catch_choice_pending() and game.pending_catch_sell_value()==pending_value,'save restores pending catch choice without rerolling value')
 	check(bool(game.pending_catch.get('metadata',{}).get('first_capture',false)) and not game.reveal_shortened,'pending first-capture metadata survives save/load')
 	check(game.shells==pending_shells and int(game.catches.get(first_species,0))==pending_count,'pending choice does not duplicate currency or inventory')
-	check(game.register_pending_catch() and not game.catch_choice_pending() and game.shells==pending_shells+1,'register keeps fish and awards the established shell reward once')
+	check(game.register_pending_catch() and not game.catch_choice_pending() and game.shells==pending_shells+pending_register_value,'register keeps fish and pays its reward once')
+	check(game.best_records.has(first_species) and float(game.best_records[first_species].get('size_cm',0.0))>=first_size-0.001,'registering a crown candidate writes the size record')
+	check(game.best_records[first_species].has('map') and game.best_records[first_species].has('spot'),'crown record keeps its catch location')
 	# A repeat updates the current reveal while leaving the discovery record intact.
 	game._record_catch_metadata({'name':first_species,'rarity':str(first_meta.get('rarity','COMMON'))},'GOOD')
 	check(is_equal_approx(float(game.get_first_capture_metadata(first_species).get('size_cm',0.0)),first_size) and game.catch_latest.has(first_species),'first capture metadata is immutable across repeats')
@@ -190,7 +251,25 @@ func run():
 	var sell_count_before := int(game.catches.get(first_species,0))
 	check(game.sell_pending_catch() and not game.catch_choice_pending(),'sell resolves the pending choice')
 	check(game.shells==sell_shells+sell_value and int(game.catches.get(first_species,0))==sell_count_before-1,'selling pays shells and removes only one held fish')
-	check(game.get_first_capture_metadata(first_species).has('size_cm') and game.best_records.has(first_species),'selling preserves discovery and crown records')
+	check(game.get_first_capture_metadata(first_species).has('size_cm') and game.best_records.has(first_species),'selling preserves discovery and the already-registered crown')
+	# Selling a record-breaking specimen keeps the species discovered but does not
+	# take the crown; registering the next record-breaker does.
+	game.best_records[first_species]={'species':first_species,'size_cm':0.1,'weight_kg':0.01,'day':1,'map':'town','spot':'test'}
+	game._reset_fishing(); game.cast_candidate={'name':first_species,'rarity':first_rarity}; game._resolve_fishing_timing(0.5)
+	var sold_crown_candidate := bool(game.last_catch_metadata.get('crown', false))
+	game.sell_pending_catch()
+	check(sold_crown_candidate and is_equal_approx(float(game.best_records[first_species].get('size_cm',0.0)),0.1),'selling a record specimen does not take the crown')
+	check(game.species_discovered(first_species),'selling a record specimen still keeps the species discovered')
+	game._reset_fishing(); game.cast_candidate={'name':first_species,'rarity':first_rarity}; game._resolve_fishing_timing(0.5)
+	var registered_size := float(game.last_catch_metadata.get('size_cm',0.0))
+	var crown_register_value: int = game.pending_catch_register_value()
+	check(bool(game.last_catch_metadata.get('crown', false)) and crown_register_value==game.REGISTER_BASE_REWARD+game.REGISTER_CROWN_BONUS,'a repeat crown candidate earns the crown bonus on register')
+	game.register_pending_catch()
+	check(is_equal_approx(float(game.best_records[first_species].get('size_cm',0.0)),registered_size),'registering a record specimen takes the crown')
+	# A save written after a sold record must not resurrect it from catch_latest.
+	game.best_records[first_species]={'species':first_species,'size_cm':0.1,'weight_kg':0.01,'day':1,'map':'town','spot':'test'}
+	game._save_game('user://sold-crown.json'); game._load_game('user://sold-crown.json')
+	check(is_equal_approx(float(game.best_records[first_species].get('size_cm',0.0)),0.1),'loading does not rebuild crowns from sold specimens')
 	# Selling the final copy keeps the field-guide name visible because durable
 	# discovery metadata is distinct from transient inventory ownership.
 	game._reset_fishing(); game.catches.erase('Old boot'); game.cast_candidate={'name':'Old boot','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
@@ -311,12 +390,68 @@ func run():
 	game.catches.erase(legendary_ledger_name); game.catch_metadata[legendary_ledger_name]={"species":legendary_ledger_name,"rarity":"LEGENDARY"}
 	check(game.ledger_display_name(legendary_ledger_name,0)==legendary_ledger_name and game.species_discovered(legendary_ledger_name,0),'selling the last legendary copy preserves its durable discovery')
 	game.catch_metadata.erase(legendary_ledger_name)
-	game.rumor_found=false; game.hidden_spot_unlocked=false; game.fish_count=0
-	game.current_map='town'; game._build_map('town'); game.player=Vector2(424,381); game._update_rumor_gate()
-	check(game.rumor_found,'fisher NPC reveals hidden fishing rumor')
-	game.rumor_found=false; game.player=Vector2(468,381); game._update_rumor_gate()
-	check(game.rumor_found,'weathered notice reveals hidden fishing rumor')
-	game.fish_count=3; game._update_rumor_gate(); check(game.hidden_spot_unlocked,'collection gate unlocks hidden spot')
+	# Rumors: SPACE beside Fisher Mera or the notice tells the next unheard rumor.
+	# The grotto opens when the guide is 25% full, not after a handful of fish.
+	var kept_catches: Dictionary = game.catches.duplicate(true)
+	var kept_catch_metadata: Dictionary = game.catch_metadata.duplicate(true)
+	var kept_first_metadata: Dictionary = game.first_capture_metadata.duplicate(true)
+	var kept_latest: Dictionary = game.catch_latest.duplicate(true)
+	game.catches.clear(); game.catch_metadata.clear(); game.first_capture_metadata.clear(); game.catch_latest.clear()
+	game.rumor_found=false; game.hidden_spot_unlocked=false; game.fish_count=0; game.heard_rumors=[]
+	game.current_map='town'; game._build_map('town'); game.player=Vector2(424,381)
+	check(game.rumor_source_near()=='mera','Fisher Mera can be talked to')
+	check(game.talk_to_rumor_source() and game.rumor_found and game.heard_rumors==['grotto'],'fisher NPC tells the grotto rumor first')
+	check(game.toast.contains('Fisher Mera') and game.toast.contains('grotto'),'a heard rumor is shown in the toast bar')
+	check(game.talk_to_rumor_source() and game.heard_rumors.size()==2 and game.heard_rumors[1]=='Moonfin trout','Mera tells a different rumor each time she is asked')
+	game.player=Vector2(468,381)
+	check(game.rumor_source_near()=='notice','the weathered notice can be read')
+	game.rumor_found=false; game.heard_rumors=[]
+	check(game.talk_to_rumor_source() and game.rumor_found,'weathered notice reveals the grotto rumor')
+	check(game.talk_to_rumor_source() and game.heard_rumors==['grotto','Lighthouse ray'],'notice moves on to a species rumor')
+	game.player=Vector2(300,250)
+	check(game.rumor_source_near()=='' and not game.talk_to_rumor_source(),'no rumor is available away from the plaza')
+	game.player=Vector2(424,381)
+	for i in range(8): game.talk_to_rumor_source()
+	var heard_after_all: int = game.heard_rumors.size()
+	check(game.heard_rumors.has('Night sailfish') and game.talk_to_rumor_source() and game.heard_rumors.size()==heard_after_all and game.toast.contains('nothing new'),'an exhausted source says it has nothing new')
+	# Rumors become a readable hint, and the ledger shows what is biting right now.
+	check(game.fish_condition_hint('Moonfin trout')=='Moonfin trout: dusk or night / clear or rain / autumn or winter','species rumors are generated from the real condition table')
+	check(game.fish_condition_hint('Lantern squid')=='Lantern squid: night / clear or rain / not spring','a missing season reads as "not <season>"')
+	var worst_rumor_width := 0.0
+	for rumor_id in game._all_rumor_ids():
+		var width: float = ThemeDB.fallback_font.get_string_size('[9/9] '+game.rumor_text(str(rumor_id)),HORIZONTAL_ALIGNMENT_LEFT,-1,8).x
+		worst_rumor_width=maxf(worst_rumor_width,width)
+	check(worst_rumor_width<=318.0,'every rumor fits the ledger line (%.0fpx)' % worst_rumor_width)
+	game.heard_rumors=['grotto']; game.rumor_page=0
+	game.page_rumor(1); check(game.rumor_page==0,'a single rumor does not page away')
+	game.heard_rumors=['grotto','Moonfin trout','Lantern squid']; game.page_rumor(-1)
+	check(game.rumor_page==2,'rumor paging wraps backwards')
+	game.page_rumor(1); check(game.rumor_page==0,'rumor paging wraps forwards')
+	game.heard_rumors=['grotto']; game.current_map='beach'; game.time_of_day=0.75; game.weather='clear'; game.season='autumn'
+	check(not game.species_known('Moonfin trout') and not game.species_biting_now('Moonfin trout') and game.ledger_display_name('Moonfin trout',0).begins_with('????'),'an unheard, uncaught species stays unknown in the ledger')
+	game.heard_rumors=['grotto','Moonfin trout']
+	check(game.species_known('Moonfin trout') and game.species_biting_now('Moonfin trout') and game.ledger_display_name('Moonfin trout',0).begins_with('Moonfin trout'),'a rumor names the species and marks it as biting now')
+	game.season='spring'
+	check(game.species_known('Moonfin trout') and not game.species_biting_now('Moonfin trout'),'the biting-now dot follows the season')
+	game._save_game('user://rumor-test.json'); game.heard_rumors=[]; game.rumor_found=false; game._load_game('user://rumor-test.json')
+	check(game.heard_rumors==['grotto','Moonfin trout'],'heard rumors survive save and load')
+	var legacy_rumor_file=FileAccess.open('user://legacy-rumor.json',FileAccess.WRITE)
+	legacy_rumor_file.store_string('{"version":12,"fish":5,"rumor_found":true,"x":368,"y":372}'); legacy_rumor_file.close()
+	game._load_game('user://legacy-rumor.json')
+	check(game.rumor_found and game.heard_rumors==['grotto'],'a pre-rumor-list save keeps its grotto rumor')
+	game.heard_rumors=[]; game.rumor_found=false; game.current_map='town'; game._build_map('town')
+	game.catches.clear(); game.catch_metadata.clear(); game.first_capture_metadata.clear(); game.catch_latest.clear()
+	game.rumor_found=true; game.hidden_spot_unlocked=false; game.fish_count=99
+	for species in ['Silver sprat','Sand goby','Old boot','Saltwater eel','Gullfin']: game.catch_metadata[species]={'species':species}
+	game._update_rumor_gate()
+	check(game.collection_discovered_count()==5 and game.collection_percent()<float(game.HIDDEN_SPOT_COLLECTION_PERCENT) and not game.hidden_spot_unlocked,'a few fish no longer open the grotto')
+	game.catch_metadata['Tidemark carp']={'species':'Tidemark carp'}; game._update_rumor_gate()
+	check(game.collection_percent()>=float(game.HIDDEN_SPOT_COLLECTION_PERCENT) and game.hidden_spot_unlocked,'collection gate unlocks hidden spot at a quarter of the guide')
+	game.hidden_spot_unlocked=false; game.rumor_found=false; game._update_rumor_gate()
+	check(not game.hidden_spot_unlocked,'the guide percentage alone does not open the grotto without the rumor')
+	game.rumor_found=true; game.fish_count=0
+	game.catches=kept_catches; game.catch_metadata=kept_catch_metadata; game.first_capture_metadata=kept_first_metadata; game.catch_latest=kept_latest
+	game._update_rumor_gate(); game.hidden_spot_unlocked=true
 	game.current_map='rocky'; game._build_map('rocky'); check(game._fishing_spots().size()==3,'hidden grotto adds distinct pool')
 	game.hidden_spot_collected=true; game.player=Vector2(170,590)
 	var rocky_pool: Array = game._species_pool()
@@ -338,6 +473,9 @@ func run():
 	game.cast_candidate=game.FISH_SPECIES[4].duplicate(true)
 	game._resolve_fishing_timing(0.5)
 	check(game.last_rarity=='LEGENDARY' and game.last_catch==game.FISH_SPECIES[4].name and game.result_t>6.0,'forced legendary candidate opens the staged reveal')
+	check(not game.catch_reveal_complete() and game.toast=='' and game.result_toast_pending.contains('BIG CATCH'),'legendary omen does not announce the catch in the toast bar')
+	game._process_fishing(2.1)
+	check(game.catch_reveal_complete() and game.toast.contains('BIG CATCH'),'legendary toast and prompt wait for the name reveal')
 	var rainbow_count_before: int = int(game.catches.get('Rainbow Kingfish',0))
 	game._reset_fishing(); game.cast_candidate=game.FISH_SPECIES[4].duplicate(true); game._resolve_fishing_timing(0.34)
 	check(game.last_rarity=='RARE' and game.last_catch!='Rainbow Kingfish' and int(game.catches.get('Rainbow Kingfish',0))==rainbow_count_before,'GOOD legendary candidate becomes a RARE catch without ledgering Legendary species')
