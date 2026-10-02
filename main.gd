@@ -112,6 +112,8 @@ const FEVER_THRESHOLD := 3
 const FEVER_DURATION := 30.0
 const FEVER_RARITY_BONUS := 0.5
 const PROMOTION_FALSE_CUE_CHANCE := 0.18
+const PROMOTION_FALSE_RAINBOW_CHANCE := 0.02
+const PROMOTION_FALSE_PURPLE_CHANCE := 0.06
 const PROMOTION_REVERSAL_CHANCE := 0.24
 ## Soft pity is a transparent rescue hook for an unlucky run.  A miss or a
 ## low-grade (GOOD) catch advances the meter, but the player still has to land
@@ -509,9 +511,9 @@ func _pick_good_substitute(candidate: Dictionary) -> Dictionary:
 		if str(fish.get("rarity", "COMMON")) == "RARE": rare_pool.append(fish)
 	if rare_pool.is_empty(): return {}
 	# The substitute is selected at cast time, so GOOD cannot introduce a
-	# second result-time species roll.  Keep the first map-legal RARE stable for
-	# deterministic seeded casts and ledger results.
-	return rare_pool[0].duplicate(true)
+	# second result-time species roll. Draw from the whole map-legal pool so
+	# downgrades do not funnel every catch into one species.
+	return rare_pool[rng.randi_range(0, rare_pool.size() - 1)].duplicate(true)
 
 func _candidate_for_grade(candidate: Dictionary, grade: String) -> Dictionary:
 	var resolved := candidate.duplicate(true)
@@ -746,9 +748,12 @@ func _try_fish():
 		if cue_roll < PROMOTION_FALSE_CUE_CHANCE and promotion_cue_rank >= 2:
 			promotion_false_cue = true
 			promotion_cue_rank = maxi(0, promotion_cue_rank - 2)
-		elif cue_roll > 1.0 - PROMOTION_FALSE_CUE_CHANCE and promotion_cue_rank <= 1:
+		elif cue_roll < PROMOTION_FALSE_RAINBOW_CHANCE and promotion_cue_rank <= 1:
 			promotion_false_cue = true
 			promotion_cue_rank = 3
+		elif cue_roll < PROMOTION_FALSE_RAINBOW_CHANCE + PROMOTION_FALSE_PURPLE_CHANCE and promotion_cue_rank <= 1:
+			promotion_false_cue = true
+			promotion_cue_rank = 2
 		promotion_reversal_armed = rng.randf() < PROMOTION_REVERSAL_CHANCE
 		cast_timer = 1.8
 		bite_delay = rng.randf_range(0.72, 1.42)
@@ -984,15 +989,15 @@ func _resolve_fishing_timing(position: float):
 		# that same dictionary for the result.
 		picked = _pick_cast_candidate(rescue_was_ready)
 		cast_candidate = picked.duplicate(true)
+	var candidate_rarity := str(picked.get("rarity", "COMMON"))
 	picked = _candidate_for_grade(picked, grade)
 	var legendary := grade == "PERFECT" and str(picked.get("rarity", "COMMON")) == "LEGENDARY"
 	var result_rank := _rarity_rank(str(picked.get("rarity", "COMMON")))
-	if result_rank > promotion_cue_rank:
+	var candidate_rank := _rarity_rank(candidate_rarity)
+	if result_rank > promotion_cue_rank and result_rank >= _rarity_rank("RARE"):
 		promotion_result_label = "逆転!"
 	elif result_rank < promotion_cue_rank:
-		promotion_result_label = "ガセ…"
-	elif promotion_reversal:
-		promotion_result_label = "逆転!"
+		promotion_result_label = "惜しい!  PERFECTなら " + candidate_rarity if candidate_rank > result_rank and not promotion_false_cue else "ガセ…"
 	else:
 		promotion_result_label = ""
 	last_catch = str(picked.name)
@@ -1281,7 +1286,9 @@ func _load_game(path: String = SAVE_PATH):
 		if record.is_empty(): continue
 		var first: Dictionary = first_capture_metadata[key]
 		if legacy_metadata or not first.has("crown"):
-			first["crown"] = is_equal_approx(float(first.get("size_cm", 0.0)), float(record.get("size_cm", 0.0)))
+			# A legacy first capture is the immutable discovery record. Preserve its
+			# historical crown even when a later specimen is larger.
+			first["crown"] = true
 		if legacy_metadata or not first.has("record_size_cm"):
 			first["record_size_cm"] = float(record.get("size_cm", first.get("size_cm", 0.0)))
 		if legacy_metadata or not first.has("record_weight_kg"):

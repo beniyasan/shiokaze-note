@@ -64,7 +64,7 @@ func run():
 	game.promotion_stage=3; game.promotion_reversal=true
 	check(game._visible_promotion_stage()==2,'reversal visibly steps the float back one stage')
 	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game.promotion_cue_rank=3; game._resolve_fishing_timing(0.34)
-	check(game.promotion_result_label=='ガセ…' and game.last_rarity=='RARE','high preview to GOOD low result is labelled false cue')
+	check(game.promotion_result_label.begins_with('惜しい') and game.last_rarity=='RARE','honest high preview to GOOD low result is labelled near miss')
 	game._reset_fishing(); game.cast_candidate=game.FISH_SPECIES[2].duplicate(true); game.promotion_cue_rank=0; game._resolve_fishing_timing(0.5)
 	check(game.promotion_result_label=='逆転!' and game.last_rarity=='RARE','low preview to PERFECT high result is labelled reversal')
 	# Promotion lies are configured once per cast, so a seeded cast reproduces
