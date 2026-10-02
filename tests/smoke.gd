@@ -125,6 +125,7 @@ func run():
 	# Rarer fish are rare, so a flat lie rate would make rainbow mostly bait.
 	# Over many seeded Rocky casts a rainbow float must be honest more often than not.
 	var saved_combo: int = game.combo
+	var saved_clock := [game.time_of_day, game.weather, game.season]
 	game._reset_fishing(); game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
 	game.combo=0; game.fever_active=false; game.rng.seed=31337
 	# The species pool follows the tide, so the lie rate must follow the pool:
@@ -161,6 +162,7 @@ func run():
 		substitute_names[str(game._pick_good_substitute(game.FISH_SPECIES[15]).get('name',''))]=true
 	check(substitute_names.size()>1,'GOOD substitutes vary across the RARE pool')
 	game._reset_fishing(); game.combo=saved_combo
+	game.time_of_day=float(saved_clock[0]); game.weather=str(saved_clock[1]); game.season=str(saved_clock[2])
 	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530)
 	game._reset_fishing()
 	game._reset_fishing()
@@ -284,7 +286,11 @@ func run():
 	game._reset_fishing(); game.catches.erase('Old boot'); game.cast_candidate={'name':'Old boot','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
 	game.sell_pending_catch()
 	check(int(game.catches.get('Old boot',0))==0 and game.species_discovered('Old boot') and game._ledger_marker('Old boot',0)!='?','selling last copy keeps ledger discovery visible')
-	check(first_rarity == 'LEGENDARY' or game._reveal_stage_at(1.12,first_rarity)==4,'shortened reveal reaches face before standard timing')
+	# Whether Old boot was a repeat depends on earlier casts, so use a species that
+	# is certainly already in the ledger to check the shortened reveal.
+	game._reset_fishing(); game.cast_candidate={'name':first_species,'rarity':first_rarity}; game._resolve_fishing_timing(0.5)
+	check(game.reveal_shortened and (game.last_rarity == 'LEGENDARY' or game._reveal_stage_at(1.12,game.last_rarity)==4),'shortened reveal reaches face before standard timing')
+	game.sell_pending_catch()
 	game.weather='rain'; game.season='autumn'; game.time_of_day=0.74
 	var saved_fish=game.fish_count
 	game._save_game('user://smoke-test.json')
@@ -401,6 +407,7 @@ func run():
 	game.catch_metadata.erase(legendary_ledger_name)
 	# Rumors: SPACE beside Fisher Mera or the notice tells the next unheard rumor.
 	# The grotto opens when the guide is 25% full, not after a handful of fish.
+	var rumor_clock := [game.time_of_day, game.weather, game.season]
 	var kept_catches: Dictionary = game.catches.duplicate(true)
 	var kept_catch_metadata: Dictionary = game.catch_metadata.duplicate(true)
 	var kept_first_metadata: Dictionary = game.first_capture_metadata.duplicate(true)
@@ -460,6 +467,7 @@ func run():
 	check(not game.hidden_spot_unlocked,'the guide percentage alone does not open the grotto without the rumor')
 	game.rumor_found=true; game.fish_count=0
 	game.catches=kept_catches; game.catch_metadata=kept_catch_metadata; game.first_capture_metadata=kept_first_metadata; game.catch_latest=kept_latest
+	game.time_of_day=float(rumor_clock[0]); game.weather=str(rumor_clock[1]); game.season=str(rumor_clock[2])
 	game._update_rumor_gate(); game.hidden_spot_unlocked=true
 	game.current_map='rocky'; game._build_map('rocky'); check(game._fishing_spots().size()==3,'hidden grotto adds distinct pool')
 	game.hidden_spot_collected=true; game.player=Vector2(170,590)
