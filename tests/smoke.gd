@@ -82,6 +82,7 @@ func run():
 	game.register_pending_catch(); game._process_fishing(0.0)
 	check(game.toast.begins_with('REGISTERED') and game.result_toast_pending=='','registering is confirmed instead of being overwritten by the reveal toast')
 	check(game.LEGENDARY_RESULT_PROMOTION_Y < game.LEGENDARY_RESULT_CHOICE_Y and game.LEGENDARY_RESULT_CHOICE_Y <= 260.0,'legendary promotion and choice lines stay inside the viewport')
+	check(game._legendary_reveal_art_target_rect(1.0).end.y <= game.LEGENDARY_RESULT_NAME_Y,'legendary reveal art stays above the name metadata row')
 	game._reset_fishing()
 	game.notebook_open=true; game._try_fish()
 	check(game.cast_timer==0,'notebook prevents casting')
