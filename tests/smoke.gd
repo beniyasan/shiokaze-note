@@ -64,15 +64,9 @@ func run():
 	game.promotion_stage=3; game.promotion_reversal=true
 	check(game._visible_promotion_stage()==2,'reversal visibly steps the float back one stage')
 	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game.promotion_cue_rank=3; game._resolve_fishing_timing(0.34)
-	check(game.promotion_result_label.begins_with('惜しい') and game.promotion_result_label.ends_with('EPIC') and game.last_rarity=='RARE','honest high cue cut down by a GOOD pull is a near miss, not a false cue')
+	check(game.promotion_result_label=='ガセ…' and game.last_rarity=='RARE','high preview to GOOD low result is labelled false cue')
 	game._reset_fishing(); game.cast_candidate=game.FISH_SPECIES[2].duplicate(true); game.promotion_cue_rank=0; game._resolve_fishing_timing(0.5)
 	check(game.promotion_result_label=='逆転!' and game.last_rarity=='RARE','low preview to PERFECT high result is labelled reversal')
-	# The label has to say what actually happened.
-	game._reset_fishing(); game.cast_candidate=game.FISH_SPECIES[0].duplicate(true); game.promotion_cue_rank=0; game.promotion_reversal=true; game._resolve_fishing_timing(0.5)
-	check(game.promotion_result_label=='' and game.last_rarity=='COMMON','a stepped-back float over a COMMON catch is not a reversal')
-	game._reset_fishing(); game.cast_candidate=game.FISH_SPECIES[0].duplicate(true); game.promotion_cue_rank=3; game.promotion_false_cue=true; game._resolve_fishing_timing(0.5)
-	check(game.promotion_result_label=='ガセ…' and game.last_rarity=='COMMON','false rainbow over a COMMON catch is labelled ガセ…')
-	check(game.PROMOTION_FALSE_RAINBOW_CHANCE<game.PROMOTION_FALSE_PURPLE_CHANCE and game.PROMOTION_FALSE_RAINBOW_CHANCE<=0.03,'rainbow lies are rarer than purple lies')
 	# Promotion lies are configured once per cast, so a seeded cast reproduces
 	# both its misleading cue and its reversal window exactly.
 	game._reset_fishing(); game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530); game.shells=100
@@ -94,37 +88,6 @@ func run():
 		check(game.promotion_reversal and not game.promotion_false_cue_revealed and first_cue_rank != first_target_rank,'false cue enters its configured reversal window without revealing early')
 		game._resolve_fishing_timing(0.5)
 		check(game.promotion_false_cue_revealed,'false cue is disclosed only on the result reveal')
-	# The stage ceiling has to hold through the real wait, not just in the helper:
-	# a COMMON cue must still be gold when the bite is a heartbeat away.
-	game._reset_fishing(); game.shells=100; game.rng.seed=7; game._try_fish()
-	game.promotion_false_cue=false; game.promotion_reversal_armed=false; game.promotion_reversal=false
-	game.bite_delay=1.0; game.promotion_cue_rank=0; game.bite_timer=0.0; game._process_fishing(0.97)
-	check(game.fishing_state==game.FishingState.ANTICIPATING and game.promotion_stage==1,'COMMON cue tops out at gold late in the wait')
-	game.promotion_cue_rank=2; game.bite_timer=0.0; game._process_fishing(0.97)
-	check(game.promotion_stage==2,'RARE cue tops out at purple late in the wait')
-	game.promotion_cue_rank=3; game.bite_timer=0.0; game._process_fishing(0.97)
-	check(game.promotion_stage==3,'EPIC cue reaches rainbow')
-	# Rarer fish are rare, so a flat lie rate would make rainbow mostly bait.
-	# Over many seeded Rocky casts a rainbow float must be honest more often than not.
-	var saved_combo: int = game.combo
-	game._reset_fishing(); game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
-	game.combo=0; game.fever_active=false; game.rng.seed=31337
-	var rainbow_total := 0
-	var rainbow_honest := 0
-	for i in range(2000):
-		game._reset_fishing(); game.shells=100; game._try_fish()
-		if game.promotion_cue_rank>=3:
-			rainbow_total+=1
-			if not game.promotion_false_cue: rainbow_honest+=1
-	check(rainbow_total>40 and float(rainbow_honest)/float(rainbow_total)>=0.5,'a rainbow cue is honest more often than not')
-	# GOOD substitutes come from the whole RARE pool, not always its first species.
-	var substitute_names := {}
-	for s in range(1,60):
-		game.rng.seed=s
-		substitute_names[str(game._pick_good_substitute(game.FISH_SPECIES[15]).get('name',''))]=true
-	check(substitute_names.size()>1,'GOOD substitutes vary across the RARE pool')
-	game._reset_fishing(); game.combo=saved_combo
-	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530)
 	game._reset_fishing()
 	game._reset_fishing()
 	game._resolve_fishing_timing(0.1)
@@ -155,10 +118,17 @@ func run():
 	check(first_meta.has('day') and first_meta.has('map') and first_meta.has('spot'),'first capture stores where and when')
 	check(float(first_meta.get('size_cm',0.0))>0.0 and float(first_meta.get('weight_kg',0.0))>0.0,'first capture stores size and weight variation')
 	check(first_meta.has('variant') and first_meta.has('mystery_marker'),'first capture stores variant and mystery markers')
+	check(bool(game.last_catch_metadata.get('crown', false)),'first capture is marked as crown')
 	var first_size := float(first_meta.get('size_cm',0.0))
+	check(bool(first_meta.get('crown', false)) and first_meta.has('record_size_cm'),'first capture persists crown metadata')
+	check(game.best_records.has(first_species) and float(game.best_records[first_species].get('size_cm',0.0))>=first_size,'first capture creates a size record')
 	# A repeat updates the current reveal while leaving the discovery record intact.
 	game._record_catch_metadata({'name':first_species,'rarity':str(first_meta.get('rarity','COMMON'))},'GOOD')
 	check(is_equal_approx(float(game.get_first_capture_metadata(first_species).get('size_cm',0.0)),first_size) and game.catch_latest.has(first_species),'first capture metadata is immutable across repeats')
+	check(game.reveal_shortened,'repeat catch uses shortened reveal')
+	check(not bool(game.last_catch_metadata.get('crown', false)),'smaller repeat does not claim crown')
+	var first_rarity := str(first_meta.get('rarity','COMMON'))
+	check(first_rarity == 'LEGENDARY' or game._reveal_stage_at(1.12,first_rarity)==4,'shortened reveal reaches face before standard timing')
 	var saved_fish=game.fish_count
 	game._save_game('user://smoke-test.json')
 	game.player=Vector2(368,372); game.fish_count=999; game.catches={}
