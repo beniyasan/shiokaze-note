@@ -26,3 +26,4 @@ notebook={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":78)]}
 sell_catch={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":88)]}
 register_catch={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":67)]}
 save_game={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":4194325)]}
+fx_toggle={"deadzone":0.5,"events":[Object(InputEventKey,"physical_keycode":70)]}

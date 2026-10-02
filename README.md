@@ -1,6 +1,6 @@
 # Tidebound Notebook v2
 
-A compact Godot 4 coastal fishing RPG prototype with an intentionally small SFC-era hero on a broad 64×40 tile overworld (16 px tile basis). Explore separate Saltmere town, amber beach, and rocky shore maps connected by short fade transitions at marked exits. Walk with WASD/arrow keys, cast with Space near water, open the tide ledger with N, and save with F6.
+A compact Godot 4 coastal fishing RPG prototype with an intentionally small SFC-era hero on a broad 64×40 tile overworld (16 px tile basis). Explore separate Saltmere town, amber beach, and rocky shore maps connected by short fade transitions at marked exits. Walk with WASD/arrow keys, cast with Space near water, open the tide ledger with N, save with F6, and press F to toggle reduced flashing.
 
 All visuals are original primitive pixel-style shapes; no Dragon Quest, Final Fantasy, or other protected character/asset content is used.
 
@@ -82,6 +82,31 @@ registers it. The prompt shows both prices, e.g. `X SELL +8   C REGISTER +5  NEW
 
 `N` opens the ledger. `A`/`D` page through heard rumors. `? mystery`, `~ shimmer`,
 `! gilded` and `^ crown` mark specimens; a green dot means that species is biting now.
+
+## Cue show: heat ladder and reduced flashing
+
+The whole cast is staged as one escalating show, defined in
+[EFFECTS_DESIGN.md](EFFECTS_DESIGN.md) and driven by `fx/fx_director.gd`:
+
+- **Heat ladder.** Float, cut-ins, speed lines and the reveal's summon light all use
+  one colour ladder: blue → gold → purple → rainbow, plus a premium gold. Gold is a
+  quiet glint (it appears on most casts); purple dims the world, hushes the music and
+  starts a heartbeat; rainbow fires a `激アツ!!` cut-in, speed lines and a brief
+  chromatic pulse. Hotter cues hold the bite back longer (up to +1.7 s).
+- **Extra cues.** A glowing fish school sometimes crosses the screen (often, but not
+  always, RARE or better). The golden tide (`黄金の潮`) only ever appears for an
+  EPIC-or-better candidate. These rolls use the FX director's own RNG, so they never
+  change which fish bites.
+- **Reach.** Purple-or-hotter bites enter a letterboxed REACH / SUPER REACH. Each pull
+  has a short hit-stop, splash and callout; banners use a slim top strip so the timing
+  gauge is never covered.
+- **Reveal.** The card glows in the promised heat, then promotes one step at a time
+  to the real result (`UP!`) or quietly fizzles. The flip bursts in proportion to
+  rarity, followed by `NEW!` / `CROWN!` stamps. LEGENDARY cracks the screen, then
+  shatters it. FEVER is announced once the catch is sold or registered.
+- **Safety.** Full-screen flashes are limited to three per second with a brightness
+  cap. F toggles reduced flashing (smaller flashes, gentler shake/zoom, no chromatic
+  aberration, a steady danger edge); the setting is saved.
 
 ## Chain FEVER
 

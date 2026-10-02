@@ -56,6 +56,10 @@ var _fade_out_seconds := 0.0
 var _fade_out_elapsed := 0.0
 var _music_volume_db := -15.0
 var _muted := false
+# Ducking lets the anticipation phase pull the music almost to silence (the
+# "hold your breath" beat) and snap back on the bite without changing mode.
+var _duck := 1.0
+var _duck_target := 1.0
 var _enabled := true
 var _stream_player: AudioStreamPlayer
 var _generator: AudioStreamGenerator
@@ -133,6 +137,12 @@ func set_muted(value: bool) -> void:
 	if _stream_player != null:
 		_stream_player.volume_db = -80.0 if _muted else _music_volume_db
 
+func set_duck(level: float) -> void:
+	_duck_target = clampf(level, 0.0, 1.0)
+
+func get_duck() -> float:
+	return _duck_target
+
 func is_muted() -> bool:
 	return _muted
 
@@ -170,6 +180,7 @@ func get_snapshot() -> Dictionary:
 		"fever": fever_active,
 		"muted": _muted,
 		"volume_db": _music_volume_db,
+		"duck": _duck_target,
 		"beat": maxi(0, _last_beat),
 		"playing": _playback != null and mode != MODE_SILENT,
 	}
@@ -206,6 +217,8 @@ func _process(delta: float) -> void:
 
 func _update_transport(delta: float) -> void:
 	elapsed += delta
+	# Fall quickly into the hush, come back a little faster than that.
+	_duck = move_toward(_duck, _duck_target, delta * (5.0 if _duck_target > _duck else 2.2))
 	# Mode crossfades happen over a fraction of a beat. The note clock is never
 	# reset, so field -> fishing returns on the same motif phase.
 	var fade_rate := 1.0 / maxf(0.08, BEAT_SECONDS * 0.75)
@@ -291,7 +304,7 @@ func _sample_at(t: float) -> float:
 	v += _fanfare_voice(t) * fanfare_gain
 	# Master guard leaves headroom for main.gd's SE player. A final tanh soft
 	# clip catches rare stacked peaks without hard digital clipping.
-	var master := 0.34
+	var master := 0.34 * _duck
 	if _muted:
 		master = 0.0
 	return tanh(v * master)

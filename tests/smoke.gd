@@ -43,9 +43,11 @@ func run():
 	check(game.shells==1 and game.fishing_state==game.FishingState.ANTICIPATING,'cast charges the explicit bait cost')
 	game._reset_fishing(); game.shells=100; game.bait_index=0; game.rod_index=0
 	game.fishing_state=game.FishingState.IDLE; game._try_fish()
+	# Hot cues deliberately hold the bite back (up to +1.7s, see
+	# EFFECTS_DESIGN.md), so tests wait long enough for any cue to bite.
 	check(game.fishing_state==game.FishingState.ANTICIPATING,'fishing bite anticipation starts')
 	var cast_species := str(game.cast_candidate.get('name',''))
-	game._process_fishing(2.0)
+	game._process_fishing(4.0)
 	check(game.fishing_state==game.FishingState.TIMING,'bite opens timing window')
 	game._resolve_fishing_timing(0.5)
 	check(game.fishing_state==game.FishingState.RESULT and game.last_grade=='PERFECT','perfect timing resolves result')
@@ -89,7 +91,7 @@ func run():
 	game.notebook_open=false; game._try_fish()
 	check(game.cast_timer>0,'valid cast starts timed sequence')
 	check(game.fishing_state == game.FishingState.ANTICIPATING,'cast enters bite anticipation')
-	game._process_fishing(2.0)
+	game._process_fishing(4.0)
 	game._resolve_fishing_timing(0.5)
 	check(game.last_grade=='PERFECT' and game.combo>=1,'perfect timing awards grade and combo')
 	# The cast keeps a PERFECT-pool candidate, while the mini-game grade still
@@ -385,7 +387,7 @@ func run():
 	game.notebook_open=false
 	game._reset_fishing(); game._break_chain(); game.combo=2
 	game.player=Vector2(170,590)
-	game._try_fish(); game._process_fishing(2.0)
+	game._try_fish(); game._process_fishing(4.0)
 	check(game.fish_hp_max==12 and game.timing_timer==20.0,'battle starts with stamina and a 20 second limit')
 	var before_battle=game.fish_count
 	game._handle_fishing_strike(0.5)
@@ -407,7 +409,7 @@ func run():
 		game._process_fishing(1.7); check(game.legendary_stage==3,'legendary advances to afterglow')
 	else:
 		check(game.last_rarity in ['COMMON','UNCOMMON','RARE','EPIC'],'bounded rarity result is valid')
-	game._reset_fishing(); game._try_fish(); game._process_fishing(2.0)
+	game._reset_fishing(); game._try_fish(); game._process_fishing(4.0)
 	game._process_fishing(1.1)
 	game._handle_fishing_strike(0.0)
 	check(game.fishing_state==game.FishingState.TIMING and game.battle_tension>0.4,'bad pull strains the line without instant failure')
@@ -415,7 +417,7 @@ func run():
 	check(game.last_grade=='MISS' and game.combo==0,'repeated bad pulls can snap the line and reset combo')
 	game._reset_fishing()
 	check(game.fish_hp==0 and game.battle_hits==0 and game.legendary_t==0.0,'reset clears battle and celebration state')
-	game._try_fish(); game._process_fishing(2.0); game._process_fishing(21.0)
+	game._try_fish(); game._process_fishing(4.0); game._process_fishing(21.0)
 	check(game.last_grade=='MISS','battle timeout loses the fish')
 	# The standalone chain exposes all four deterministic mini-game styles.
 	var ChallengeScript = preload('res://fishing_challenge.gd')
@@ -434,13 +436,13 @@ func run():
 		check(recovered.success,'challenge %s can recover at its visible target' % starting_name)
 	# A combo-two battle wires the chain into the live timing state.
 	game._reset_fishing(); game._break_chain(); game.combo=2; game.player=Vector2(170,590)
-	game._try_fish(); game._process_fishing(2.0)
+	game._try_fish(); game._process_fishing(4.0)
 	check(game.fishing_challenge != null and game.fishing_challenge.rounds.size()==4,'bite configures the four-round challenge chain')
 	# Use the real moving gauge at 60fps, rather than injecting perfect positions.
 	# This proves each rotated chain can be caught through the normal key path.
 	for seed in range(4):
 		game._reset_fishing(); game._break_chain(); game.combo=2
-		game._try_fish(); game._process_fishing(2.0)
+		game._try_fish(); game._process_fishing(4.0)
 		game.fishing_challenge.configure(3,2,seed)
 		for frame in range(1200):
 			if game.fishing_state != game.FishingState.TIMING: break
@@ -616,6 +618,109 @@ func run():
 	check(not game.fever_active and game.combo==0 and game.fever_t==0.0,'miss ends fever and resets chain')
 	game._load_game('user://legacy-test.json')
 	check(not game.fever_active and game.combo==0,'legacy saves default to no fever')
+	# ---- Dopamine FX (EFFECTS_DESIGN.md) ----------------------------------
+	var fx = game.fx
+	game._reset_fishing(); game._break_chain()
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
+	game.time_of_day=0.95; game.weather='clear'; game.season='autumn'
+	# The premium "golden tide" is the one cue that never lies.
+	var low_premium := 0
+	for i in range(400):
+		if fx.roll_premium(2) or fx.roll_premium(0): low_premium += 1
+	check(low_premium==0,'premium cue is never rolled for a RARE-or-lower candidate')
+	fx.rng.seed=4401
+	var premium_casts := 0
+	var premium_lies := 0
+	for i in range(1500):
+		game._reset_fishing(); game.shells=100; game.combo=0; game.fever_active=false
+		game._try_fish()
+		if game.fishing_state != game.FishingState.ANTICIPATING: continue
+		if game.fx_premium:
+			premium_casts += 1
+			if game._rarity_rank(str(game.cast_candidate.get('rarity','COMMON'))) < 3 or game.promotion_false_cue: premium_lies += 1
+	check(premium_casts>0 and premium_lies==0,'golden tide appears and always means EPIC or better (%d casts)' % premium_casts)
+	# FX rolls run on their own RNG, so the gameplay roll is unchanged.
+	game._reset_fishing(); game.shells=100
+	game.rng.seed=99001; fx.rng.seed=1
+	game._try_fish()
+	var cand_a := str(game.cast_candidate.get('name','')); var state_a: int = game.rng.state
+	game._reset_fishing(); game.shells=100
+	game.rng.seed=99001; fx.rng.seed=777
+	game._try_fish()
+	check(cand_a==str(game.cast_candidate.get('name','')) and state_a==game.rng.state,'FX rolls never shift the gameplay RNG')
+	# Hotter cues hold the bite back longer.
+	var ext: Array = fx.WAIT_EXTENSION
+	var ladder_ok := true
+	for i in range(1, ext.size()):
+		if float(ext[i]) <= float(ext[i-1]): ladder_ok = false
+	check(ladder_ok and fx.wait_extension(0)==0.0,'wait extension climbs with heat and is zero for a quiet float')
+	var rod_mult := float(game.RODS[game.rod_index].get('bite_mult',1.0))
+	var base_delay: float = game.bite_delay - fx.wait_extension(game.fx_heat)
+	check(base_delay >= 0.72*rod_mult - 0.001 and base_delay <= 1.42*rod_mult + 0.001,'bite delay is the base roll plus the heat extension')
+	# Photosensitivity guard.
+	game._reset_fishing()
+	fx.reduced=false; fx.flash_log.clear()
+	var accepted := 0
+	for i in range(10):
+		if fx.request_flash(Color.WHITE, 1.0, 0.2): accepted += 1
+	check(accepted==fx.FLASH_MAX_PER_WINDOW and fx.flash_alpha<=fx.FLASH_ALPHA_CAP,'at most three full-screen flashes per second, brightness capped')
+	fx.update(1.05)
+	check(fx.request_flash(Color.WHITE, 1.0, 0.2),'flash budget refills after a second')
+	fx.reduced=true; fx.flash_log.clear(); fx.request_flash(Color.WHITE, 1.0, 0.2)
+	check(fx.flash_alpha<=fx.FLASH_ALPHA_CAP_REDUCED and fx.chroma()==0.0,'reduced mode caps flashes and disables chromatic aberration')
+	fx.chroma_pulse(1.0,0.5)
+	check(fx.chroma()==0.0,'reduced mode ignores chroma pulses')
+	game._save_game('user://fx-test.json'); fx.reduced=false; game._load_game('user://fx-test.json')
+	check(fx.reduced,'reduced flash setting survives save/load')
+	fx.reduced=false
+	# Hit-stop freezes the fishing clock only briefly.
+	fx.hitstop(0.1)
+	check(fx.time_scale()==0.0,'hit-stop freezes game time')
+	fx.update(0.11)
+	check(fx.time_scale()==1.0,'hit-stop releases after its duration')
+	# Ladder: gold stays quiet, purple hushes the music, rainbow cuts in.
+	fx.cast(1); fx.counters.clear(); fx.flash_log.clear()
+	fx.cue_step(1, Vector2(240,160))
+	check(not fx.counters.keys().any(func(k): return str(k).begins_with('cutin_')) and int(fx.counters.get('flash',0))==0 and fx.music_duck==1.0,'gold step is a quiet glint, not a cut-in')
+	fx.cue_step(2, Vector2(240,160))
+	check(fx.music_duck<0.2 and fx.heartbeat_on and fx.dim_target>0.0,'purple step hushes the music and starts the heartbeat')
+	fx.cue_step(3, Vector2(240,160))
+	check(int(fx.counters.get('cutin_hot',0))==1 and fx.speed_target>0.5,'rainbow step fires the hot cut-in and speed lines')
+	fx.bite(3, Vector2(240,160))
+	check(fx.music_duck==1.0 and fx.letterbox_target==1.0 and not fx.heartbeat_on,'a hot bite releases the hush and opens the reach letterbox')
+	fx.cast(0); fx.bite(1, Vector2(240,160))
+	check(fx.letterbox_target==0.0,'a gold bite does not enter reach')
+	fx.cast(0); fx.premium_omen(); fx.update(0.4)
+	check(int(fx.counters.get('cutin_premium',0))>=1,'golden tide lands its premium cut-in')
+	fx.cue_step(3, Vector2(240,160))
+	check(int(fx.counters.get('cutin_premium',0))>=2,'after the golden tide the rainbow step stays on the gold ladder')
+	# Summon light: promotions climb one step at a time; broken promises fizzle.
+	game._reset_fishing()
+	game.last_rarity='EPIC'; game.reveal_shortened=false; game.reveal_glow_start=1
+	var plan: Array = game._reveal_glow_plan()
+	check(plan.size()==2 and int(plan[0].rank)==2 and int(plan[1].rank)==3 and float(plan[1].t)<game._reveal_face_time(),'gold-to-EPIC reveal promotes twice before the card turns')
+	check(game._reveal_glow_rank_at(0.5)==1 and game._reveal_glow_rank_at(game._reveal_face_time())==3,'summon light starts at the promised heat and ends at the result')
+	game.last_rarity='RARE'; game.reveal_glow_start=3
+	plan = game._reveal_glow_plan()
+	check(plan.size()==1 and str(plan[0].kind)=='fizzle' and game._reveal_glow_rank_at(1.2)==2,'a rainbow promise that lands RARE fizzles once')
+	game.last_rarity='COMMON'; game.reveal_glow_start=-1
+	check(game._reveal_glow_plan().is_empty(),'a catch with no cue history reveals without promotions')
+	# A gold float on a common fish must not fizzle every ordinary catch.
+	game._reset_fishing(); game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530)
+	game.time_of_day=0.5; game.weather='clear'; game.season='spring'
+	game.shells=100; game._try_fish()
+	game.cast_candidate={'name':'Silver sprat','rarity':'COMMON'}; game.promotion_target_rarity='COMMON'
+	game.promotion_cue_rank=0; game.promotion_false_cue=false; game.fx_premium=false; game.promotion_reversal_armed=false
+	game._process_fishing(game.bite_delay*0.5); game._process_fishing(game.bite_delay)
+	check(game.fishing_state==game.FishingState.TIMING and game.reveal_glow_start==0,'gold float on a common catch starts the summon light at blue')
+	# FEVER is announced when the catch is settled, not over the reveal.
+	game._reset_fishing(); game._break_chain(); game.combo=2; fx.counters.clear()
+	game.cast_candidate={'name':'Silver sprat','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
+	check(game.fever_active and int(fx.counters.get('fever',0))==0,'FEVER banner waits while the card is revealed')
+	game.reveal_t=2.0; game.reveal_stage=4
+	game.register_pending_catch()
+	check(int(fx.counters.get('fever',0))==1 and fx.fever_target==1.0,'settling the catch announces FEVER and lights the frame')
+	game._break_chain(); game._reset_fishing()
 	game.queue_free()
 	await process_frame
 	print('RESULT: %d failure(s)' % failures)
