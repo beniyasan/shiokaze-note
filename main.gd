@@ -1103,6 +1103,7 @@ func register_pending_catch() -> bool:
 	# by saving mid-choice.
 	var reward := _register_value(metadata)
 	var new_crown := _commit_crown_record(species, metadata)
+	result_toast_pending = ""
 	shells += reward
 	pending_catch["decision"] = "registered"
 	pending_catch["register_value"] = reward
@@ -1124,6 +1125,7 @@ func sell_pending_catch() -> bool:
 		else: catches[species] = held
 	var value := pending_catch_sell_value()
 	var gave_up_crown := bool((pending_catch.get("metadata", {}) as Dictionary).get("crown", false))
+	result_toast_pending = ""
 	shells += value
 	pending_catch["decision"] = "sold"
 	pending_catch["sell_value"] = value
@@ -1353,6 +1355,7 @@ func _process_fishing(delta: float):
 			elif Input.is_action_just_pressed("fish"):
 				# Space never silently chooses a disposition.  Keep the result on
 				# screen until the player explicitly sells or registers it.
+				result_toast_pending = ""
 				toast = "Choose SELL or REGISTER / the catch is safely held"
 				toast_t = 1.8
 		elif Input.is_action_just_pressed("fish"):
@@ -2367,14 +2370,13 @@ func _draw_legendary_result():
 		_center_text(53,"LEGENDARY!!",35,Color("#fff4bd"))
 		var legendary_marker := _metadata_marker(last_catch_metadata)
 		var legendary_name := str(last_catch).to_upper() + (" " + legendary_marker if legendary_marker != "" else "") + ("  CROWN" if bool(last_catch_metadata.get("crown", false)) else "")
-		_center_text(211,legendary_name,24,Color("#fff3c9"))
-		_center_text(231,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
-		_center_text(245,"%.1f cm  /  %.2f kg  /  %s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant],9,Color("#d8d0ff"))
+		_center_text(203,legendary_name,24,Color("#fff3c9"))
+		_center_text(221,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
+		_center_text(234,"%.1f cm  /  %.2f kg  /  %s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant],9,Color("#d8d0ff"))
 		if promotion_result_label != "" or promotion_false_cue_revealed:
-			_center_text(255,(promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED"),8,Color("#f7f0cb"))
-			_center_text(266,_catch_choice_prompt(),8,Color("#fff0d8"))
-		else:
-			_center_text(258,_catch_choice_prompt(),8,Color("#fff0d8"))
+			_center_text(245,(promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED"),8,Color("#f7f0cb"))
+		# One fixed prompt line, well inside the 270px viewport.
+		_center_text(257,_catch_choice_prompt(),9,Color("#fff0d8"))
 	# The fish grows from a dark silhouette to a full-width rainbow trophy.
 	var scale := 0.22 + rise * 0.55 + peak * 0.28
 	var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])

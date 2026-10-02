@@ -67,6 +67,15 @@ func run():
 	game._process_fishing(0.40)
 	check(game.reveal_stage==4 and game.reveal_stage_name()=='REVEALED','reveal resolves fish name')
 	check(game.catch_reveal_complete() and game.toast.contains(cast_species) and game.result_toast_pending=='','toast and prompt appear once the card has flipped')
+	# A choice made while a reveal toast is still queued must keep its own
+	# confirmation: the queued toast is dropped, not flushed over it.
+	game.result_toast_pending='stale reveal toast'
+	game.sell_pending_catch(); game._process_fishing(0.0)
+	check(game.toast.begins_with('SOLD') and game.result_toast_pending=='','selling is confirmed instead of being overwritten by the reveal toast')
+	game._reset_fishing(); game.cast_candidate={'name':'Silver sprat','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
+	game.reveal_stage=4; game.reveal_t=2.0; game.result_toast_pending='stale reveal toast'
+	game.register_pending_catch(); game._process_fishing(0.0)
+	check(game.toast.begins_with('REGISTERED') and game.result_toast_pending=='','registering is confirmed instead of being overwritten by the reveal toast')
 	game._reset_fishing()
 	game.notebook_open=true; game._try_fish()
 	check(game.cast_timer==0,'notebook prevents casting')
