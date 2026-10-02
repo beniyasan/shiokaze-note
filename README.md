@@ -18,7 +18,7 @@ Space starts a cast at the shore or pier. After the bite, the fish battle is a s
 - Clean pulls ramp the procedural SE and screen effects; failed pulls strain the line and can snap it
 - A three-catch perfect combo unlocks Rainbow Kingfish (LEGENDARY)
 
-LEGENDARY follows a paced reveal: omen, rising energy, full-screen rainbow light/rays/particles, then a long afterglow. All SE are synthesized with Godot's AudioStreamGenerator and have no external audio-file dependency. After the reveal, the catch stays safely on the result card until the player chooses C to register/keep it or X to sell it for shells; Space never dismisses an undecided catch. A pending choice is saved and restored, so closing the game cannot discard a fish. Selling removes only the held inventory copy while preserving its discovery and size record. First captures remain immutable discovery records; repeat catches use a shortened reveal, and a larger specimen updates a species crown record shown with a CROWN marker. Size breaks ties by weight, and crown records retain map, spot, day, variant, and grade. Crown data, pending choices, and the tide forecast are saved in the version 11 ledger format.
+LEGENDARY follows a paced reveal: omen, rising energy, full-screen rainbow light/rays/particles, then a long afterglow. All SE are synthesized with Godot's AudioStreamGenerator and have no external audio-file dependency. After the reveal, the catch stays safely on the result card until the player chooses C to register/keep it or X to sell it for shells; Space never dismisses an undecided catch. A pending choice is saved and restored, so closing the game cannot discard a fish. Selling removes only the held inventory copy while preserving its discovery and size record. First captures remain immutable discovery records; repeat catches use a shortened reveal, and a larger specimen updates a species crown record shown with a CROWN marker. Size breaks ties by weight, and crown records retain map, spot, day, variant, and grade. Crown data, pending choices, and the tide forecast are saved in the version 12 ledger format.
 
 ## Tide forecast and fish availability
 
@@ -73,3 +73,22 @@ On a fresh clone, import assets before running smoke checks:
 ```sh
 XDG_DATA_HOME=/tmp/godot-data XDG_CACHE_HOME=/tmp/godot-cache XDG_CONFIG_HOME=/tmp/godot-config godot --headless --editor --path . --import --quit
 ```
+
+## Tackle economy and fair rescue forecast
+
+Bait is consumed on every cast and rods charge a small maintenance fee on the
+same cast. Worms and the Reed Rod are free, reliable fallbacks. Glowbait and
+Moonseed cost 2 and 4 shells and increase rarity odds, but make an uncountered
+fish surge harder. Fiberglass costs 2 shells and reduces line strain while
+slowing the bite; Stormglass costs 4 shells and suppresses escape while making
+the line twitchier. These are different risk/reward choices rather than a free
+upgrade ladder. The HUD and bait/rod selection toasts show the exact
+shells-per-cast cost and trade-off.
+
+Misses and GOOD catches advance a visible three-step RESCUE meter. Each step
+adds a small, deterministic rarity nudge to the tide forecast and moves the
+promotion float forward, disclosed as `RESCUE TIDE`; it never resolves the
+timing battle. At RESCUE READY, the next landed battle gets a one-shot
+map-legal RARE-or-better floor, then the meter resets. Tackle selection and
+rescue progress are saved in the version 12 ledger; older saves keep their
+selected indices and start with the new derived forecast bonus.

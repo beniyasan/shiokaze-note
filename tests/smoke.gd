@@ -34,9 +34,14 @@ func run():
 		check(game.player.distance_to(target)<2,'route waypoint '+str(target))
 	check(game._can_fish(),'pier route ends at fishing spot')
 	check(game.bait_name()=='Worm' and game.rod_name()=='Reed Rod','default tackle is available')
-	game.cycle_bait(); check(game.bait_name()=='Glowbait' and game.BAITS[game.bait_index].rarity_bonus>0.0,'bait selection improves rarity odds')
-	game.cycle_rod(); check(game.rod_name()=='Fiberglass Rod' and game.RODS[game.rod_index].tension_mult<1.0,'rod selection reduces line strain')
-	game.cycle_bait(-1); game.cycle_rod(-1)
+	check(game.tackle_cost()==0 and game.can_afford_tackle(),'default tackle is free and affordable')
+	game.cycle_bait(); check(game.bait_name()=='Glowbait' and game.bait_cost()==2 and game.BAITS[game.bait_index].rarity_bonus>0.0 and game.BAITS[game.bait_index].escape_mult>1.0,'glowbait costs shells and adds a surge risk')
+	game.cycle_rod(); check(game.rod_name()=='Fiberglass Rod' and game.rod_cost()==2 and game.RODS[game.rod_index].tension_mult<1.0 and game.RODS[game.rod_index].escape_mult>1.0,'fiberglass trades lower strain for a slower riskier bite')
+	game.cycle_rod(); check(game.rod_name()=='Stormglass Rod' and game.rod_cost()==4 and game.RODS[game.rod_index].tension_mult>game.RODS[1].tension_mult and game.RODS[game.rod_index].escape_mult<game.RODS[1].escape_mult,'stormglass trades higher strain for escape control')
+	game.cycle_bait(-1); game.cycle_rod(-2)
+	game.shells=3; game.bait_index=1; game.rod_index=0; game._try_fish()
+	check(game.shells==1 and game.fishing_state==game.FishingState.ANTICIPATING,'cast charges the explicit bait cost')
+	game._reset_fishing(); game.shells=100; game.bait_index=0; game.rod_index=0
 	game.fishing_state=game.FishingState.IDLE; game._try_fish()
 	check(game.fishing_state==game.FishingState.ANTICIPATING,'fishing bite anticipation starts')
 	var cast_species := str(game.cast_candidate.get('name',''))
@@ -106,9 +111,20 @@ func run():
 	game._reset_fishing()
 	game._resolve_fishing_timing(0.1)
 	check(game.last_grade=='MISS' and game.combo==0,'miss resets combo')
+	game._reset_fishing()
 	# Soft pity counts consecutive misses/low-grade outcomes and arms one
 	# transparent rescue hook. The hook changes only the rarity floor; the
 	# timing battle is still required for a real catch.
+	game._reset_pity()
+	game._advance_pity("MISS")
+	check(is_equal_approx(game.rescue_forecast_bonus(),0.04) and game.pity_status().forecast_bonus>0.0,'first miss adds a visible forecast bonus')
+	game._advance_pity("GOOD")
+	check(game.rescue_forecast_bonus()>0.04 and game.pity_status().low_grade_streak==1,'low-grade catch strengthens the rescue forecast')
+	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530); game.shells=100; game.bait_index=0; game.rod_index=0
+	game._try_fish()
+	game._process_fishing(game.bite_delay * 0.30)
+	check(game.promotion_rescue_bonus>0.0 and game.promotion_stage>=1,'rescue forecast is disclosed on the promotion float')
+	game._reset_fishing()
 	game._reset_pity()
 	for i in range(game.PITY_THRESHOLD):
 		game._resolve_fishing_timing(-1.0)

@@ -22,14 +22,21 @@ var shells := 12
 var bait_index := 0
 var rod_index := 0
 const BAITS: Array[Dictionary] = [
- {"name":"Worm","cost":0,"rarity_bonus":0.0,"tension_bonus":0.0},
- {"name":"Glowbait","cost":2,"rarity_bonus":0.14,"tension_bonus":0.06},
- {"name":"Moonseed","cost":4,"rarity_bonus":0.28,"tension_bonus":0.12}
+ # Bait is a per-cast consumable.  The brighter baits improve rarity odds,
+ # but their scent also makes a hooked fish surge harder.  Worm is a safe,
+ # free fallback rather than a strictly-worse tutorial item.
+ {"name":"Worm","cost":0,"rarity_bonus":0.0,"tension_bonus":0.0,"escape_mult":1.0,"risk":"steady"},
+ {"name":"Glowbait","cost":2,"rarity_bonus":0.14,"tension_bonus":0.06,"escape_mult":1.06,"risk":"warm line"},
+ {"name":"Moonseed","cost":4,"rarity_bonus":0.28,"tension_bonus":0.12,"escape_mult":1.14,"risk":"hot line"}
 ]
 const RODS: Array[Dictionary] = [
- {"name":"Reed Rod","tension_mult":1.0,"escape_mult":1.0},
- {"name":"Fiberglass Rod","tension_mult":0.82,"escape_mult":0.90},
- {"name":"Stormglass Rod","tension_mult":0.68,"escape_mult":0.82}
+ # Rods are also maintenance costs paid when a cast starts.  Each model has a
+ # different trade-off: Fiberglass forgives strain but gives the fish a little
+ # more escape time, while Stormglass controls escape at the cost of a twitchy
+ # line.  There is no free, strictly dominant upgrade.
+ {"name":"Reed Rod","cost":0,"tension_mult":1.0,"escape_mult":1.0,"bite_mult":1.0,"risk":"steady"},
+ {"name":"Fiberglass Rod","cost":2,"tension_mult":0.82,"escape_mult":1.08,"bite_mult":1.16,"risk":"slow bite"},
+ {"name":"Stormglass Rod","cost":4,"tension_mult":1.08,"escape_mult":0.78,"bite_mult":0.88,"risk":"hot line"}
 ]
 var day := 1
 var time_of_day := 0.35
@@ -99,6 +106,7 @@ var promotion_false_cue := false
 var promotion_false_cue_revealed := false
 var promotion_reversal_armed := false
 var promotion_cue_rank := 0
+var promotion_rescue_bonus := 0.0
 var cast_candidate: Dictionary = {}
 var cast_good_candidate: Dictionary = {}
 var promotion_target_rarity := "COMMON"
@@ -137,6 +145,8 @@ const PROMOTION_REVERSAL_CHANCE := 0.24
 ## the next battle normally.  Once armed, the hook only changes the species
 ## floor to RARE; it never auto-wins a cast or bypasses map/grade rules.
 const PITY_THRESHOLD := 3
+const PITY_FORECAST_BONUS_STEP := 0.04
+const PITY_LOW_GRADE_BONUS_STEP := 0.02
 var pity_meter := 0
 var rescue_ready := false
 var low_grade_streak := 0
@@ -567,7 +577,10 @@ func _pick_species(grade: String, apply_rescue := false, exclude_legendary := fa
 		if exclude_legendary and str(fish.get("rarity", "COMMON")) == "LEGENDARY": continue
 		if grade == "PERFECT" or fish.rarity in ["COMMON","UNCOMMON","RARE"]: eligible.append(fish)
 	if eligible.is_empty(): eligible = pool
-	var bonus := float(BAITS[bait_index].rarity_bonus) + (FEVER_RARITY_BONUS if fever_active else 0.0)
+	# Rescue is intentionally a soft odds nudge before the one-shot RARE floor.
+	# It makes an unlucky forecast feel warmer without handing out a catch or
+	# changing the map/time/weather legality of the pool.
+	var bonus := float(BAITS[bait_index].rarity_bonus) + (FEVER_RARITY_BONUS if fever_active else 0.0) + rescue_forecast_bonus()
 	var total := 0.0
 	var weights: Array[float] = []
 	for fish in eligible:
@@ -711,12 +724,30 @@ func _advance_pity(outcome: String) -> void:
 		rescue_ready = true
 
 func pity_status() -> Dictionary:
-	return {"meter": pity_meter, "threshold": PITY_THRESHOLD, "ready": rescue_ready, "low_grade_streak": low_grade_streak}
+	return {"meter": pity_meter, "threshold": PITY_THRESHOLD, "ready": rescue_ready, "low_grade_streak": low_grade_streak, "forecast_bonus": rescue_forecast_bonus()}
+
+func rescue_forecast_bonus() -> float:
+	"""Return the visible rarity-odds nudge earned by misses/low-grade catches.
+
+	This is deliberately separate from the RARE rescue floor.  A player gets a
+	small, deterministic forecast improvement after the first unlucky outcome,
+	then a larger promotion cue as the meter fills, while the timing battle is
+	still required for every catch.
+	"""
+	return clampf(float(pity_meter) * PITY_FORECAST_BONUS_STEP + float(low_grade_streak) * PITY_LOW_GRADE_BONUS_STEP, 0.0, 0.18)
+
+func rescue_forecast_label() -> String:
+	var percent := int(round(rescue_forecast_bonus() * 100.0))
+	if rescue_ready:
+		return "RESCUE READY  /  RARE floor  +%d%% forecast" % percent
+	if percent > 0:
+		return "RESCUE %d/%d  /  tide +%d%%" % [pity_meter, PITY_THRESHOLD, percent]
+	return "RESCUE 0/%d" % PITY_THRESHOLD
 
 func _pity_label() -> String:
-	if rescue_ready:
-		return "RESCUE READY"
-	return "RESCUE %d/%d" % [pity_meter, PITY_THRESHOLD]
+	var percent := int(round(rescue_forecast_bonus() * 100.0))
+	if rescue_ready: return "READY +%d%%" % percent
+	return "RESCUE %d/%d +%d%%" % [pity_meter, PITY_THRESHOLD, percent]
 
 # Keep the variation ranges deliberately broad but believable.  They are
 # derived from rarity rather than adding 23 hand-maintained fields to the
@@ -940,15 +971,21 @@ func _metadata_marker(metadata: Dictionary) -> String:
 
 func bait_name() -> String: return str(BAITS[bait_index].name)
 func rod_name() -> String: return str(RODS[rod_index].name)
+func bait_cost() -> int: return int(BAITS[bait_index].get("cost", 0))
+func rod_cost() -> int: return int(RODS[rod_index].get("cost", 0))
+func tackle_cost() -> int: return bait_cost() + rod_cost()
+func can_afford_tackle() -> bool: return shells >= tackle_cost()
+func tackle_summary() -> String:
+	return "%s %d + %s %d = %d shells/cast" % [bait_name(), bait_cost(), rod_name(), rod_cost(), tackle_cost()]
 func cycle_bait(step: int = 1) -> void:
 	if fishing_state != FishingState.IDLE: return
 	bait_index = posmod(bait_index + step, BAITS.size())
-	toast = "%s selected (%d shells, rarity +%d%%)" % [bait_name(), int(BAITS[bait_index].cost), int(BAITS[bait_index].rarity_bonus * 100.0)]
+	toast = "%s selected (%d shells/cast, rarity +%d%%, %s)" % [bait_name(), bait_cost(), int(BAITS[bait_index].rarity_bonus * 100.0), str(BAITS[bait_index].get("risk", "steady"))]
 	toast_t = 2.0
 func cycle_rod(step: int = 1) -> void:
 	if fishing_state != FishingState.IDLE: return
 	rod_index = posmod(rod_index + step, RODS.size())
-	toast = "%s selected (line strain x%.2f)" % [rod_name(), float(RODS[rod_index].tension_mult)]
+	toast = "%s selected (%d shells/cast, strain x%.2f, escape x%.2f, %s)" % [rod_name(), rod_cost(), float(RODS[rod_index].tension_mult), float(RODS[rod_index].escape_mult), str(RODS[rod_index].get("risk", "steady"))]
 	toast_t = 2.0
 
 func _try_fish():
@@ -958,11 +995,11 @@ func _try_fish():
 		return
 	if fishing_state != FishingState.IDLE: return
 	if _can_fish():
-		var bait_cost := int(BAITS[bait_index].cost)
-		if shells < bait_cost:
-			toast = "Need %d shells for %s (you have %d)" % [bait_cost, bait_name(), shells]; toast_t = 2.5
+		var cast_cost := tackle_cost()
+		if shells < cast_cost:
+			toast = "Need %d shells for %s (you have %d)" % [cast_cost, tackle_summary(), shells]; toast_t = 2.5
 			return
-		shells -= bait_cost
+		shells -= cast_cost
 		fishing_state = FishingState.ANTICIPATING
 		promotion_t = 0.0
 		promotion_stage = 0
@@ -971,6 +1008,7 @@ func _try_fish():
 		promotion_false_cue_revealed = false
 		promotion_reversal_armed = false
 		promotion_result_label = ""
+		promotion_rescue_bonus = rescue_forecast_bonus()
 		cast_candidate = _pick_cast_candidate(true)
 		cast_good_candidate = _pick_good_substitute(cast_candidate)
 		promotion_target_rarity = str(cast_candidate.get("rarity", "COMMON"))
@@ -991,10 +1029,10 @@ func _try_fish():
 			promotion_cue_rank = 2
 		promotion_reversal_armed = rng.randf() < PROMOTION_REVERSAL_CHANCE
 		cast_timer = 1.8
-		bite_delay = rng.randf_range(0.72, 1.42)
+		bite_delay = rng.randf_range(0.72, 1.42) * float(RODS[rod_index].get("bite_mult", 1.0))
 		bite_timer = 0.0
 		face = 0
-		toast = "Line out... wait for a bite!"
+		toast = "Line out... %s" % tackle_summary()
 		toast_t = 2.0
 		_music_call("start_fishing", [combo])
 		_play_se("cast")
@@ -1015,7 +1053,10 @@ func _process_fishing(delta: float):
 		bite_timer += delta
 		promotion_t = bite_timer
 		var promotion_progress := clampf(bite_timer / maxf(0.01, bite_delay), 0.0, 1.0)
-		var stage_bias := 0.12 * float(promotion_cue_rank)
+		# The rescue tide is a visible promotion assist, not an auto-catch. It
+		# brings the float forward a little after repeated misses/GOOD catches,
+		# while the player still has to win the timing battle below.
+		var stage_bias := 0.12 * float(promotion_cue_rank) + promotion_rescue_bonus * 0.60
 		var cue_progress := clampf(promotion_progress + stage_bias, 0.0, 1.0)
 		var raw_stage := 3 if cue_progress >= 0.86 else (2 if cue_progress >= 0.62 else (1 if cue_progress >= 0.34 else 0))
 		var stage_limit := _promotion_max_stage(promotion_target_rarity)
@@ -1074,7 +1115,11 @@ func _process_fishing(delta: float):
 		if fishing_challenge != null and not fishing_challenge.done:
 			fishing_challenge.tick(delta, counter)
 			challenge_hint_t = maxf(0.0, challenge_hint_t-delta)
-		battle_escape = clampf(battle_escape + delta * (-0.035 if countering else (0.095 if straining else 0.055)) * float(RODS[rod_index].escape_mult), 0.0, 1.0)
+		var escape_rate := float(RODS[rod_index].escape_mult) * float(BAITS[bait_index].get("escape_mult", 1.0))
+		# Bait risk applies to uncountered surges only. A deliberate counter
+		# remains a reliable recovery action regardless of the lure selected.
+		var escape_change := -0.035 * float(RODS[rod_index].escape_mult) if countering else (0.095 if straining else 0.055) * escape_rate
+		battle_escape = clampf(battle_escape + delta * escape_change, 0.0, 1.0)
 		battle_tension = clampf(battle_tension + delta * (-0.045 if countering else (0.07 if straining else -0.014)) * float(RODS[rod_index].tension_mult), 0.0, 1.0)
 		gauge += delta * (1.25 + battle_tension * 0.75) * gauge_direction
 		if gauge >= 1.0: gauge = 1.0; gauge_direction = -1.0
@@ -1444,6 +1489,7 @@ func _reset_fishing():
 	promotion_reversal_armed = false
 	promotion_reversal = false
 	promotion_result_label = ""
+	promotion_rescue_bonus = 0.0
 	toast = "Ready to cast"
 	toast_t = 1.2
 
@@ -1451,7 +1497,7 @@ func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		toast = "Could not save. Please check available storage."; toast_t = 4; return
-	f.store_string(JSON.stringify({"version":11,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"weather":weather,"season":season,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected,"pending_catch":pending_catch,"pending_catch_state":pending_catch_state,"last_catch_decision":last_catch_decision,"reveal_t":reveal_t,"reveal_stage":reveal_stage,"reveal_shortened":reveal_shortened,"legendary_t":legendary_t,"legendary_stage":legendary_stage}))
+	f.store_string(JSON.stringify({"version":12,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"weather":weather,"season":season,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected,"pending_catch":pending_catch,"pending_catch_state":pending_catch_state,"last_catch_decision":last_catch_decision,"reveal_t":reveal_t,"reveal_stage":reveal_stage,"reveal_shortened":reveal_shortened,"legendary_t":legendary_t,"legendary_stage":legendary_stage}))
 	toast = "Saved to the tide ledger"; toast_t = 2.4
 
 func _normalize_catch_metadata(raw: Dictionary, species: String, first_capture := true) -> Dictionary:
@@ -1559,7 +1605,7 @@ func _load_game(path: String = SAVE_PATH):
 			if legacy_metadata or not latest.has("record_weight_kg"): latest["record_weight_kg"] = float(record.get("weight_kg", latest.get("weight_kg", 0.0)))
 			if legacy_metadata or not latest.has("crown"): latest["crown"] = is_equal_approx(float(latest.get("size_cm", 0.0)), float(record.get("size_cm", 0.0)))
 			catch_latest[key] = latest
-	# A v11 save may have been written while the result card was awaiting the
+	# A v11/v12 save may have been written while the result card was awaiting the
 	# player's disposition. Restore that card instead of silently discarding the
 	# held fish. Older saves have no pending fields and remain idle as before.
 	var saved_pending = data.get("pending_catch", {})
@@ -1772,8 +1818,9 @@ func _draw_hud():
 	_text(Vector2(16,35),"Day %02d    Fish %02d  Shells %02d" % [day,fish_count,shells],10)
 	_panel(Rect2(8,40,174,18))
 	_text(Vector2(15,53),environment_label() + "  " + clock_text(),8)
-	_panel(Rect2(294,8,178,22))
-	_text(Vector2(302,23),"[N] Ledger   [B] Bait: %s   [R] Rod: %s" % [bait_name(), rod_name()],10)
+	_panel(Rect2(294,8,178,32))
+	_text(Vector2(302,21),"[N] Ledger  B:%d  R:%d shells" % [bait_cost(), rod_cost()],9)
+	_text(Vector2(302,34),bait_name() + " / " + rod_name(),8)
 	if catch_choice_pending():
 		_panel(Rect2(8,218,250,20))
 		_text(Vector2(15,232),_catch_choice_prompt(),9)
@@ -1802,7 +1849,8 @@ func _draw_hud():
 		_panel(Rect2(66,51,348,194),true)
 		_text(Vector2(85,75),"THE TIDE LEDGER",17,true)
 		_text(Vector2(85,94),"Saltmere / " + current_map.capitalize() + "  " + _time_period().to_upper(),10,true)
-		_text(Vector2(85,104),"Rescue: " + ("READY / next catch RARE+" if rescue_ready else "%d/%d unlucky pulls" % [pity_meter, PITY_THRESHOLD]),9,true)
+		_text(Vector2(85,104),rescue_forecast_label(),9,true)
+		_text(Vector2(85,113),"Tackle  B:%s %d  /  R:%s %d  shells/cast" % [bait_name(), bait_cost(), rod_name(), rod_cost()],8,true)
 		# Three-column field guide: every species has a card fallback portrait.
 		var rows := 8
 		for i in range(FISH_SPECIES.size()):
@@ -1810,7 +1858,7 @@ func _draw_hud():
 			var col := i / rows
 			var row := i % rows
 			var x := 82.0 + col * 112.0
-			var y := 114.0 + row * 14.0
+			var y := 122.0 + row * 14.0
 			var owned := int(catches.get(str(fish.name),0))
 			var icon := Color("#b6c7d9") if owned == 0 else _rarity_color(str(fish.rarity))
 			hud.draw_rect(Rect2(x,y-9,8,8),icon)
@@ -1843,6 +1891,8 @@ func _draw_fishing_hud():
 		var cue: String = ["FLOAT BLUE  /  quiet water", "FLOAT GOLD  /  promotion cue", "FLOAT PURPLE  /  hold your breath", "RAINBOW PROMOTION  /  BITE!"][_visible_promotion_stage()]
 		_text(Vector2(114,123), cue, 10)
 		_text(Vector2(114,137), "Read the float, then trust your timing", 8)
+		if promotion_rescue_bonus > 0.0:
+			_text(Vector2(114,149), "RESCUE TIDE  /  forecast +%d%%" % int(round(promotion_rescue_bonus * 100.0)), 8)
 	else:
 		if challenge_live:
 			_text(Vector2(114,86), fishing_challenge.round_label(), 9)
