@@ -165,8 +165,15 @@ const PROMOTION_PURPLE_LIE_RATIO := 0.60   # purple may mislead a little more of
 ## the next battle normally.  Once armed, the hook only changes the species
 ## floor to RARE; it never auto-wins a cast or bypasses map/grade rules.
 const PITY_THRESHOLD := 3
-const PITY_FORECAST_BONUS_STEP := 0.04
+# The first two misses should make the next cue feel warmer without replacing
+# the timing game.  The third miss still arms the separate RARE-or-better floor.
+# These forecast lifts are deliberately modest and rarity-sensitive: purple
+# (RARE) and rainbow (EPIC/LEGENDARY) weights rise faster than common fish.
+const PITY_FORECAST_BONUS_STEP := 0.06
 const PITY_LOW_GRADE_BONUS_STEP := 0.02
+const RESCUE_RARE_WEIGHT_SCALE := 1.8
+const RESCUE_EPIC_WEIGHT_SCALE := 2.6
+const RESCUE_LEGENDARY_WEIGHT_SCALE := 2.9
 var pity_meter := 0
 var rescue_ready := false
 var low_grade_streak := 0
@@ -723,6 +730,25 @@ func _species_pool() -> Array[Dictionary]:
 		if fish_available(species): pool.append(fish)
 	return pool
 
+func _weighted_species_pick(pool: Array[Dictionary], bonus: float = -1.0) -> Dictionary:
+	# Keep species selection rarity-weighted in every path, including the
+	# one-shot rescue floor. A uniform rare_pool roll would make each rare and
+	# epic species equally likely and quietly flatten the rarity curve.
+	if pool.is_empty(): return {}
+	var effective_bonus := _rarity_bonus_total() if bonus < 0.0 else bonus
+	var total := 0.0
+	var weights: Array[float] = []
+	for fish in pool:
+		var weight := _species_weight(str(fish.get("rarity", "COMMON")), effective_bonus)
+		weights.append(weight)
+		total += weight
+	if total <= 0.0: return pool[0]
+	var roll := rng.randf() * total
+	for i in range(pool.size()):
+		roll -= weights[i]
+		if roll <= 0.0: return pool[i]
+	return pool[pool.size() - 1]
+
 func _pick_species(grade: String, apply_rescue := false, exclude_legendary := false) -> Dictionary:
 	if apply_rescue: rescue_selection_used = false
 	var pool := _species_pool()
@@ -736,16 +762,9 @@ func _pick_species(grade: String, apply_rescue := false, exclude_legendary := fa
 	# It makes an unlucky forecast feel warmer without handing out a catch or
 	# changing the map/time/weather legality of the pool.
 	var bonus := _rarity_bonus_total()
-	var total := 0.0
-	var weights: Array[float] = []
-	for fish in eligible:
-		var weight := _species_weight(str(fish.rarity), bonus)
-		weights.append(weight); total += weight
-	var roll := rng.randf() * total
-	for i in range(eligible.size()):
-		roll -= weights[i]
-		if roll <= 0.0:
-			return _apply_rescue_floor(eligible[i], eligible, grade) if apply_rescue else eligible[i]
+	var picked := _weighted_species_pick(eligible, bonus)
+	if not picked.is_empty():
+		return _apply_rescue_floor(picked, eligible, grade) if apply_rescue else picked
 	var fallback: Dictionary = eligible[eligible.size() - 1]
 	return _apply_rescue_floor(fallback, eligible, grade) if apply_rescue else fallback
 
@@ -759,10 +778,19 @@ func _species_weight(rarity: String, bonus: float) -> float:
 		"RARE": weight = 12.0
 		"EPIC": weight = 3.0
 		"LEGENDARY": weight = 0.5
-	# Bait and FEVER are intentionally rarity-sensitive.  Common fish keep
-	# their baseline weight, while the bonus increasingly favours a real
-	# upgrade instead of inflating every rarity by the same amount.
-	return weight * (1.0 + bonus * _rarity_bonus_scale(rarity))
+	# Bait, FEVER, and the early rescue forecast are intentionally
+	# rarity-sensitive. Common fish keep their baseline weight, while the
+	# bonus increasingly favours a real upgrade instead of inflating every
+	# rarity by the same amount. The rescue-specific scales make one or two
+	# misses visible in the forecast without making high rarity dominant.
+	var rescue_scale := 0.0
+	match rarity:
+		"RARE": rescue_scale = RESCUE_RARE_WEIGHT_SCALE
+		"EPIC": rescue_scale = RESCUE_EPIC_WEIGHT_SCALE
+		"LEGENDARY": rescue_scale = RESCUE_LEGENDARY_WEIGHT_SCALE
+	var rescue_bonus := rescue_forecast_bonus()
+	var tackle_bonus := maxf(0.0, bonus - rescue_bonus)
+	return weight * (1.0 + tackle_bonus * _rarity_bonus_scale(rarity) + rescue_bonus * (_rarity_bonus_scale(rarity) + rescue_scale))
 
 # Probability that the next cast's candidate has at least this rarity rank, from
 # the same weights _pick_species uses plus the explicit legendary roll.  The
@@ -893,7 +921,9 @@ func _apply_rescue_floor(candidate: Dictionary, eligible: Array[Dictionary], _gr
 	if rare_pool.is_empty():
 		return candidate
 	rescue_selection_used = true
-	return rare_pool[rng.randi_range(0, rare_pool.size() - 1)]
+	# The floor changes the minimum rarity only; within that floor preserve the
+	# same weighted species curve as a natural roll.
+	return _weighted_species_pick(rare_pool)
 
 func _reset_pity() -> void:
 	pity_meter = 0
@@ -924,15 +954,16 @@ func rescue_forecast_bonus() -> float:
 func rescue_forecast_label() -> String:
 	var percent := int(round(rescue_forecast_bonus() * 100.0))
 	if rescue_ready:
-		return "RESCUE READY  /  RARE floor  +%d%% forecast" % percent
+		return "RESCUE READY  /  RARE floor  /  PURPLE+ cue +%d%%" % percent
 	if percent > 0:
-		return "RESCUE %d/%d  /  tide +%d%%" % [pity_meter, PITY_THRESHOLD, percent]
+		return "RESCUE %d/%d  /  PURPLE+ cue +%d%%" % [pity_meter, PITY_THRESHOLD, percent]
 	return "RESCUE 0/%d" % PITY_THRESHOLD
 
 func _pity_label() -> String:
 	var percent := int(round(rescue_forecast_bonus() * 100.0))
-	if rescue_ready: return "READY +%d%%" % percent
-	return "RESCUE %d/%d +%d%%" % [pity_meter, PITY_THRESHOLD, percent]
+	if rescue_ready: return "READY  PURPLE+%d%%" % percent
+	if percent > 0: return "RESCUE %d/%d  PURPLE+%d%%" % [pity_meter, PITY_THRESHOLD, percent]
+	return "RESCUE 0/%d" % PITY_THRESHOLD
 
 # Keep the variation ranges deliberately broad but believable.  They are
 # derived from rarity rather than adding 23 hand-maintained fields to the
@@ -2131,6 +2162,23 @@ func _panel(rect: Rect2, paper := false):
 func _text(pos: Vector2, value: String, size := 11, paper := false):
 	hud.draw_string(ThemeDB.fallback_font,pos,value,HORIZONTAL_ALIGNMENT_LEFT,-1,size,Color("#43534e") if paper else Color("#f1e3ba"))
 
+func _result_reveal_hud_reserved() -> bool:
+	# The result card owns the upper-center label rows. The persistent
+	# chain/rescue status is redrawn in the left gutter while the result is on
+	# screen, so this is a layout reservation rather than a visibility pause.
+	return fishing_state == FishingState.RESULT and last_grade != "MISS" and last_rarity != ""
+
+func _draw_result_status_hud():
+	# Keep FEVER and rescue feedback visible while a held catch waits for an
+	# explicit SELL/REGISTER choice. The 90px gutter is outside the standard
+	# reveal card (x=104..376), so its rarity label and fish art stay untouched.
+	_panel(Rect2(8,62,90,48))
+	_text(Vector2(14,75),("FEVER %.0fs" % ceilf(fever_t)) if fever_active else ("CHAIN %d/%d" % [combo, FEVER_THRESHOLD]),8)
+	hud_bar(Vector2(14,80),Vector2(76,4),fever_t / FEVER_DURATION if fever_active else float(combo) / FEVER_THRESHOLD,Color("#efbf69"))
+	_text(Vector2(14,99),_pity_label(),7)
+	if fever_flash_t > 0.0:
+		hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fever_flash_t*0.10))
+
 func _draw_hud():
 	_panel(Rect2(8,8,174,34))
 	_text(Vector2(16,22),"SALTMERE  /  " + _map_display_name(),11)
@@ -2155,14 +2203,19 @@ func _draw_hud():
 	elif fishing_state == FishingState.RESULT:
 		_draw_fishing_result()
 	if not notebook_open:
-		# Draw after the result card so the timer cannot be hidden by its reveal.
-		_panel(Rect2(188,8,100,30))
-		_text(Vector2(195,21),("FEVER %.0fs" % ceilf(fever_t)) if fever_active else ("CHAIN %d/%d" % [combo, FEVER_THRESHOLD]),10)
-		hud_bar(Vector2(195,27),Vector2(85,4),fever_t / FEVER_DURATION if fever_active else float(combo) / FEVER_THRESHOLD,Color("#efbf69"))
-		_panel(Rect2(188,40,100,18))
-		_text(Vector2(195,53),_pity_label(),8)
-		if fever_flash_t > 0.0:
-			hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fever_flash_t*0.10))
+		if _result_reveal_hud_reserved():
+			_draw_result_status_hud()
+		else:
+			# Draw after the result card so the timer cannot be hidden by its reveal.
+			# Standard reveals use the left gutter for status, keeping CHAIN/RESCUE
+			# out of the card's upper-center rarity rows.
+			_panel(Rect2(188,8,100,30))
+			_text(Vector2(195,21),("FEVER %.0fs" % ceilf(fever_t)) if fever_active else ("CHAIN %d/%d" % [combo, FEVER_THRESHOLD]),10)
+			hud_bar(Vector2(195,27),Vector2(85,4),fever_t / FEVER_DURATION if fever_active else float(combo) / FEVER_THRESHOLD,Color("#efbf69"))
+			_panel(Rect2(188,40,100,18))
+			_text(Vector2(195,53),_pity_label(),8)
+			if fever_flash_t > 0.0:
+				hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fever_flash_t*0.10))
 	if notebook_open:
 		_panel(Rect2(66,51,348,194),true)
 		_text(Vector2(85,75),"THE TIDE LEDGER",17,true)
@@ -2218,7 +2271,7 @@ func _draw_fishing_hud():
 		_text(Vector2(114,123), cue, 10)
 		_text(Vector2(114,137), "Read the float, then trust your timing", 8)
 		if promotion_rescue_bonus > 0.0:
-			_text(Vector2(114,149), "RESCUE TIDE  /  forecast +%d%%" % int(round(promotion_rescue_bonus * 100.0)), 8)
+			_text(Vector2(114,149), "RESCUE TIDE  /  PURPLE+ cue +%d%%" % int(round(promotion_rescue_bonus * 100.0)), 8)
 	else:
 		if challenge_live:
 			_text(Vector2(114,86), fishing_challenge.round_label(), 9)

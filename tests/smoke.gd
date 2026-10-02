@@ -190,7 +190,7 @@ func run():
 	# timing battle is still required for a real catch.
 	game._reset_pity()
 	game._advance_pity("MISS")
-	check(is_equal_approx(game.rescue_forecast_bonus(),0.04) and game.pity_status().forecast_bonus>0.0,'first miss adds a visible forecast bonus')
+	check(is_equal_approx(game.rescue_forecast_bonus(),0.06) and game.pity_status().forecast_bonus>0.0,'first miss adds a visible forecast bonus')
 	game._advance_pity("GOOD")
 	check(game.rescue_forecast_bonus()>0.04 and game.pity_status().low_grade_streak==1,'low-grade catch strengthens the rescue forecast')
 	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530); game.shells=100; game.bait_index=0; game.rod_index=0
@@ -209,6 +209,40 @@ func run():
 	game.rng.seed=9183
 	var rescued_cast: Dictionary = game._pick_cast_candidate(true)
 	check(game._rarity_rank(str(rescued_cast.get('rarity','COMMON')))>=game._rarity_rank('RARE'),'pity threshold guarantees the next landed cast is rare-or-better')
+	# Option 6b: the first two misses make purple-or-higher cues visibly more
+	# likely, while the third miss remains the explicit RARE floor. The shares
+	# use the same deterministic rarity weights as the natural cast roll.
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
+	game.time_of_day=0.95; game.weather='clear'; game.season='autumn'; game.combo=0; game.fever_active=false
+	game._reset_pity(); var purple_share_0: float = game._candidate_share_at_least(2)
+	game._advance_pity('MISS'); var purple_share_1: float = game._candidate_share_at_least(2)
+	game._advance_pity('MISS'); var purple_share_2: float = game._candidate_share_at_least(2)
+	check(purple_share_1>purple_share_0 and purple_share_2>purple_share_1,'one and two misses monotonically lift PURPLE+ cue share')
+	check(game.rescue_forecast_label().contains('PURPLE+ cue'),'rescue HUD names the PURPLE+ cue uplift')
+	var rescue_eligible: Array[Dictionary] = []
+	for fish in game._species_pool():
+		if str(fish.get('rarity','COMMON')) != 'LEGENDARY': rescue_eligible.append(fish)
+	game.rescue_ready=false; game.rng.seed=77123
+	var natural_common := 0
+	var natural_rare := 0
+	for i in range(6000):
+		var natural_weighted: Dictionary = game._pick_species('PERFECT', false, true)
+		if str(natural_weighted.get('rarity','COMMON')) == 'COMMON': natural_common += 1
+		elif str(natural_weighted.get('rarity','COMMON')) == 'RARE': natural_rare += 1
+	game.rescue_ready=true; game.rng.seed=77123
+	var rescued_rare := 0
+	var rescued_epic := 0
+	for i in range(6000):
+		var rescued_weighted: Dictionary = game._apply_rescue_floor({'name':'Silver sprat','rarity':'COMMON'}, rescue_eligible, 'PERFECT')
+		if str(rescued_weighted.get('rarity','COMMON')) == 'RARE': rescued_rare += 1
+		elif str(rescued_weighted.get('rarity','COMMON')) == 'EPIC': rescued_epic += 1
+	check(natural_common>0 and natural_rare>0 and rescued_rare>0 and rescued_epic>0 and rescued_rare>rescued_epic*3 and rescued_rare>natural_rare,'rescue raises the floor while preserving rarity weights (%d natural common, %d/%d rare)' % [natural_common,natural_rare,rescued_rare])
+	check(game._rarity_rank(str(game._apply_rescue_floor({'name':'Silver sprat','rarity':'COMMON'}, rescue_eligible, 'PERFECT').get('rarity','COMMON')))>=game._rarity_rank('RARE'),'weighted rescue never drops below RARE')
+	game.fishing_state=game.FishingState.RESULT; game.last_grade='PERFECT'; game.last_rarity='RARE'
+	check(game._result_reveal_hud_reserved(),'result reveal reserves rarity rows from CHAIN/RESCUE HUD')
+	game.last_grade='MISS'; game.last_rarity=''
+	check(not game._result_reveal_hud_reserved(),'miss result keeps ambient CHAIN/RESCUE HUD available')
+	game._reset_fishing(); game._reset_pity()
 	game._reset_pity()
 	game.pity_meter=2; game.low_grade_streak=2; game.rescue_ready=false
 	game._save_game('user://pity-test.json')
