@@ -210,6 +210,9 @@ func run():
 	game.rng.seed=9183
 	var rescued_cast: Dictionary = game._pick_cast_candidate(true)
 	check(game._rarity_rank(str(rescued_cast.get('rarity','COMMON')))>=game._rarity_rank('RARE'),'pity threshold guarantees the next landed cast is rare-or-better')
+	# This block moves to the rocky shore at night; restore the town pier and
+	# clock afterwards so later save/position checks do not depend on it.
+	var pre_6b_state := [game.current_map, game.player, game.time_of_day, game.weather, game.season]
 	# Option 6b: the first two misses make purple-or-higher cues visibly more
 	# likely, while the third miss remains the explicit RARE floor. The shares
 	# use the same deterministic rarity weights as the natural cast roll.
@@ -244,6 +247,8 @@ func run():
 	game.last_grade='MISS'; game.last_rarity=''
 	check(not game._result_reveal_hud_reserved(),'miss result keeps ambient CHAIN/RESCUE HUD available')
 	game._reset_fishing(); game._reset_pity()
+	game.current_map=str(pre_6b_state[0]); game._build_map(game.current_map); game.player=pre_6b_state[1]
+	game.time_of_day=float(pre_6b_state[2]); game.weather=str(pre_6b_state[3]); game.season=str(pre_6b_state[4])
 	game._reset_pity()
 	game.pity_meter=2; game.low_grade_streak=2; game.rescue_ready=false
 	game._save_game('user://pity-test.json')
@@ -251,7 +256,16 @@ func run():
 	check(game.pity_meter==2 and game.low_grade_streak==2 and not game.rescue_ready,'save restores pity meter without arming early')
 	game.pity_meter=game.PITY_THRESHOLD; game.rescue_ready=true
 	game._reset_fishing()
+	# The first-capture checks below need a species that is genuinely new.  A
+	# seeded roll would silently depend on every earlier cast and on the rarity
+	# weights, so pin the cast to an undiscovered RARE/EPIC species instead.
+	var first_pick: Dictionary = {}
+	for fish in game.FISH_SPECIES:
+		if str(fish.rarity) in ['RARE','EPIC'] and not game.species_discovered(str(fish.name)):
+			first_pick = fish.duplicate(true); break
+	check(not first_pick.is_empty(),'an undiscovered rare species remains for first-capture checks')
 	game.rng.seed=2026
+	game.cast_candidate=first_pick
 	game._finish_cast()
 	check(game.catches.size()>=1,'catch recorded in ledger')
 	check(game.pity_meter==0 and not game.rescue_ready,'successful rescue catch clears pity meter')
@@ -292,7 +306,7 @@ func run():
 	check(game.reveal_shortened,'repeat catch uses shortened reveal')
 	var repeat_size := float(game.last_catch_metadata.get('size_cm',0.0))
 	var repeat_record_size := float(game.best_records[first_species].get('size_cm',0.0))
-	check(bool(game.last_catch_metadata.get('crown', false)) == is_equal_approx(repeat_size,repeat_record_size),'repeat crown marker matches the generated record')
+	check(bool(game.last_catch_metadata.get('crown', false)) == (repeat_size > repeat_record_size + 0.001),'repeat crown flag marks a candidate only when it beats the registered record')
 	# Selling removes only the held inventory copy.  Discovery metadata and the
 	# species crown remain available, so a player cannot lose a record by taking
 	# the shell payout.
