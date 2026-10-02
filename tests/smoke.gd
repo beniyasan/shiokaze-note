@@ -171,6 +171,11 @@ func run():
 	check(game.sell_pending_catch() and not game.catch_choice_pending(),'sell resolves the pending choice')
 	check(game.shells==sell_shells+sell_value and int(game.catches.get(first_species,0))==sell_count_before-1,'selling pays shells and removes only one held fish')
 	check(game.get_first_capture_metadata(first_species).has('size_cm') and game.best_records.has(first_species),'selling preserves discovery and crown records')
+	# Selling the final copy keeps the field-guide name visible because durable
+	# discovery metadata is distinct from transient inventory ownership.
+	game._reset_fishing(); game.catches.erase('Old boot'); game.cast_candidate={'name':'Old boot','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
+	game.sell_pending_catch()
+	check(int(game.catches.get('Old boot',0))==0 and game.species_discovered('Old boot') and game._ledger_marker('Old boot',0)!='?','selling last copy keeps ledger discovery visible')
 	check(first_rarity == 'LEGENDARY' or game._reveal_stage_at(1.12,first_rarity)==4,'shortened reveal reaches face before standard timing')
 	game.weather='rain'; game.season='autumn'; game.time_of_day=0.74
 	var saved_fish=game.fish_count

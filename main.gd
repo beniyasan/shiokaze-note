@@ -918,8 +918,14 @@ func _catch_choice_prompt() -> String:
 	if last_catch_decision == "registered": return "REGISTERED / KEPT   SPACE continue"
 	return "SPACE  continue"
 
+func species_discovered(species: String, owned: int = -1) -> bool:
+	# Inventory is transient: selling the last copy must not erase the durable
+	# field-guide discovery stored in catch metadata or the latest record.
+	var count := int(catches.get(species, 0)) if owned < 0 else owned
+	return count > 0 or catch_metadata.has(species) or first_capture_metadata.has(species) or catch_latest.has(species)
+
 func _ledger_marker(species: String, owned: int) -> String:
-	if owned <= 0: return "?"
+	if not species_discovered(species, owned): return "?"
 	var metadata := get_first_capture_metadata(species)
 	return _metadata_marker(metadata)
 
@@ -1809,7 +1815,7 @@ func _draw_hud():
 			var icon := Color("#b6c7d9") if owned == 0 else _rarity_color(str(fish.rarity))
 			hud.draw_rect(Rect2(x,y-9,8,8),icon)
 			var marker := _ledger_marker(str(fish.name), owned)
-			var display_name := str(fish.name) if owned > 0 else "????????"
+			var display_name := str(fish.name) if species_discovered(str(fish.name), owned) else "????????"
 			if marker != "": display_name += " " + marker
 			if best_records.has(str(fish.name)): display_name += " ^"
 			_text(Vector2(x+11,y),display_name,8,true)
