@@ -2163,11 +2163,21 @@ func _text(pos: Vector2, value: String, size := 11, paper := false):
 	hud.draw_string(ThemeDB.fallback_font,pos,value,HORIZONTAL_ALIGNMENT_LEFT,-1,size,Color("#43534e") if paper else Color("#f1e3ba"))
 
 func _result_reveal_hud_reserved() -> bool:
-	# The standard reveal card owns the upper-center label rows. Keep the
-	# persistent chain/rescue panels out of those rows for the short reveal;
-	# the card already carries combo and rarity information, so no state is
-	# lost by pausing these two ambient HUD panels for a result frame.
+	# The result card owns the upper-center label rows. The persistent
+	# chain/rescue status is redrawn in the left gutter while the result is on
+	# screen, so this is a layout reservation rather than a visibility pause.
 	return fishing_state == FishingState.RESULT and last_grade != "MISS" and last_rarity != ""
+
+func _draw_result_status_hud():
+	# Keep FEVER and rescue feedback visible while a held catch waits for an
+	# explicit SELL/REGISTER choice. The 90px gutter is outside the standard
+	# reveal card (x=104..376), so its rarity label and fish art stay untouched.
+	_panel(Rect2(8,62,90,48))
+	_text(Vector2(14,75),("FEVER %.0fs" % ceilf(fever_t)) if fever_active else ("CHAIN %d/%d" % [combo, FEVER_THRESHOLD]),8)
+	hud_bar(Vector2(14,80),Vector2(76,4),fever_t / FEVER_DURATION if fever_active else float(combo) / FEVER_THRESHOLD,Color("#efbf69"))
+	_text(Vector2(14,99),_pity_label(),7)
+	if fever_flash_t > 0.0:
+		hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fever_flash_t*0.10))
 
 func _draw_hud():
 	_panel(Rect2(8,8,174,34))
@@ -2192,17 +2202,20 @@ func _draw_hud():
 		_draw_fishing_hud()
 	elif fishing_state == FishingState.RESULT:
 		_draw_fishing_result()
-	if not notebook_open and not _result_reveal_hud_reserved():
-		# Draw after the result card so the timer cannot be hidden by its reveal.
-		# Standard reveals reserve the top-center rows for their rarity label;
-		# _result_reveal_hud_reserved() keeps CHAIN/RESCUE from covering it.
-		_panel(Rect2(188,8,100,30))
-		_text(Vector2(195,21),("FEVER %.0fs" % ceilf(fever_t)) if fever_active else ("CHAIN %d/%d" % [combo, FEVER_THRESHOLD]),10)
-		hud_bar(Vector2(195,27),Vector2(85,4),fever_t / FEVER_DURATION if fever_active else float(combo) / FEVER_THRESHOLD,Color("#efbf69"))
-		_panel(Rect2(188,40,100,18))
-		_text(Vector2(195,53),_pity_label(),8)
-		if fever_flash_t > 0.0:
-			hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fever_flash_t*0.10))
+	if not notebook_open:
+		if _result_reveal_hud_reserved():
+			_draw_result_status_hud()
+		else:
+			# Draw after the result card so the timer cannot be hidden by its reveal.
+			# Standard reveals use the left gutter for status, keeping CHAIN/RESCUE
+			# out of the card's upper-center rarity rows.
+			_panel(Rect2(188,8,100,30))
+			_text(Vector2(195,21),("FEVER %.0fs" % ceilf(fever_t)) if fever_active else ("CHAIN %d/%d" % [combo, FEVER_THRESHOLD]),10)
+			hud_bar(Vector2(195,27),Vector2(85,4),fever_t / FEVER_DURATION if fever_active else float(combo) / FEVER_THRESHOLD,Color("#efbf69"))
+			_panel(Rect2(188,40,100,18))
+			_text(Vector2(195,53),_pity_label(),8)
+			if fever_flash_t > 0.0:
+				hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fever_flash_t*0.10))
 	if notebook_open:
 		_panel(Rect2(66,51,348,194),true)
 		_text(Vector2(85,75),"THE TIDE LEDGER",17,true)
