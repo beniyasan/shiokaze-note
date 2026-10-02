@@ -44,7 +44,9 @@ Three consecutive catches activate a 30-second FEVER window. The HUD shows chain
 progress and remaining time; a warm flash, original chime, and full music layers
 announce activation. FEVER and bait use rarity-sensitive weights: common fish
 retain their baseline, while higher rarities receive progressively stronger
-boosts. A PERFECT timing grade also enables the Rocky Shore legendary roll,
+boosts. The Rocky Shore legendary roll happens at cast time after two chain
+catches; timing does not create a second roll. PERFECT keeps the rolled
+candidate, while GOOD downgrades it to a map-legal RARE catch,
 capped at 5% even with Moonseed; GOOD timing keeps its lower-quality metadata,
 RARE substitution, and rescue-meter effect. Catches do not refresh the timer. A lost fish or elapsed
 FEVER window resets the chain. Reading

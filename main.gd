@@ -994,9 +994,10 @@ func _resolve_fishing_timing(position: float):
 	var legendary := grade == "PERFECT" and str(picked.get("rarity", "COMMON")) == "LEGENDARY"
 	var result_rank := _rarity_rank(str(picked.get("rarity", "COMMON")))
 	var candidate_rank := _rarity_rank(candidate_rarity)
-	if result_rank > promotion_cue_rank and result_rank >= _rarity_rank("RARE"):
+	var effective_cue_rank := maxi(0, promotion_cue_rank - (1 if promotion_reversal else 0))
+	if result_rank > effective_cue_rank and result_rank >= _rarity_rank("RARE"):
 		promotion_result_label = "逆転!"
-	elif result_rank < promotion_cue_rank:
+	elif result_rank < effective_cue_rank:
 		promotion_result_label = "惜しい!  PERFECTなら " + candidate_rarity if candidate_rank > result_rank and not promotion_false_cue else "ガセ…"
 	else:
 		promotion_result_label = ""

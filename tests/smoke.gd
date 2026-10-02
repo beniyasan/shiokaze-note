@@ -126,7 +126,9 @@ func run():
 	game._record_catch_metadata({'name':first_species,'rarity':str(first_meta.get('rarity','COMMON'))},'GOOD')
 	check(is_equal_approx(float(game.get_first_capture_metadata(first_species).get('size_cm',0.0)),first_size) and game.catch_latest.has(first_species),'first capture metadata is immutable across repeats')
 	check(game.reveal_shortened,'repeat catch uses shortened reveal')
-	check(not bool(game.last_catch_metadata.get('crown', false)),'smaller repeat does not claim crown')
+	var repeat_size := float(game.last_catch_metadata.get('size_cm',0.0))
+	var repeat_record_size := float(game.best_records[first_species].get('size_cm',0.0))
+	check(bool(game.last_catch_metadata.get('crown', false)) == is_equal_approx(repeat_size,repeat_record_size),'repeat crown marker matches the generated record')
 	var first_rarity := str(first_meta.get('rarity','COMMON'))
 	check(first_rarity == 'LEGENDARY' or game._reveal_stage_at(1.12,first_rarity)==4,'shortened reveal reaches face before standard timing')
 	var saved_fish=game.fish_count
