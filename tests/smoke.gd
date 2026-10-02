@@ -72,10 +72,16 @@ func run():
 	game.result_toast_pending='stale reveal toast'
 	game.sell_pending_catch(); game._process_fishing(0.0)
 	check(game.toast.begins_with('SOLD') and game.result_toast_pending=='','selling is confirmed instead of being overwritten by the reveal toast')
+	# A stale queue cannot resurrect after the decision, even if a later frame
+	# runs the normal reveal-toast flush path.
+	var sold_confirmation: String = game.toast
+	game.result_toast_pending='stale reveal toast'; game._process_fishing(0.0)
+	check(game.toast==sold_confirmation and game.result_toast_pending=='','stale reveal toast stays cleared after selling')
 	game._reset_fishing(); game.cast_candidate={'name':'Silver sprat','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
 	game.reveal_stage=4; game.reveal_t=2.0; game.result_toast_pending='stale reveal toast'
 	game.register_pending_catch(); game._process_fishing(0.0)
 	check(game.toast.begins_with('REGISTERED') and game.result_toast_pending=='','registering is confirmed instead of being overwritten by the reveal toast')
+	check(game.LEGENDARY_RESULT_PROMOTION_Y < game.LEGENDARY_RESULT_CHOICE_Y and game.LEGENDARY_RESULT_CHOICE_Y <= 260.0,'legendary promotion and choice lines stay inside the viewport')
 	game._reset_fishing()
 	game.notebook_open=true; game._try_fish()
 	check(game.cast_timer==0,'notebook prevents casting')

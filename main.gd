@@ -9,6 +9,11 @@ const WORLD_W := 64
 const WORLD_H := 40
 const WORLD_SIZE := Vector2(WORLD_W*TILE, WORLD_H*TILE)
 const SAVE_PATH := "user://saltmere_save.json"
+# Keep the legendary choice controls clear of the 270px viewport edge. These
+# are shared by both the promotion-label and no-label variants so a long-lived
+# result cannot move the actionable prompt back to the clipped baseline.
+const LEGENDARY_RESULT_PROMOTION_Y := 242.0
+const LEGENDARY_RESULT_CHOICE_Y := 252.0
 var player := Vector2(368, 372)
 var current_map := "town"
 var transition_active := false
@@ -1040,7 +1045,14 @@ func catch_reveal_complete() -> bool:
 	return reveal_stage >= 4
 
 func _flush_result_toast() -> void:
-	if result_toast_pending == "" or fishing_state != FishingState.RESULT or not catch_reveal_complete(): return
+	if result_toast_pending == "": return
+	# A decision may be made from a saved/revealed result before the next draw
+	# tick. Do not resurrect a stale reveal toast after that fish is already SOLD
+	# or REGISTERED; the decision handler owns the visible confirmation.
+	if not catch_choice_pending():
+		result_toast_pending = ""
+		return
+	if fishing_state != FishingState.RESULT or not catch_reveal_complete(): return
 	toast = result_toast_pending
 	toast_t = 4.0
 	result_toast_pending = ""
@@ -1254,6 +1266,7 @@ func _try_fish():
 
 func _process_fishing(delta: float):
 	# Notebook and map transitions pause fishing; the same pause applies here.
+	var choice_changed := false
 	# Thirty seconds leaves room for the reveal and another full tug-of-war.
 	fever_flash_t = maxf(0.0, fever_flash_t - delta)
 	if fever_active:
@@ -1344,20 +1357,25 @@ func _process_fishing(delta: float):
 			_handle_fishing_strike(gauge, counter)
 	elif fishing_state == FishingState.RESULT:
 		result_t -= delta
+		# Flush a queued reveal toast before reading disposition input. If
+		# SELL/REGISTER is pressed on this same frame, its confirmation replaces
+		# the reveal toast and the final guard below cannot overwrite it.
+		_flush_result_toast()
 		if catch_choice_pending():
 			# The prompt is hidden until the card flips, so ignore blind presses.
 			if not catch_reveal_complete():
 				pass
 			elif Input.is_action_just_pressed("sell_catch"):
-				sell_pending_catch()
+				choice_changed = sell_pending_catch()
 			elif Input.is_action_just_pressed("register_catch"):
-				register_pending_catch()
+				choice_changed = register_pending_catch()
 			elif Input.is_action_just_pressed("fish"):
 				# Space never silently chooses a disposition.  Keep the result on
 				# screen until the player explicitly sells or registers it.
 				result_toast_pending = ""
 				toast = "Choose SELL or REGISTER / the catch is safely held"
 				toast_t = 1.8
+				choice_changed = true
 		elif Input.is_action_just_pressed("fish"):
 			_reset_fishing()
 		if last_rarity == "LEGENDARY":
@@ -1391,7 +1409,8 @@ func _process_fishing(delta: float):
 			var flip_time := 0.92 if reveal_shortened else 1.48
 			if previous_reveal_t < flip_time and reveal_t >= flip_time:
 				_play_se("rise")
-	_flush_result_toast()
+	if not choice_changed:
+		_flush_result_toast()
 	flash_t = maxf(0.0, flash_t-delta)
 	shake_t = maxf(0.0, shake_t-delta)
 	fish_particle_t += delta
@@ -2374,9 +2393,9 @@ func _draw_legendary_result():
 		_center_text(221,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
 		_center_text(234,"%.1f cm  /  %.2f kg  /  %s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant],9,Color("#d8d0ff"))
 		if promotion_result_label != "" or promotion_false_cue_revealed:
-			_center_text(245,(promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED"),8,Color("#f7f0cb"))
+			_center_text(LEGENDARY_RESULT_PROMOTION_Y,(promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED"),8,Color("#f7f0cb"))
 		# One fixed prompt line, well inside the 270px viewport.
-		_center_text(257,_catch_choice_prompt(),9,Color("#fff0d8"))
+		_center_text(LEGENDARY_RESULT_CHOICE_Y,_catch_choice_prompt(),9,Color("#fff0d8"))
 	# The fish grows from a dark silhouette to a full-width rainbow trophy.
 	var scale := 0.22 + rise * 0.55 + peak * 0.28
 	var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])
