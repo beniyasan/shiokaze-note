@@ -403,11 +403,16 @@ func run():
 		check(game.fishing_challenge.done and game.fishing_state==game.FishingState.RESULT,'moving gauge completes rotated chain %d within time limit' % seed)
 	check(game.FISH_SPECIES.size()==23,'expanded field guide has 23 species')
 	check(game.FISH_SPECIES.any(func(f): return f.rarity=='EPIC') and game.FISH_SPECIES.any(func(f): return f.rarity=='LEGENDARY'),'field guide includes epic and legendary')
+	check(game.fish_cards.has('Silver sprat') and game.fish_cards.has('Sand goby') and game.fish_cards.has('Moonfin trout'),'encyclopedia loads generated fish card art')
+	check(game.fish_cards.has('Rainbow Kingfish') and game.fish_portraits.has('Rainbow Kingfish'),'legendary art assets are available for discovered entries')
+	check(not game.fish_cards.has('Old boot') and game._fish_art_visible('Old boot',0),'missing fish art keeps the generic fallback available')
 	var legendary_ledger_name := 'Rainbow Kingfish'
 	game.catches.erase(legendary_ledger_name); game.catch_metadata.erase(legendary_ledger_name); game.first_capture_metadata.erase(legendary_ledger_name); game.catch_latest.erase(legendary_ledger_name)
 	check(game.ledger_display_name(legendary_ledger_name,0)=='???','uncaught legendary encyclopedia card stays hidden as ???')
+	check(not game._fish_art_visible(legendary_ledger_name,0),'uncaught legendary illustration stays masked')
 	game.catches[legendary_ledger_name]=1
 	check(game.ledger_display_name(legendary_ledger_name,1)==legendary_ledger_name,'caught legendary reveals its encyclopedia name')
+	check(game._fish_art_visible(legendary_ledger_name,1),'caught legendary illustration becomes visible')
 	game.catches.erase(legendary_ledger_name); game.catch_metadata[legendary_ledger_name]={"species":legendary_ledger_name,"rarity":"LEGENDARY"}
 	check(game.ledger_display_name(legendary_ledger_name,0)==legendary_ledger_name and game.species_discovered(legendary_ledger_name,0),'selling the last legendary copy preserves its durable discovery')
 	game.catch_metadata.erase(legendary_ledger_name)
