@@ -14,6 +14,7 @@ const SAVE_PATH := "user://saltmere_save.json"
 # result cannot move the actionable prompt back to the clipped baseline.
 const LEGENDARY_RESULT_PROMOTION_Y := 242.0
 const LEGENDARY_RESULT_CHOICE_Y := 252.0
+const LEGENDARY_RESULT_NAME_Y := 203.0
 var player := Vector2(368, 372)
 var current_map := "town"
 var transition_active := false
@@ -2544,6 +2545,27 @@ func _draw_legendary_result():
 		if i % 4 == 0:
 			hud.draw_line(q-Vector2(sz*2.5,0),q+Vector2(sz*2.5,0),Color(1,1,0.85,col.a),1)
 			hud.draw_line(q-Vector2(0,sz*2.5),q+Vector2(0,sz*2.5),Color(1,1,0.85,col.a),1)
+	# Draw the fish before any result metadata. The card's transparent margins
+	# still let the rainbow field show through, while the name, size, and choice
+	# rows remain legible on top of even a tall legacy illustration.
+	var scale := 0.22 + rise * 0.55 + peak * 0.28
+	var legendary_art_revealed := false
+	if t >= 2.05:
+		var art_rect := _legendary_reveal_art_target_rect(0.72 + peak * 0.28)
+		legendary_art_revealed = _draw_reveal_art(art_rect.get_center(), str(last_catch), art_rect.size, 1.0)
+	if not legendary_art_revealed:
+		# Old saves can still lack a card; reuse the improved generic silhouette
+		# rather than reviving the old flat body/tail fallback. The rainbow
+		# treatment below remains a legendary-only cue for that path.
+		_draw_reveal_fish(center, scale, Color("#130f32") if t < 2.05 else Color("#fff1c2"), t >= 2.05)
+		if t >= 2.05:
+			for k in range(8):
+				var x := -50.0 + k * 14.0
+				var col := Color.from_hsv(fmod(float(k)/8.0+t*0.025,1.0),0.62,1.0)
+				hud.draw_rect(Rect2(center+Vector2(x,-18)*scale,Vector2(13,36)*scale),col)
+			hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-25,-26)*scale,center+Vector2(5,-53)*scale,center+Vector2(31,-26)*scale]),Color("#d0acff"))
+			hud.draw_circle(center+Vector2(57,-8)*scale,5*scale,Color("#162539"))
+			hud.draw_circle(center+Vector2(58,-10)*scale,1.5*scale,Color.WHITE)
 	if t < 0.82:
 		_center_text(56,"SOMETHING ENORMOUS...",19,Color("#c8e8ff"))
 		_center_text(219,"Feel the tide gathering",11,Color("#d4cefa"))
@@ -2558,38 +2580,25 @@ func _draw_legendary_result():
 		_center_text(53,"LEGENDARY!!",35,Color("#fff4bd"))
 		var legendary_marker := _metadata_marker(last_catch_metadata)
 		var legendary_name := str(last_catch).to_upper() + (" " + legendary_marker if legendary_marker != "" else "") + ("  CROWN" if bool(last_catch_metadata.get("crown", false)) else "")
-		_center_text(203,legendary_name,24,Color("#fff3c9"))
+		_center_text(LEGENDARY_RESULT_NAME_Y,legendary_name,24,Color("#fff3c9"))
 		_center_text(221,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
 		_center_text(234,"%.1f cm  /  %.2f kg  /  %s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant],9,Color("#d8d0ff"))
 		if promotion_result_label != "" or promotion_false_cue_revealed:
 			_center_text(LEGENDARY_RESULT_PROMOTION_Y,(promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED"),8,Color("#f7f0cb"))
 		# One fixed prompt line, well inside the 270px viewport.
 		_center_text(LEGENDARY_RESULT_CHOICE_Y,_catch_choice_prompt(),9,Color("#fff0d8"))
-	# The fish grows from a dark silhouette to its species-specific encyclopedia
-	# illustration. Keep the rainbow-trophy fallback for old saves whose species
-	# has no imported art, while every current field-guide entry gets a matching
-	# face.
-	var scale := 0.22 + rise * 0.55 + peak * 0.28
-	var legendary_art_revealed := false
-	if t >= 2.05:
-		legendary_art_revealed = _draw_reveal_art(center, str(last_catch), Vector2(206, 138) * (0.72 + peak * 0.28), 1.0)
-	if not legendary_art_revealed:
-		# Old saves can still lack a card; reuse the improved generic silhouette
-		# rather than reviving the old flat body/tail fallback. The rainbow
-		# treatment below remains a legendary-only cue for that path.
-		_draw_reveal_fish(center, scale, Color("#130f32") if t < 2.05 else Color("#fff1c2"), t >= 2.05)
-		if t >= 2.05:
-			for k in range(8):
-				var x := -50.0 + k * 14.0
-				var col := Color.from_hsv(fmod(float(k)/8.0+t*0.025,1.0),0.62,1.0)
-				hud.draw_rect(Rect2(center+Vector2(x,-18)*scale,Vector2(13,36)*scale),col)
-			hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-25,-26)*scale,center+Vector2(5,-53)*scale,center+Vector2(31,-26)*scale]),Color("#d0acff"))
-			hud.draw_circle(center+Vector2(57,-8)*scale,5*scale,Color("#162539"))
-			hud.draw_circle(center+Vector2(58,-10)*scale,1.5*scale,Color.WHITE)
 	# The initial reveal gets one soft glow, never repeated high-frequency flash.
 	if t >= 2.05 and t < 2.55:
 		var glow := sin((t-2.05)/0.5*PI)*0.20
 		hud.draw_rect(Rect2(0,0,480,270),Color(1,0.90,0.67,glow))
+
+func _legendary_reveal_art_target_rect(growth: float = 1.0) -> Rect2:
+	# Keep the maximum card box above the name and metadata rows. The artwork is
+	# drawn before those rows too, so this is both a layout guard and a readable
+	# composition if a future card has a denser alpha silhouette.
+	var center := Vector2(240,132)
+	var size := Vector2(206,138) * clampf(growth, 0.0, 1.0)
+	return Rect2(center - size * 0.5, size)
 
 func _center_text(y: float, value: String, size: int, color: Color):
 	var font := ThemeDB.fallback_font
