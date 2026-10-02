@@ -95,7 +95,8 @@ The whole cast is staged as one escalating show, defined in
   chromatic pulse. Hotter cues hold the bite back longer (up to +1.7 s).
 - **Extra cues.** A glowing fish school sometimes crosses the screen (often, but not
   always, RARE or better). The golden tide (`黄金の潮`) only ever appears for an
-  EPIC-or-better candidate. These rolls use the FX director's own RNG, so they never
+  EPIC-or-better candidate, and a golden-tide cast never fakes out (no downward false
+  cue, no mid-wait reversal). These rolls use the FX director's own RNG, so they never
   change which fish bites.
 - **Reach.** Purple-or-hotter bites enter a letterboxed REACH / SUPER REACH. Each pull
   has a short hit-stop, splash and callout; banners use a slim top strip so the timing
@@ -106,7 +107,7 @@ The whole cast is staged as one escalating show, defined in
   shatters it. FEVER is announced once the catch is sold or registered.
 - **Safety.** Full-screen flashes are limited to three per second with a brightness
   cap. F toggles reduced flashing (smaller flashes, gentler shake/zoom, no chromatic
-  aberration, a steady danger edge); the setting is saved.
+  aberration, no soft full-screen tints, a steady danger edge); the setting is saved.
 
 ## Chain FEVER
 

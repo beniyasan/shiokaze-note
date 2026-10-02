@@ -189,7 +189,6 @@ var last_grade := ""
 var last_catch := ""
 var last_rarity := ""
 var result_t := 0.0
-var flash_t := 0.0
 var shake_t := 0.0
 var fish_particle_t := 0.0
 var legendary_t := 0.0
@@ -1440,8 +1439,12 @@ func _plan_cast_fx() -> void:
 	fx_premium = fx.roll_premium(actual_rank)
 	fx_school = fx.roll_school(actual_rank)
 	if fx_premium:
-		# The premium cue never lies, so it also removes a downward fake-out.
+		# The premium cue never lies, so it also removes every fake-out: the
+		# downward false cue and the mid-wait reversal (a visible step back).
+		# Both were rolled before this call, so clearing them leaves the
+		# gameplay RNG stream untouched.
 		promotion_false_cue = false
+		promotion_reversal_armed = false
 		promotion_cue_rank = actual_rank
 	fx_heat = fx.HEAT_PREMIUM if fx_premium else _promotion_stage_limit()
 	bite_delay += float(fx.wait_extension(fx_heat))
@@ -1528,7 +1531,6 @@ func _process_fishing(delta: float):
 			challenge_hint_t = 2.4
 			toast = "BITE!  Keep the line in the gold zone!"
 			toast_t = 2.0
-			flash_t = 0.12
 			_play_se("bite")
 			_play_se("battle_start")
 		elif Input.is_action_just_pressed("fish"):
@@ -1601,13 +1603,11 @@ func _process_fishing(delta: float):
 			if previous_legendary_t < 0.82 and legendary_t >= 0.82:
 				legendary_stage = maxi(legendary_stage, 1)
 				_play_se("rise")
-				flash_t = maxf(flash_t, 0.42)
 				shake_t = maxf(shake_t, 0.65)
 				fx.legendary_crack()
 			if previous_legendary_t < 2.05 and legendary_t >= 2.05:
 				legendary_stage = maxi(legendary_stage, 2)
 				_play_se("peak")
-				flash_t = maxf(flash_t, 1.35)
 				shake_t = maxf(shake_t, 1.8)
 				fx.legendary_shatter()
 			if previous_legendary_t < 3.75 and legendary_t >= 3.75:
@@ -1633,7 +1633,6 @@ func _process_fishing(delta: float):
 				fx.reveal_flip(_rarity_heat(last_rarity), bool(last_catch_metadata.get("first_capture", false)), bool(last_catch_metadata.get("crown", false)))
 	if not choice_changed:
 		_flush_result_toast()
-	flash_t = maxf(0.0, flash_t-delta)
 	shake_t = maxf(0.0, shake_t-delta)
 	fish_particle_t += delta
 
@@ -1812,7 +1811,6 @@ func _resolve_fishing_timing(position: float):
 	reveal_t = 0.0
 	reveal_stage = 0
 	result_t = 6.2 if last_rarity == "LEGENDARY" else 2.0
-	flash_t = 0.90 if last_rarity == "LEGENDARY" else (0.32 if last_rarity == "RARE" else 0.18)
 	shake_t = 1.10 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
 	_play_se("catch" if last_rarity != "LEGENDARY" else "legendary")
 	var catch_toast := ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch
@@ -1876,7 +1874,6 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	battle_escape = maxf(0.0, battle_escape - (0.24 if grade == "PERFECT" else 0.11))
 	gauge_direction = -gauge_direction
 	shake_t = maxf(shake_t, 0.14 + battle_hits * 0.06)
-	flash_t = maxf(flash_t, 0.10 + battle_hits * 0.025)
 	_play_se("perfect_tug" if grade == "PERFECT" else "tug")
 	fx.pull(grade, _float_screen_pos(), battle_hits, 1.0 - float(fish_hp) / maxf(1.0, float(fish_hp_max)))
 	if fish_hp > 0 and fish_hp <= 2 and not fx_last_pull_shown:
@@ -2439,7 +2436,7 @@ func _draw_result_status_hud():
 	hud_bar(Vector2(14,80),Vector2(76,4),fever_t / FEVER_DURATION if fever_active else float(combo) / FEVER_THRESHOLD,Color("#efbf69"))
 	_text(Vector2(14,99),_pity_label(),7)
 	if fever_flash_t > 0.0:
-		hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fever_flash_t*0.10))
+		hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fx.soft_overlay(fever_flash_t*0.10)))
 
 func _draw_hud():
 	_panel(Rect2(8,8,174,34))
@@ -2478,7 +2475,7 @@ func _draw_hud():
 			# Seven points keeps "RESCUE 2/3  PURPLE+16%" inside the 100px panel.
 			_text(Vector2(195,53),_pity_label(),7)
 			if fever_flash_t > 0.0:
-				hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fever_flash_t*0.10))
+				hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fx.soft_overlay(fever_flash_t*0.10)))
 	if notebook_open:
 		_panel(Rect2(66,51,348,194),true)
 		_text(Vector2(85,75),"THE TIDE LEDGER",17,true)
@@ -2653,8 +2650,6 @@ func _draw_fishing_result():
 		_text(Vector2(116,160),"SPACE  cast again",10)
 	else:
 		_text(Vector2(116,155),"SPACE  cast again",11)
-	if flash_t > 0.0:
-		hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.9,0.55,flash_t*0.28))
 	if last_grade != "MISS":
 		var sparkle_color := Color("#ffffff") if last_rarity == "LEGENDARY" else (Color("#f8dc75") if last_rarity == "RARE" else Color("#c6e6b7"))
 		var sparkle_count := 28 if last_rarity == "LEGENDARY" else (20 if last_rarity == "EPIC" else (14 if last_rarity == "RARE" else 7))
@@ -2752,7 +2747,7 @@ func _draw_standard_reveal_result():
 	# the rapid flashing that makes ordinary catches tiring to watch.
 	if t >= flip_start and t < flip_end:
 		var flip_glow := sin(flip_p * PI) * 0.10
-		hud.draw_rect(Rect2(0, 0, 480, 270), Color(rarity_col, flip_glow))
+		hud.draw_rect(Rect2(0, 0, 480, 270), Color(rarity_col, fx.soft_overlay(flip_glow)))
 
 func _draw_reveal_fish(center: Vector2, scale: float, color: Color, revealed: bool, width_scale: float = 1.0, species_name: String = "") -> bool:
 	# The face of an expanded catch uses the same transparent illustration as the
@@ -2869,7 +2864,7 @@ func _draw_legendary_result():
 	# The initial reveal gets one soft glow, never repeated high-frequency flash.
 	if t >= 2.05 and t < 2.55:
 		var glow := sin((t-2.05)/0.5*PI)*0.20
-		hud.draw_rect(Rect2(0,0,480,270),Color(1,0.90,0.67,glow))
+		hud.draw_rect(Rect2(0,0,480,270),Color(1,0.90,0.67,fx.soft_overlay(glow)))
 
 func _legendary_reveal_art_target_rect(growth: float = 1.0) -> Rect2:
 	# Keep the maximum card box above the name and metadata rows. The artwork is

@@ -639,6 +639,40 @@ func run():
 			premium_casts += 1
 			if game._rarity_rank(str(game.cast_candidate.get('rarity','COMMON'))) < 3 or game.promotion_false_cue: premium_lies += 1
 	check(premium_casts>0 and premium_lies==0,'golden tide appears and always means EPIC or better (%d casts)' % premium_casts)
+	# The golden tide also promises no fake-out: a reversal rolled for the
+	# cast (a visible step back) is dropped together with any false cue.
+	var tide_planned := 0
+	var tide_dirty := 0
+	for i in range(300):
+		game.promotion_target_rarity='EPIC'; game.promotion_cue_rank=3
+		game.promotion_false_cue=true; game.promotion_reversal_armed=true
+		game._plan_cast_fx()
+		if game.fx_premium:
+			tide_planned += 1
+			if game.promotion_false_cue or game.promotion_reversal_armed: tide_dirty += 1
+	check(tide_planned>0 and tide_dirty==0,'planning a golden tide clears the false cue and the armed reversal (%d plans)' % tide_planned)
+	# End to end: arm a reversal on an EPIC cast, plan it until the tide rolls,
+	# then play the whole wait. (Premium is too rare in natural casts to rely on
+	# the reversal roll landing on one, so the reversal is forced here.)
+	game._reset_fishing(); game.shells=100; game.combo=0; game.fever_active=false
+	game._try_fish()
+	fx.rng.seed=4402
+	var tide_rolled := false
+	for i in range(200):
+		game.promotion_target_rarity='EPIC'; game.promotion_cue_rank=3
+		game.promotion_false_cue=false; game.promotion_reversal_armed=true; game.promotion_reversal=false
+		game.bite_delay=1.0; game.bite_timer=0.0
+		game._plan_cast_fx()
+		if game.fx_premium:
+			tide_rolled = true
+			break
+	fx.counters.clear()
+	var tide_fakeouts := 0
+	var tide_steps := 0
+	while tide_rolled and game.fishing_state == game.FishingState.ANTICIPATING and tide_steps < 400:
+		game._process_fishing(0.05); tide_steps += 1
+		if game.promotion_reversal: tide_fakeouts += 1
+	check(tide_rolled and tide_steps>10 and tide_fakeouts==0 and int(fx.counters.get('cue_reversal',0))==0,'a golden-tide wait never steps back, even when a reversal was rolled (%d steps)' % tide_steps)
 	# FX rolls run on their own RNG, so the gameplay roll is unchanged.
 	game._reset_fishing(); game.shells=100
 	game.rng.seed=99001; fx.rng.seed=1
@@ -673,6 +707,22 @@ func run():
 	game._save_game('user://fx-test.json'); fx.reduced=false; game._load_game('user://fx-test.json')
 	check(fx.reduced,'reduced flash setting survives save/load')
 	fx.reduced=false
+	# HUD-drawn soft tints (reveal wash, LEGENDARY glow, FEVER wash) are not
+	# director flashes, so reduced mode must drop them: the capped, budgeted
+	# flash is then the only full-screen brightness change.
+	check(is_equal_approx(fx.soft_overlay(0.2),0.2),'soft screen tints draw normally by default')
+	fx.reduced=true
+	check(fx.soft_overlay(0.2)==0.0 and fx.soft_overlay(0.1)==0.0,'reduced mode drops the HUD soft tints')
+	fx.reduced=false
+	# Source guard for the same promise: every light full-screen HUD rect goes
+	# through soft_overlay (the dark LEGENDARY backdrop is not a light flash).
+	var main_src: String = FileAccess.get_file_as_string('res://main.gd')
+	var overlay_bypass := 0
+	for src_line in main_src.split('\n'):
+		var compact: String = src_line.replace(' ', '')
+		if compact.contains('hud.draw_rect(Rect2(0,0,480,270)') and not compact.contains('soft_overlay') and not compact.contains('Color(0.025,0.03,0.12'):
+			overlay_bypass += 1
+	check(overlay_bypass==0,'no HUD full-screen light overlay bypasses the reduced-flash switch (%d found)' % overlay_bypass)
 	# Hit-stop freezes the fishing clock only briefly.
 	fx.hitstop(0.1)
 	check(fx.time_scale()==0.0,'hit-stop freezes game time')

@@ -188,6 +188,13 @@ func current_flash_alpha() -> float:
 	if flash_t <= 0.0 or flash_dur <= 0.0: return 0.0
 	return flash_alpha * (flash_t / flash_dur)
 
+# Smooth full-screen tints drawn by the HUD (reveal wash, LEGENDARY glow, FEVER
+# wash) are single low-alpha bumps rather than director flashes, so they skip
+# the flash budget. Reduced mode drops them entirely: the capped, budgeted
+# request_flash() is then the only full-screen brightness change.
+func soft_overlay(alpha: float) -> float:
+	return 0.0 if reduced else alpha
+
 func pop_sounds() -> Array[String]:
 	var out := sounds.duplicate()
 	sounds.clear()
