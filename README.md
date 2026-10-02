@@ -42,7 +42,7 @@ NPC schedules, quests, and the wider offshore/lighthouse progression remain futu
 
 The rebuilt slice includes 23 fish cards across Saltmere town, Amber Beach, and Rocky Shore, with COMMON, UNCOMMON, RARE, EPIC, and LEGENDARY rarity. The ledger opens as a three-column field guide with fallback card portraits for undiscovered species. Casting rolls one PERFECT-pool candidate up front. PERFECT timing keeps that candidate; GOOD timing deterministically swaps an EPIC/LEGENDARY candidate for a map-legal RARE catch, so low-grade results never register a Legendary species. Staged promotion cues are capped by candidate rank (gold for COMMON/UNCOMMON, purple for RARE, rainbow for EPIC/LEGENDARY) but can occasionally mislead or reverse. The result card discloses the mismatch as “逆転!” or “ガセ…”.
 
-A weathered notice beside the Saltmere sign starts Issue #1's rumor loop. After the rumor is heard and three catches are collected, Moonlit Grotto appears as a distinct rocky-shore fishing pool; visiting it completes discovery and can surface Aurora koi.
+Fisher Mera in the Saltmere plaza or the weathered notice beside the sign starts Issue #1's rumor loop. After the rumor is heard and three catches are collected, Moonlit Grotto appears as a distinct rocky-shore fishing pool; visiting it completes discovery and can surface Aurora koi. Undiscovered legendary field-guide cards stay `???` with a generic icon; after the first catch, their name, icon, and durable crown record remain visible even if the last inventory copy is sold.
 
 ## Chain FEVER
 

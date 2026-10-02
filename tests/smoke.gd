@@ -133,6 +133,10 @@ func run():
 	game.current_map='town'; game._build_map('town'); game.rng.seed=9182
 	var rescued_pick: Dictionary = game._pick_species('GOOD', true)
 	check(game._rarity_rank(str(rescued_pick.get('rarity','COMMON')))>=game._rarity_rank('RARE'),'armed rescue raises catch floor to rare')
+	game.rng.seed=9183
+	var rescued_cast: Dictionary = game._pick_cast_candidate(true)
+	check(game._rarity_rank(str(rescued_cast.get('rarity','COMMON')))>=game._rarity_rank('RARE'),'pity threshold guarantees the next landed cast is rare-or-better')
+	game._reset_pity()
 	game.pity_meter=2; game.low_grade_streak=2; game.rescue_ready=false
 	game._save_game('user://pity-test.json')
 	game._reset_pity(); game._load_game('user://pity-test.json')
@@ -299,7 +303,18 @@ func run():
 		check(game.fishing_challenge.done and game.fishing_state==game.FishingState.RESULT,'moving gauge completes rotated chain %d within time limit' % seed)
 	check(game.FISH_SPECIES.size()==23,'expanded field guide has 23 species')
 	check(game.FISH_SPECIES.any(func(f): return f.rarity=='EPIC') and game.FISH_SPECIES.any(func(f): return f.rarity=='LEGENDARY'),'field guide includes epic and legendary')
-	game.current_map='town'; game._build_map('town'); game.player=Vector2(468,381); game._update_rumor_gate()
+	var legendary_ledger_name := 'Rainbow Kingfish'
+	game.catches.erase(legendary_ledger_name); game.catch_metadata.erase(legendary_ledger_name); game.first_capture_metadata.erase(legendary_ledger_name); game.catch_latest.erase(legendary_ledger_name)
+	check(game.ledger_display_name(legendary_ledger_name,0)=='???','uncaught legendary encyclopedia card stays hidden as ???')
+	game.catches[legendary_ledger_name]=1
+	check(game.ledger_display_name(legendary_ledger_name,1)==legendary_ledger_name,'caught legendary reveals its encyclopedia name')
+	game.catches.erase(legendary_ledger_name); game.catch_metadata[legendary_ledger_name]={"species":legendary_ledger_name,"rarity":"LEGENDARY"}
+	check(game.ledger_display_name(legendary_ledger_name,0)==legendary_ledger_name and game.species_discovered(legendary_ledger_name,0),'selling the last legendary copy preserves its durable discovery')
+	game.catch_metadata.erase(legendary_ledger_name)
+	game.rumor_found=false; game.hidden_spot_unlocked=false; game.fish_count=0
+	game.current_map='town'; game._build_map('town'); game.player=Vector2(424,381); game._update_rumor_gate()
+	check(game.rumor_found,'fisher NPC reveals hidden fishing rumor')
+	game.rumor_found=false; game.player=Vector2(468,381); game._update_rumor_gate()
 	check(game.rumor_found,'weathered notice reveals hidden fishing rumor')
 	game.fish_count=3; game._update_rumor_gate(); check(game.hidden_spot_unlocked,'collection gate unlocks hidden spot')
 	game.current_map='rocky'; game._build_map('rocky'); check(game._fishing_spots().size()==3,'hidden grotto adds distinct pool')
