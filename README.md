@@ -18,7 +18,7 @@ Space starts a cast at the shore or pier. After the bite, the fish battle is a s
 - Clean pulls ramp the procedural SE and screen effects; failed pulls strain the line and can snap it
 - A three-catch perfect combo unlocks Rainbow Kingfish (LEGENDARY)
 
-LEGENDARY follows a paced reveal: omen, rising energy, full-screen rainbow light/rays/particles, then a long afterglow. All SE are synthesized with Godot's AudioStreamGenerator and have no external audio-file dependency. After the reveal, the catch stays safely on the result card until the player chooses C to register/keep it or X to sell it for shells; Space never dismisses an undecided catch. A pending choice is saved and restored, so closing the game cannot discard a fish. Selling removes only the held inventory copy while preserving its discovery and size record. First captures remain immutable discovery records; repeat catches use a shortened reveal, and a larger specimen updates a species crown record shown with a CROWN marker. Size breaks ties by weight, and crown records retain map, spot, day, variant, and grade. Crown data, pending choices, and the tide forecast are saved in the version 12 ledger format.
+LEGENDARY follows a paced reveal: omen, rising energy, full-screen rainbow light/rays/particles, then a long afterglow. All SE are synthesized with Godot's AudioStreamGenerator and have no external audio-file dependency. After the reveal, the catch stays safely on the result card until the player chooses C to register/keep it or X to sell it for shells; Space never dismisses an undecided catch. A pending choice is saved and restored, so closing the game cannot discard a fish. Selling removes only the held inventory copy while preserving its discovery (see Sell or register for how crowns work). First captures remain immutable discovery records; repeat catches use a shortened reveal, and a larger registered specimen updates a species crown record shown with a CROWN marker. Size breaks ties by weight, and crown records retain map, spot, day, variant, and grade. Crown data, pending choices, heard rumors, and the tide forecast are saved in the version 13 ledger format.
 
 ## Tide forecast and fish availability
 
@@ -40,24 +40,61 @@ NPC schedules, quests, and the wider offshore/lighthouse progression remain futu
 
 ## Expanded field guide and hidden tide loop
 
-The rebuilt slice includes 23 fish cards across Saltmere town, Amber Beach, and Rocky Shore, with COMMON, UNCOMMON, RARE, EPIC, and LEGENDARY rarity. The ledger opens as a three-column field guide with fallback card portraits for undiscovered species. Casting rolls one PERFECT-pool candidate up front. PERFECT timing keeps that candidate; GOOD timing deterministically swaps an EPIC/LEGENDARY candidate for a map-legal RARE catch, so low-grade results never register a Legendary species. Staged promotion cues are capped by candidate rank (gold for COMMON/UNCOMMON, purple for RARE, rainbow for EPIC/LEGENDARY) but can occasionally mislead or reverse. The result card discloses the mismatch as “逆転!” or “ガセ…”.
+The rebuilt slice includes 23 fish cards across Saltmere town, Amber Beach, and Rocky Shore, with COMMON, UNCOMMON, RARE, EPIC, and LEGENDARY rarity. The ledger opens as a three-column field guide with fallback card portraits for undiscovered species. Casting rolls one PERFECT-pool candidate up front. PERFECT timing keeps that candidate; GOOD timing deterministically swaps an EPIC/LEGENDARY candidate for a map-legal RARE catch, so low-grade results never register a Legendary species. Staged promotion cues are capped by candidate rank (gold for COMMON/UNCOMMON, purple for RARE, rainbow for EPIC/LEGENDARY) but can occasionally mislead or reverse. A false rainbow or purple float is sized against the chance of a genuine one in the current tide pool, so a rainbow float stays honest roughly three times in four whichever pool is active. The result card discloses the mismatch as “逆転!” or “ガセ…”, and nothing about the catch (toast, SELL/REGISTER prices, name) is shown until the card has flipped.
 
-Fisher Mera in the Saltmere plaza or the weathered notice beside the sign starts Issue #1's rumor loop. After the rumor is heard and three catches are collected, Moonlit Grotto appears as a distinct rocky-shore fishing pool; visiting it completes discovery and can surface Aurora koi. Undiscovered legendary field-guide cards stay `???` with a generic icon; after the first catch, their name, icon, and durable crown record remain visible even if the last inventory copy is sold.
+### Rumors, hints and the grotto gate
+
+Stand beside Fisher Mera or the weathered notice in the Saltmere plaza (a bobbing
+`!` marks an unheard rumor) and press SPACE to hear the next rumor. Each source
+knows five: the grotto rumor plus four species hints. A species hint is generated
+from the same condition table that decides the species pool (for example
+`Moonfin trout: dusk or night / clear or rain / autumn or winter`), so it can never
+disagree with the water. Heard rumors are listed in the tide ledger (N, then A/D to
+page), a rumor names an otherwise `????????` card, and the ledger draws a green dot
+beside every discovered or rumored species that is biting on the current map,
+time, weather and season.
+
+Moonlit Grotto appears as a distinct rocky-shore pool once the grotto rumor has been
+heard **and** the field guide is 25% discovered (6 of 23 species); the ledger shows
+the guide percentage. Visiting it completes discovery and can surface Aurora koi.
+Undiscovered legendary field-guide cards stay `???` with a generic icon; after the
+first catch, their name, icon, and durable discovery remain visible even if the last
+inventory copy is sold.
+
+## Sell or register
+
+Every landed fish waits for a choice once its card has flipped: `X` sells it, `C`
+registers it. The prompt shows both prices, e.g. `X SELL +8   C REGISTER +5  NEW  CROWN`.
+
+- Selling pays by rarity, size and variant. The species stays discovered and the
+  first-capture record is kept, but a specimen that would have been a new crown is
+  not recorded as one.
+- Registering pays 1 shell, plus a rarity-scaled bonus for a first capture and +2
+  for a new size crown, and is the only way a crown is written to the ledger (`^`).
+  Duplicates are therefore worth selling; trophies are a real decision.
+
+## Tide ledger quick reference
+
+`N` opens the ledger. `A`/`D` page through heard rumors. `? mystery`, `~ shimmer`,
+`! gilded` and `^ crown` mark specimens; a green dot means that species is biting now.
 
 ## Chain FEVER
 
 Three consecutive catches activate a 30-second FEVER window. The HUD shows chain
 progress and remaining time; a warm flash, original chime, and full music layers
 announce activation. FEVER and bait use rarity-sensitive weights: common fish
-retain their baseline, while higher rarities receive progressively stronger
-boosts. The Rocky Shore legendary roll happens at cast time after two chain
-catches; timing does not create a second roll. PERFECT keeps the rolled
-candidate, while GOOD downgrades it to a map-legal RARE catch,
-capped at 5% even with Moonseed; GOOD timing keeps its lower-quality metadata,
-RARE substitution, and rescue-meter effect. Catches do not refresh the timer. A lost fish or elapsed
-FEVER window resets the chain. Reading
-the ledger and map transitions pause the timer with the fishing loop. Version 6
-saves retain the combo and remaining FEVER time; older saves start with no chain.
+retain their baseline, while higher rarities receive progressively stronger boosts.
+
+The Rocky Shore legendary roll happens once, at cast time, when the upcoming catch
+would be the third in the chain or later; timing does not create a second roll. It starts at
+1%, FEVER and Moonseed add 2% each, and it is capped at 5%. PERFECT keeps the
+rolled candidate, while GOOD downgrades an EPIC/LEGENDARY candidate to a map-legal
+RARE catch (keeping its lower-quality metadata and rescue-meter effect). Catches do
+not refresh the timer. A lost fish or an elapsed FEVER window resets the chain, and
+a miss that breaks a chain says how close it was (`惜しい!  one more catch for
+FEVER`). Reading the ledger and map transitions pause the timer with the fishing
+loop. Version 6+ saves retain the combo and remaining FEVER time; older saves start
+with no chain.
 
 ## Fair rescue (soft pity)
 
@@ -90,5 +127,5 @@ adds a small, deterministic rarity nudge to the tide forecast and moves the
 promotion float forward, disclosed as `RESCUE TIDE`; it never resolves the
 timing battle. At RESCUE READY, the next landed battle gets a one-shot
 map-legal RARE-or-better floor, then the meter resets. Tackle selection and
-rescue progress are saved in the version 12 ledger; older saves keep their
+rescue progress are saved in the version 13 ledger; older saves keep their
 selected indices and start with the new derived forecast bonus.

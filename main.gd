@@ -9,6 +9,11 @@ const WORLD_W := 64
 const WORLD_H := 40
 const WORLD_SIZE := Vector2(WORLD_W*TILE, WORLD_H*TILE)
 const SAVE_PATH := "user://saltmere_save.json"
+# Keep the legendary choice controls clear of the 270px viewport edge. These
+# are shared by both the promotion-label and no-label variants so a long-lived
+# result cannot move the actionable prompt back to the clipped baseline.
+const LEGENDARY_RESULT_PROMOTION_Y := 242.0
+const LEGENDARY_RESULT_CHOICE_Y := 252.0
 var player := Vector2(368, 372)
 var current_map := "town"
 var transition_active := false
@@ -97,6 +102,12 @@ const FISH_SPECIES: Array[Dictionary] = [
  {"name":"Crown snapper","rarity":"EPIC","maps":["town","rocky"]}, {"name":"Singing herring","rarity":"RARE","maps":["town","beach"]}, {"name":"Aurora koi","rarity":"LEGENDARY","maps":["hidden"]}
 ]
 var rumor_found := false
+# Rumor ids heard from Fisher Mera / the notice: "grotto" or a species name.
+var heard_rumors: Array = []
+var rumor_page := 0
+# Result toasts name the catch, so they wait until the card has flipped.
+var result_toast_pending := ""
+var chain_break_text := ""
 var hidden_spot_unlocked := false
 var hidden_spot_collected := false
 var promotion_t := 0.0
@@ -137,9 +148,13 @@ const FEVER_THRESHOLD := 3
 const FEVER_DURATION := 30.0
 const FEVER_RARITY_BONUS := 0.5
 const PROMOTION_FALSE_CUE_CHANCE := 0.18
+# A false rainbow/purple float is capped both by these absolute chances and by a
+# ratio of the honest one, so lies stay a minority of each cue.
 const PROMOTION_FALSE_RAINBOW_CHANCE := 0.02
 const PROMOTION_FALSE_PURPLE_CHANCE := 0.06
 const PROMOTION_REVERSAL_CHANCE := 0.24
+const PROMOTION_RAINBOW_LIE_RATIO := 0.35  # false rainbow floats per honest one (cap)
+const PROMOTION_PURPLE_LIE_RATIO := 0.60   # purple may mislead a little more often
 ## Soft pity is a transparent rescue hook for an unlucky run.  A miss or a
 ## low-grade (GOOD) catch advances the meter, but the player still has to land
 ## the next battle normally.  Once armed, the hook only changes the species
@@ -364,8 +379,8 @@ func _build_town():
 	# The notice is not the only way to discover the grotto.  Fisher Mera hangs
 	# around the plaza and shares the same rumor, so exploration and NPC talk
 	# both feed the Issue #1 hidden-tide loop.
-	landmarks.append({"kind":"rumor_npc","pos":Vector2(424,381),"label":"Fisher Mera"})
-	landmarks.append({"kind":"rumor_sign","pos":Vector2(468,381),"label":"Weathered notice"})
+	landmarks.append({"kind":"rumor_npc","pos":RUMOR_SOURCES.mera.pos,"label":RUMOR_SOURCES.mera.label})
+	landmarks.append({"kind":"rumor_sign","pos":RUMOR_SOURCES.notice.pos,"label":"Notice"})
 	for pos in [Vector2(296,323),Vector2(306,337),Vector2(582,337),Vector2(475,452)]:
 		_add_prop("barrel",pos,Rect2(-7,-17,14,16))
 	var tree_positions: Array[Vector2] = [Vector2(183,298),Vector2(194,232),Vector2(313,228),Vector2(316,280),Vector2(463,260),Vector2(498,278),Vector2(593,292),Vector2(172,378),Vector2(206,400),Vector2(286,410),Vector2(608,387),Vector2(663,359)]
@@ -472,6 +487,9 @@ func _process(delta):
 		return
 	if Input.is_action_just_pressed("notebook"):
 		notebook_open = not notebook_open
+	if notebook_open:
+		if Input.is_action_just_pressed("move_right"): page_rumor(1)
+		elif Input.is_action_just_pressed("move_left"): page_rumor(-1)
 	_update_rumor_gate()
 	var dir := Input.get_vector("move_left", "move_right", "move_up", "move_down")
 	walking = dir.length() > 0 and not notebook_open and fishing_state == FishingState.IDLE
@@ -485,7 +503,8 @@ func _process(delta):
 		if Input.is_action_just_pressed("bait_next"): cycle_bait()
 		if Input.is_action_just_pressed("rod_next"): cycle_rod()
 		if Input.is_action_just_pressed("fish") and fishing_state == FishingState.IDLE:
-			_try_fish()
+			if rumor_source_near() != "": talk_to_rumor_source()
+			else: _try_fish()
 		_process_fishing(delta)
 	if Input.is_action_just_pressed("save_game"): _save_game()
 	toast_t = maxf(0.0, toast_t-delta)
@@ -549,17 +568,109 @@ func _fishing_spots() -> Array[Dictionary]:
 			return spots
 		_: return []
 
+# --- Rumors and the collection gate -------------------------------------------
+# Fisher Mera and the weathered notice each know a few tide rumors.  Talking to
+# one (SPACE nearby) reveals the next rumor it has not told you yet.  A species
+# rumor is generated from the same condition table that drives the species pool,
+# so it can never disagree with what the water actually does.
+const HIDDEN_SPOT_COLLECTION_PERCENT := 25
+const RUMOR_TALK_RADIUS := 34.0
+const TIME_NAMES := ["dawn", "day", "dusk", "night"]
+const RUMOR_SOURCES := {
+	"mera": {"label":"Fisher Mera", "pos":Vector2(424,381), "rumors":["grotto", "Moonfin trout", "Lantern squid", "Night sailfish", "Storm sardine"]},
+	"notice": {"label":"Weathered notice", "pos":Vector2(468,381), "rumors":["grotto", "Lighthouse ray", "Pearl puffer", "Sea lavender perch", "Copper mackerel"]}
+}
+
+func collection_discovered_count() -> int:
+	var found := 0
+	for fish in FISH_SPECIES:
+		if species_discovered(str(fish.get("name", ""))): found += 1
+	return found
+
+func collection_percent() -> float:
+	return 100.0 * float(collection_discovered_count()) / float(maxi(1, FISH_SPECIES.size()))
+
+func _condition_phrase(values: Array, all_values: Array) -> String:
+	if values.size() >= all_values.size(): return "any"
+	if values.size() == all_values.size() - 1:
+		for value in all_values:
+			if not values.has(value): return "not " + str(value)
+	var ordered: Array = []
+	for value in all_values:
+		if values.has(value): ordered.append(str(value))
+	return " or ".join(ordered)
+
+func fish_condition_hint(species: String) -> String:
+	var conditions := _fish_conditions(species)
+	return "%s: %s / %s / %s" % [species, _condition_phrase(conditions.times, TIME_NAMES), _condition_phrase(conditions.weather, WEATHER_NAMES), _condition_phrase(conditions.seasons, SEASON_NAMES)]
+
+func rumor_text(rumor_id: String) -> String:
+	if rumor_id == "grotto":
+		return "A moonlit grotto opens on the rocky shore once the guide is %d%% full." % HIDDEN_SPOT_COLLECTION_PERCENT
+	return fish_condition_hint(rumor_id)
+
+func rumor_heard(rumor_id: String) -> bool:
+	return heard_rumors.has(rumor_id)
+
+func _all_rumor_ids() -> Array:
+	var ids: Array = []
+	for key in RUMOR_SOURCES:
+		for id in RUMOR_SOURCES[key].rumors:
+			if not ids.has(id): ids.append(id)
+	return ids
+
+func rumor_source_near() -> String:
+	if current_map != "town": return ""
+	var best := ""
+	var best_distance := RUMOR_TALK_RADIUS
+	for key in RUMOR_SOURCES:
+		var distance := player.distance_to(RUMOR_SOURCES[key].pos)
+		if distance < best_distance:
+			best = str(key); best_distance = distance
+	return best
+
+func _next_unheard_rumor(source: String) -> String:
+	if not RUMOR_SOURCES.has(source): return ""
+	for id in RUMOR_SOURCES[source].rumors:
+		if not heard_rumors.has(id): return str(id)
+	return ""
+
+func talk_to_rumor_source(source: String = "") -> bool:
+	var key := source if source != "" else rumor_source_near()
+	if key == "" or not RUMOR_SOURCES.has(key): return false
+	var label := str(RUMOR_SOURCES[key].label)
+	var id := _next_unheard_rumor(key)
+	if id == "":
+		toast = "%s has nothing new  /  N reviews the rumors you have heard" % label
+		toast_t = 2.8
+		return true
+	_hear_rumor(id)
+	toast = "%s: %s" % [label, rumor_text(id)]
+	toast_t = 4.5
+	return true
+
+func _hear_rumor(rumor_id: String) -> void:
+	if not heard_rumors.has(rumor_id): heard_rumors.append(rumor_id)
+	if rumor_id == "grotto": rumor_found = true
+	rumor_page = heard_rumors.size() - 1
+
+func page_rumor(step: int) -> void:
+	if heard_rumors.is_empty(): return
+	rumor_page = posmod(rumor_page + step, heard_rumors.size())
+
+# A species is "known" once it is in the ledger or a rumor has described it.
+# Only known species get the "biting now" dot, so rumors are what turn the tide
+# forecast into something readable.
+func species_known(species: String) -> bool:
+	return species_discovered(species) or heard_rumors.has(species)
+
+func species_biting_now(species: String) -> bool:
+	return species_known(species) and fish_available(species)
+
 func _update_rumor_gate() -> void:
-	if not rumor_found and current_map == "town":
-		var near_notice := player.distance_to(Vector2(468,381)) < 34.0
-		var near_fisher := player.distance_to(Vector2(424,381)) < 34.0
-		if near_notice or near_fisher:
-			rumor_found = true
-			toast = "Fisher Mera whispers of a moonlit grotto" if near_fisher and not near_notice else "The weathered notice whispers of a moonlit grotto"
-			toast_t = 3.0
-	if rumor_found and not hidden_spot_unlocked and fish_count >= 3:
+	if rumor_found and not hidden_spot_unlocked and collection_percent() >= float(HIDDEN_SPOT_COLLECTION_PERCENT):
 		hidden_spot_unlocked = true
-		toast = "A hidden fishing spot is now marked on the rocky shore"; toast_t = 3.0
+		toast = "The guide is %d%% full: a hidden grotto is marked on the rocky shore" % HIDDEN_SPOT_COLLECTION_PERCENT; toast_t = 3.5
 	if hidden_spot_unlocked and current_map == "rocky" and player.distance_to(Vector2(690,520)) < 28.0:
 		hidden_spot_collected = true
 
@@ -588,21 +699,11 @@ func _pick_species(grade: String, apply_rescue := false, exclude_legendary := fa
 	# Rescue is intentionally a soft odds nudge before the one-shot RARE floor.
 	# It makes an unlucky forecast feel warmer without handing out a catch or
 	# changing the map/time/weather legality of the pool.
-	var bonus := float(BAITS[bait_index].rarity_bonus) + (FEVER_RARITY_BONUS if fever_active else 0.0) + rescue_forecast_bonus()
+	var bonus := _rarity_bonus_total()
 	var total := 0.0
 	var weights: Array[float] = []
 	for fish in eligible:
-		var weight := 100.0
-		var rarity := str(fish.rarity)
-		match rarity:
-			"UNCOMMON": weight = 40.0
-			"RARE": weight = 12.0
-			"EPIC": weight = 3.0
-			"LEGENDARY": weight = 0.5
-		# Bait and FEVER are intentionally rarity-sensitive.  Common fish keep
-		# their baseline weight, while the bonus increasingly favours a real
-		# upgrade instead of inflating every rarity by the same amount.
-		weight *= 1.0 + bonus * _rarity_bonus_scale(rarity)
+		var weight := _species_weight(str(fish.rarity), bonus)
 		weights.append(weight); total += weight
 	var roll := rng.randf() * total
 	for i in range(eligible.size()):
@@ -611,6 +712,46 @@ func _pick_species(grade: String, apply_rescue := false, exclude_legendary := fa
 			return _apply_rescue_floor(eligible[i], eligible, grade) if apply_rescue else eligible[i]
 	var fallback: Dictionary = eligible[eligible.size() - 1]
 	return _apply_rescue_floor(fallback, eligible, grade) if apply_rescue else fallback
+
+func _rarity_bonus_total() -> float:
+	return float(BAITS[bait_index].rarity_bonus) + (FEVER_RARITY_BONUS if fever_active else 0.0) + rescue_forecast_bonus()
+
+func _species_weight(rarity: String, bonus: float) -> float:
+	var weight := 100.0
+	match rarity:
+		"UNCOMMON": weight = 40.0
+		"RARE": weight = 12.0
+		"EPIC": weight = 3.0
+		"LEGENDARY": weight = 0.5
+	# Bait and FEVER are intentionally rarity-sensitive.  Common fish keep
+	# their baseline weight, while the bonus increasingly favours a real
+	# upgrade instead of inflating every rarity by the same amount.
+	return weight * (1.0 + bonus * _rarity_bonus_scale(rarity))
+
+# Probability that the next cast's candidate has at least this rarity rank, from
+# the same weights _pick_species uses plus the explicit legendary roll.  The
+# promotion cue uses it to size its lies: the pool now changes with the tide, so
+# a fixed lie rate would swamp a rainbow float in a pool with one EPIC species.
+func _candidate_share_at_least(min_rank: int) -> float:
+	var pool := _species_pool()
+	var eligible: Array[Dictionary] = []
+	var has_legendary := false
+	for fish in pool:
+		if str(fish.get("rarity", "COMMON")) == "LEGENDARY": has_legendary = true
+		else: eligible.append(fish)
+	if eligible.is_empty(): eligible = pool
+	var bonus := _rarity_bonus_total()
+	var total := 0.0
+	var matched := 0.0
+	for fish in eligible:
+		var weight := _species_weight(str(fish.get("rarity", "COMMON")), bonus)
+		total += weight
+		if _rarity_rank(str(fish.get("rarity", "COMMON"))) >= min_rank: matched += weight
+	var share := matched / total if total > 0.0 else 0.0
+	if has_legendary and min_rank <= _rarity_rank("LEGENDARY"):
+		var legendary_chance := _legendary_chance_for_cast()
+		share = share * (1.0 - legendary_chance) + legendary_chance
+	return share
 
 func _rarity_rank(rarity: String) -> int:
 	match rarity:
@@ -857,8 +998,10 @@ func _record_catch_metadata(fish: Dictionary, grade: String) -> Dictionary:
 	var specimen_weight := float(metadata.get("weight_kg", 0.0))
 	var is_crown := _record_is_better(metadata, record)
 	if is_crown:
+		# A crown candidate.  The ledger record itself is written only when the
+		# player registers the specimen (_commit_crown_record), so selling the
+		# biggest fish gives up the crown.
 		record = {"species":fish_name,"size_cm":specimen_size,"weight_kg":specimen_weight,"day":day,"map":current_map,"spot":str(metadata.get("spot", "Open water")),"variant":str(metadata.get("variant", "Standard")),"grade":grade}
-		best_records[fish_name] = record.duplicate(true)
 	metadata["crown"] = is_crown
 	metadata["record_size_cm"] = float(record.get("size_cm", metadata.get("size_cm", 0.0)))
 	metadata["record_weight_kg"] = float(record.get("weight_kg", metadata.get("weight_kg", 0.0)))
@@ -883,9 +1026,36 @@ func get_catch_metadata(species: String) -> Dictionary:
 	return (catch_metadata.get(species, {}) as Dictionary).duplicate(true)
 
 const SELL_VALUES := {"COMMON":2, "UNCOMMON":3, "RARE":5, "EPIC":8, "LEGENDARY":14}
+# Selling always keeps the species discovered, but only a REGISTERED specimen is
+# written into the ledger as the crown.  Registering also pays a base reward plus
+# a bonus for a first capture and for a new crown, so keeping the trophy competes
+# with cashing it out instead of being a strictly worse +1 shell.
+const REGISTER_BASE_REWARD := 1
+const REGISTER_FIRST_BONUS := {"COMMON":2, "UNCOMMON":4, "RARE":6, "EPIC":8, "LEGENDARY":10}
+const REGISTER_CROWN_BONUS := 2
 
 func catch_choice_pending() -> bool:
 	return pending_catch_state == "pending" and not pending_catch.is_empty()
+
+# The reveal card, the toast bar and the SELL/REGISTER prompt all carry
+# rarity-correlated information (names, values).  They wait for the flip.
+func catch_reveal_complete() -> bool:
+	if fishing_state != FishingState.RESULT or last_grade == "MISS" or last_rarity == "": return true
+	if last_rarity == "LEGENDARY": return legendary_t >= 2.05
+	return reveal_stage >= 4
+
+func _flush_result_toast() -> void:
+	if result_toast_pending == "": return
+	# A decision may be made from a saved/revealed result before the next draw
+	# tick. Do not resurrect a stale reveal toast after that fish is already SOLD
+	# or REGISTERED; the decision handler owns the visible confirmation.
+	if not catch_choice_pending():
+		result_toast_pending = ""
+		return
+	if fishing_state != FishingState.RESULT or not catch_reveal_complete(): return
+	toast = result_toast_pending
+	toast_t = 4.0
+	result_toast_pending = ""
 
 func pending_catch_species() -> String:
 	return str(pending_catch.get("species", last_catch)) if catch_choice_pending() else ""
@@ -895,6 +1065,17 @@ func pending_catch_sell_value() -> int:
 	var stored := int(pending_catch.get("sell_value", 0))
 	if stored > 0: return stored
 	return _catch_sell_value(pending_catch.get("metadata", {}) as Dictionary)
+
+func pending_catch_register_value() -> int:
+	if not catch_choice_pending(): return 0
+	return _register_value(pending_catch.get("metadata", {}) as Dictionary)
+
+func _register_value(metadata: Dictionary) -> int:
+	var value := REGISTER_BASE_REWARD
+	if bool(metadata.get("first_capture", false)):
+		value += int(REGISTER_FIRST_BONUS.get(str(metadata.get("rarity", "COMMON")), REGISTER_FIRST_BONUS["COMMON"]))
+	if bool(metadata.get("crown", false)): value += REGISTER_CROWN_BONUS
+	return value
 
 func _catch_sell_value(metadata: Dictionary) -> int:
 	var rarity := str(metadata.get("rarity", "COMMON"))
@@ -916,17 +1097,31 @@ func _open_catch_choice(metadata: Dictionary) -> void:
 	pending_catch_state = "pending"
 	last_catch_decision = ""
 
+# Writes the specimen into best_records.  Called only when the player registers
+# it, so selling a record fish gives up the crown.
+func _commit_crown_record(species: String, metadata: Dictionary) -> bool:
+	if not bool(metadata.get("crown", false)): return false
+	var record: Dictionary = best_records.get(species, {})
+	if not _record_is_better(metadata, record): return false
+	best_records[species] = {"species":species,"size_cm":float(metadata.get("size_cm", 0.0)),"weight_kg":float(metadata.get("weight_kg", 0.0)),"day":int(metadata.get("day", day)),"map":str(metadata.get("map", current_map)),"spot":str(metadata.get("spot", "Open water")),"variant":str(metadata.get("variant", "Standard")),"grade":str(metadata.get("grade", "GOOD"))}
+	return true
+
 func register_pending_catch() -> bool:
 	if not catch_choice_pending(): return false
 	var species := pending_catch_species()
-	# Keep the established one-shell catch reward, but grant it only when the
-	# player explicitly registers/keeps the fish.  A pending result therefore
-	# cannot be duplicated by repeated SPACE presses or by saving mid-choice.
-	shells += 1
+	var metadata := pending_catch.get("metadata", {}) as Dictionary
+	# The reward is granted only when the player explicitly registers/keeps the
+	# fish, so a pending result cannot be duplicated by repeated SPACE presses or
+	# by saving mid-choice.
+	var reward := _register_value(metadata)
+	var new_crown := _commit_crown_record(species, metadata)
+	result_toast_pending = ""
+	shells += reward
 	pending_catch["decision"] = "registered"
+	pending_catch["register_value"] = reward
 	pending_catch_state = "registered"
 	last_catch_decision = "registered"
-	toast = "REGISTERED  %s / safely kept in the tide ledger" % species
+	toast = "REGISTERED  %s / +%d shells%s" % [species, reward, "  /  CROWN recorded" if new_crown else ""]
 	toast_t = 2.4
 	return true
 
@@ -941,19 +1136,25 @@ func sell_pending_catch() -> bool:
 		if held == 0: catches.erase(species)
 		else: catches[species] = held
 	var value := pending_catch_sell_value()
+	var gave_up_crown := bool((pending_catch.get("metadata", {}) as Dictionary).get("crown", false))
+	result_toast_pending = ""
 	shells += value
 	pending_catch["decision"] = "sold"
 	pending_catch["sell_value"] = value
 	pending_catch_state = "sold"
 	last_catch_decision = "sold"
-	toast = "SOLD  %s / +%d shells  (record preserved)" % [species, value]
+	toast = "SOLD  %s / +%d shells  (discovery kept%s)" % [species, value, ", crown not recorded" if gave_up_crown else ""]
 	toast_t = 2.4
 	return true
 
 func _catch_choice_prompt() -> String:
 	if catch_choice_pending():
-		return "X SELL +%d shells   C REGISTER / KEEP" % pending_catch_sell_value()
-	if last_catch_decision == "sold": return "SOLD  /  record preserved   SPACE continue"
+		var metadata := pending_catch.get("metadata", {}) as Dictionary
+		var tag := ""
+		if bool(metadata.get("first_capture", false)): tag += "  NEW"
+		if bool(metadata.get("crown", false)): tag += "  CROWN"
+		return "X SELL +%d   C REGISTER +%d%s" % [pending_catch_sell_value(), pending_catch_register_value(), tag]
+	if last_catch_decision == "sold": return "SOLD  /  discovery kept   SPACE continue"
 	if last_catch_decision == "registered": return "REGISTERED / KEPT   SPACE continue"
 	return "SPACE  continue"
 
@@ -970,7 +1171,7 @@ func ledger_display_name(species: String, owned: int = -1) -> String:
 	var fish := _fish_entry(species)
 	var discovered := species_discovered(species, owned)
 	if str(fish.get("rarity", "COMMON")) == "LEGENDARY" and not discovered: return "???"
-	var display_name := species if discovered else "????????"
+	var display_name := species if discovered or heard_rumors.has(species) else "????????"
 	var marker := _ledger_marker(species, owned)
 	if marker != "": display_name += " " + marker
 	return display_name
@@ -1038,13 +1239,17 @@ func _try_fish():
 		# misleading high promotion.  No new random roll occurs while the float is
 		# moving, so the same cast always tells the same visual story.
 		var cue_roll := rng.randf()
+		var rainbow_share := _candidate_share_at_least(3)
+		var purple_share := maxf(0.0, _candidate_share_at_least(2) - rainbow_share)
+		var false_rainbow_chance := minf(PROMOTION_FALSE_RAINBOW_CHANCE, rainbow_share * PROMOTION_RAINBOW_LIE_RATIO)
+		var false_purple_chance := minf(PROMOTION_FALSE_PURPLE_CHANCE, purple_share * PROMOTION_PURPLE_LIE_RATIO)
 		if cue_roll < PROMOTION_FALSE_CUE_CHANCE and promotion_cue_rank >= 2:
 			promotion_false_cue = true
 			promotion_cue_rank = maxi(0, promotion_cue_rank - 2)
-		elif cue_roll < PROMOTION_FALSE_RAINBOW_CHANCE and promotion_cue_rank <= 1:
+		elif cue_roll < false_rainbow_chance and promotion_cue_rank <= 1:
 			promotion_false_cue = true
 			promotion_cue_rank = 3
-		elif cue_roll < PROMOTION_FALSE_RAINBOW_CHANCE + PROMOTION_FALSE_PURPLE_CHANCE and promotion_cue_rank <= 1:
+		elif cue_roll < false_rainbow_chance + false_purple_chance and promotion_cue_rank <= 1:
 			promotion_false_cue = true
 			promotion_cue_rank = 2
 		promotion_reversal_armed = rng.randf() < PROMOTION_REVERSAL_CHANCE
@@ -1061,6 +1266,7 @@ func _try_fish():
 
 func _process_fishing(delta: float):
 	# Notebook and map transitions pause fishing; the same pause applies here.
+	var choice_changed := false
 	# Thirty seconds leaves room for the reveal and another full tug-of-war.
 	fever_flash_t = maxf(0.0, fever_flash_t - delta)
 	if fever_active:
@@ -1151,16 +1357,25 @@ func _process_fishing(delta: float):
 			_handle_fishing_strike(gauge, counter)
 	elif fishing_state == FishingState.RESULT:
 		result_t -= delta
+		# Flush a queued reveal toast before reading disposition input. If
+		# SELL/REGISTER is pressed on this same frame, its confirmation replaces
+		# the reveal toast and the final guard below cannot overwrite it.
+		_flush_result_toast()
 		if catch_choice_pending():
-			if Input.is_action_just_pressed("sell_catch"):
-				sell_pending_catch()
+			# The prompt is hidden until the card flips, so ignore blind presses.
+			if not catch_reveal_complete():
+				pass
+			elif Input.is_action_just_pressed("sell_catch"):
+				choice_changed = sell_pending_catch()
 			elif Input.is_action_just_pressed("register_catch"):
-				register_pending_catch()
+				choice_changed = register_pending_catch()
 			elif Input.is_action_just_pressed("fish"):
 				# Space never silently chooses a disposition.  Keep the result on
 				# screen until the player explicitly sells or registers it.
+				result_toast_pending = ""
 				toast = "Choose SELL or REGISTER / the catch is safely held"
 				toast_t = 1.8
+				choice_changed = true
 		elif Input.is_action_just_pressed("fish"):
 			_reset_fishing()
 		if last_rarity == "LEGENDARY":
@@ -1194,6 +1409,8 @@ func _process_fishing(delta: float):
 			var flip_time := 0.92 if reveal_shortened else 1.48
 			if previous_reveal_t < flip_time and reveal_t >= flip_time:
 				_play_se("rise")
+	if not choice_changed:
+		_flush_result_toast()
 	flash_t = maxf(0.0, flash_t-delta)
 	shake_t = maxf(0.0, shake_t-delta)
 	fish_particle_t += delta
@@ -1245,6 +1462,14 @@ func _start_fever() -> void:
 	_music_call("set_fever", [true])
 	_play_se("fever")
 
+# Shown when a miss ends a chain, so a near-FEVER loss reads as a near miss.
+func _chain_break_note(lost_combo: int, lost_fever: bool) -> String:
+	if lost_fever: return "FEVER lost at CHAIN %d" % lost_combo
+	var remaining := FEVER_THRESHOLD - lost_combo
+	if lost_combo <= 0 or remaining <= 0: return ""
+	if remaining == 1: return "惜しい!  one more catch for FEVER"
+	return "CHAIN %d lost  /  %d more for FEVER" % [lost_combo, remaining]
+
 func _break_chain() -> void:
 	combo = 0
 	fever_active = false
@@ -1260,6 +1485,7 @@ func _resolve_fishing_timing(position: float):
 	if grade == "MISS":
 		promotion_false_cue_revealed = promotion_false_cue
 		promotion_result_label = ""
+		chain_break_text = _chain_break_note(combo, fever_active)
 		_break_chain()
 		_advance_pity("MISS")
 		last_catch = "The fish got away"
@@ -1278,7 +1504,7 @@ func _resolve_fishing_timing(position: float):
 		_music_call("set_combo", [0])
 		_music_call("start_field")
 		_play_se("miss")
-		toast = "MISS!  Tap SPACE to cast again"
+		toast = "MISS!  " + (chain_break_text + "  /  " if chain_break_text != "" else "") + "SPACE to cast again"
 		toast_t = result_t
 		return
 	combo += 1
@@ -1337,11 +1563,15 @@ func _resolve_fishing_timing(position: float):
 	flash_t = 0.90 if last_rarity == "LEGENDARY" else (0.32 if last_rarity == "RARE" else 0.18)
 	shake_t = 1.10 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
 	_play_se("catch" if last_rarity != "LEGENDARY" else "legendary")
-	toast = ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch + "  /  C keep  X sell"
+	var catch_toast := ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch
 	if rescue_was_ready and last_rescue_used:
-		toast = "RESCUE! RARE floor / " + last_catch
-	if fever_started: toast = "FEVER! Rarity boosted for 30s / " + last_catch
-	toast_t = result_t
+		catch_toast = "RESCUE! RARE floor / " + last_catch
+	if fever_started: catch_toast = "FEVER! Rarity boosted for 30s / " + last_catch
+	# Every variant names the fish (or its rarity), so none may appear while the
+	# card is still face-down; _flush_result_toast shows it after the flip.
+	result_toast_pending = catch_toast
+	toast = ""
+	toast_t = 0.0
 
 func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	if pull_cooldown > 0.0: return
@@ -1481,6 +1711,8 @@ func _reset_fishing():
 	pending_catch = {}
 	pending_catch_state = ""
 	last_catch_decision = ""
+	result_toast_pending = ""
+	chain_break_text = ""
 	rescue_selection_used = false
 	legendary_t = 0.0
 	legendary_stage = 0
@@ -1517,7 +1749,7 @@ func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		toast = "Could not save. Please check available storage."; toast_t = 4; return
-	f.store_string(JSON.stringify({"version":12,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"weather":weather,"season":season,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected,"pending_catch":pending_catch,"pending_catch_state":pending_catch_state,"last_catch_decision":last_catch_decision,"reveal_t":reveal_t,"reveal_stage":reveal_stage,"reveal_shortened":reveal_shortened,"legendary_t":legendary_t,"legendary_stage":legendary_stage}))
+	f.store_string(JSON.stringify({"version":13,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"weather":weather,"season":season,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"heard_rumors":heard_rumors,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected,"pending_catch":pending_catch,"pending_catch_state":pending_catch_state,"last_catch_decision":last_catch_decision,"reveal_t":reveal_t,"reveal_stage":reveal_stage,"reveal_shortened":reveal_shortened,"legendary_t":legendary_t,"legendary_stage":legendary_stage}))
 	toast = "Saved to the tide ledger"; toast_t = 2.4
 
 func _normalize_catch_metadata(raw: Dictionary, species: String, first_capture := true) -> Dictionary:
@@ -1595,7 +1827,11 @@ func _load_game(path: String = SAVE_PATH):
 	# Version 8 saves did not have best_records. Reconstruct them from every
 	# durable measurement we do have so the first post-migration repeat cannot
 	# become a false crown just because the new ledger field is absent.
+	# Newer saves keep best_records as the registered-crown ledger (a sold
+	# specimen is deliberately absent), so rebuilding it from catch_latest would
+	# resurrect crowns the player sold.
 	for species in catch_metadata:
+		if data.has("best_records"): break
 		var key := str(species)
 		var known: Dictionary = best_records.get(key, {})
 		for source in [catch_metadata.get(key, {}), first_capture_metadata.get(key, {}), catch_latest.get(key, {})]:
@@ -1662,6 +1898,15 @@ func _load_game(path: String = SAVE_PATH):
 			toast = "Catch restored / choose REGISTER or SELL"
 			toast_t = 4.0
 	rumor_found = bool(data.get("rumor_found", false))
+	heard_rumors = []
+	var known_rumors := _all_rumor_ids()
+	var saved_rumors = data.get("heard_rumors", [])
+	if saved_rumors is Array:
+		for id in saved_rumors:
+			if known_rumors.has(str(id)) and not heard_rumors.has(str(id)): heard_rumors.append(str(id))
+	# Saves from before the rumor list only knew the single grotto rumor.
+	if rumor_found and not heard_rumors.has("grotto"): heard_rumors.append("grotto")
+	rumor_page = maxi(0, heard_rumors.size() - 1)
 	hidden_spot_unlocked = bool(data.get("hidden_spot_unlocked", rumor_found and fish_count >= 3))
 	hidden_spot_collected = bool(data.get("hidden_spot_collected", false))
 	combo = clampi(int(data.get("combo", 0)), 0, 999)
@@ -1804,6 +2049,10 @@ func _draw_map_landmarks():
 			draw_line(p + Vector2(-6,12), p + Vector2(-10,21), Color("#3d4d51"), 3.0)
 			draw_line(p + Vector2(6,12), p + Vector2(10,21), Color("#3d4d51"), 3.0)
 			draw_line(p + Vector2(7,-2), p + Vector2(16,-14), Color("#8f6e4e"), 2.0)
+		var rumor_key := "mera" if kind == "rumor_npc" else ("notice" if kind == "rumor_sign" else "")
+		if rumor_key != "" and _next_unheard_rumor(rumor_key) != "":
+			# A bobbing "!" says there is a new rumor to hear.
+			draw_string(ThemeDB.fallback_font, p + Vector2(-4,-22 + sin(elapsed * 3.0) * 1.5), "!", HORIZONTAL_ALIGNMENT_CENTER, 8, 13, Color("#ffe08a"))
 		# Landmark names are intentionally small, like hand-painted map notes.
 		draw_string(ThemeDB.fallback_font, p + Vector2(-34,27), str(landmark.label), HORIZONTAL_ALIGNMENT_CENTER, 68, 8, Color("#3f514d"))
 	# Fishing markers sit just inland of each water feature and pulse gently.
@@ -1849,17 +2098,16 @@ func _draw_hud():
 	_panel(Rect2(294,8,178,32))
 	_text(Vector2(302,21),"[N] Ledger  B:%d  R:%d shells" % [bait_cost(), rod_cost()],9)
 	_text(Vector2(302,34),bait_name() + " / " + rod_name(),8)
-	if catch_choice_pending():
-		_panel(Rect2(8,218,250,20))
-		_text(Vector2(15,232),_catch_choice_prompt(),9)
 	_panel(Rect2(8,244,464,19))
 	_text(Vector2(15,257),toast if toast_t>0 else _map_hint(),10)
 	var nearby_exit := _exit_hint()
-	if nearby_exit != "" and not notebook_open and not transition_active:
+	if nearby_exit != "" and not notebook_open and not transition_active and fishing_state == FishingState.IDLE:
 		_panel(Rect2(286,218,184,20))
 		_text(Vector2(294,232),nearby_exit,10)
 	if _can_fish() and not notebook_open and fishing_state == FishingState.IDLE:
 		_panel(Rect2(172,218,138,20)); _text(Vector2(182,232),"SPACE Cast  /  B bait  /  R rod",10)
+	elif rumor_source_near() != "" and not notebook_open and fishing_state == FishingState.IDLE:
+		_panel(Rect2(172,218,84,20)); _text(Vector2(182,232),"SPACE  Talk",10)
 	if fishing_state == FishingState.ANTICIPATING or fishing_state == FishingState.TIMING:
 		_draw_fishing_hud()
 	elif fishing_state == FishingState.RESULT:
@@ -1877,6 +2125,7 @@ func _draw_hud():
 		_panel(Rect2(66,51,348,194),true)
 		_text(Vector2(85,75),"THE TIDE LEDGER",17,true)
 		_text(Vector2(85,94),"Saltmere / " + current_map.capitalize() + "  " + _time_period().to_upper(),10,true)
+		_text(Vector2(262,94),"Guide %d/%d  %d%%" % [collection_discovered_count(), FISH_SPECIES.size(), int(collection_percent())],9,true)
 		_text(Vector2(85,104),rescue_forecast_label(),9,true)
 		_text(Vector2(85,113),"Tackle  B:%s %d  /  R:%s %d  shells/cast" % [bait_name(), bait_cost(), rod_name(), rod_cost()],8,true)
 		# Three-column field guide: every species has a card fallback portrait.
@@ -1886,18 +2135,22 @@ func _draw_hud():
 			var col := i / rows
 			var row := i % rows
 			var x := 82.0 + col * 112.0
-			var y := 122.0 + row * 14.0
+			var y := 122.0 + row * 12.0
 			var owned := int(catches.get(str(fish.name),0))
 			var discovered := species_discovered(str(fish.name), owned)
 			var icon := Color("#b6c7d9") if not discovered else _rarity_color(str(fish.rarity))
 			hud.draw_rect(Rect2(x,y-9,8,8),icon)
+			if species_biting_now(str(fish.name)): hud.draw_circle(Vector2(x-3,y-5),2.0,Color("#4f9a6a"))
 			var display_name := ledger_display_name(str(fish.name), owned)
 			if best_records.has(str(fish.name)): display_name += " ^"
 			_text(Vector2(x+11,y),display_name,8,true)
 			_text(Vector2(x+85,y),str(owned),8,true)
-		_text(Vector2(85,232),"Rumor: " + ("heard" if rumor_found else "ask Fisher Mera or read the notice"),9,true)
-		_text(Vector2(85,241),"? mystery  ~ shimmer  ! gilded  ^ crown  /  N close",8,true)
-		_text(Vector2(85,223),"N to close  /  Movement pauses while reading",10,true)
+		if heard_rumors.is_empty():
+			_text(Vector2(85,230),"Rumors: press SPACE beside Fisher Mera or the notice",8,true)
+		else:
+			_text(Vector2(85,230),"[%d/%d] %s" % [rumor_page + 1, heard_rumors.size(), rumor_text(str(heard_rumors[clampi(rumor_page, 0, heard_rumors.size() - 1)]))],8,true)
+		_text(Vector2(85,240),"? mystery ~ shimmer ! gilded ^ crown  green dot: biting now",8,true)
+		_text(Vector2(85,220),"N close  /  A D read rumors" + ("  /  grotto opens at %d%%" % HIDDEN_SPOT_COLLECTION_PERCENT if rumor_found and not hidden_spot_unlocked else ""),8,true)
 
 func _draw_fishing_hud():
 	if fishing_state == FishingState.TIMING:
@@ -1988,7 +2241,7 @@ func _draw_fishing_result():
 	if last_grade != "MISS":
 		_text(Vector2(116,133),last_rarity + "  /  COMBO x" + str(combo),13 if last_rarity == "LEGENDARY" else 11)
 	else:
-		_text(Vector2(116,133),"Combo reset",11)
+		_text(Vector2(116,133),chain_break_text if chain_break_text != "" else "Combo reset",11)
 	if promotion_result_label != "" or promotion_false_cue_revealed:
 		_text(Vector2(116,147),promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED",9)
 		_text(Vector2(116,160),"SPACE  cast again",10)
@@ -2020,7 +2273,7 @@ func _draw_standard_reveal_result():
 	var card_half_width := 136.0
 	if t >= flip_start and t < flip_end:
 		card_half_width = maxf(7.0, 136.0 * absf(cos(flip_p * PI)))
-	var card_rect := Rect2(center.x - card_half_width, 35, card_half_width * 2.0, 194)
+	var card_rect := Rect2(center.x - card_half_width, 35, card_half_width * 2.0, 211)
 	_panel(card_rect)
 	hud.draw_rect(card_rect.grow(-5), Color(0.06, 0.10, 0.18, 0.72))
 	# Soft rings and rays make the silhouette grow without using strobing.
@@ -2066,14 +2319,12 @@ func _draw_standard_reveal_result():
 		var reveal_marker := _metadata_marker(last_catch_metadata)
 		if reveal_marker == "": reveal_marker = _ledger_marker(last_catch, 1)
 		var reveal_name := last_catch + (" " + reveal_marker if reveal_marker != "" else "") + ("  CROWN" if bool(last_catch_metadata.get("crown", false)) else "")
-		_center_text(207, reveal_name, 19, Color("#fff0c6"))
-		_center_text(225, "%s  /  COMBO x%d" % [last_rarity, combo], 10, Color("#d3deec"))
-		_center_text(239, "%.1f cm  /  %.2f kg  /  %s%s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant, "  NEW" if bool(last_catch_metadata.get("first_capture", false)) else ""], 9, Color("#c8d8e8"))
+		_center_text(199, reveal_name, 19, Color("#fff0c6"))
+		# Every line sits inside the card: the HUD rows below it are not drawn over.
+		_center_text(212, "%s  /  COMBO x%d  /  %.1f cm  %.2f kg  %s%s" % [last_rarity, combo, last_catch_size_cm, last_catch_weight_kg, last_catch_variant, "  NEW" if bool(last_catch_metadata.get("first_capture", false)) else ""], 8, Color("#d3deec"))
 		if promotion_result_label != "" or promotion_false_cue_revealed:
-			_center_text(249, promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED", 8, Color("#f7f0cb"))
-			_center_text(260, _catch_choice_prompt(), 8, Color("#fff0d8"))
-		else:
-			_center_text(250, _catch_choice_prompt(), 9, Color("#fff0d8"))
+			_center_text(224, promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED", 8, Color("#f7f0cb"))
+		_center_text(237, _catch_choice_prompt(), 9, Color("#fff0d8"))
 	# A single low-alpha wash at the flip keeps the card readable and avoids
 	# the rapid flashing that makes ordinary catches tiring to watch.
 	if t >= flip_start and t < flip_end:
@@ -2138,14 +2389,13 @@ func _draw_legendary_result():
 		_center_text(53,"LEGENDARY!!",35,Color("#fff4bd"))
 		var legendary_marker := _metadata_marker(last_catch_metadata)
 		var legendary_name := str(last_catch).to_upper() + (" " + legendary_marker if legendary_marker != "" else "") + ("  CROWN" if bool(last_catch_metadata.get("crown", false)) else "")
-		_center_text(211,legendary_name,24,Color("#fff3c9"))
-		_center_text(231,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
-		_center_text(245,"%.1f cm  /  %.2f kg  /  %s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant],9,Color("#d8d0ff"))
+		_center_text(203,legendary_name,24,Color("#fff3c9"))
+		_center_text(221,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
+		_center_text(234,"%.1f cm  /  %.2f kg  /  %s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant],9,Color("#d8d0ff"))
 		if promotion_result_label != "" or promotion_false_cue_revealed:
-			_center_text(255,(promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED"),8,Color("#f7f0cb"))
-			_center_text(266,_catch_choice_prompt(),8,Color("#fff0d8"))
-		else:
-			_center_text(258,_catch_choice_prompt(),8,Color("#fff0d8"))
+			_center_text(LEGENDARY_RESULT_PROMOTION_Y,(promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED"),8,Color("#f7f0cb"))
+		# One fixed prompt line, well inside the 270px viewport.
+		_center_text(LEGENDARY_RESULT_CHOICE_Y,_catch_choice_prompt(),9,Color("#fff0d8"))
 	# The fish grows from a dark silhouette to a full-width rainbow trophy.
 	var scale := 0.22 + rise * 0.55 + peak * 0.28
 	var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])
