@@ -14,6 +14,7 @@ const SAVE_PATH := "user://saltmere_save.json"
 # result cannot move the actionable prompt back to the clipped baseline.
 const LEGENDARY_RESULT_PROMOTION_Y := 242.0
 const LEGENDARY_RESULT_CHOICE_Y := 252.0
+const LEGENDARY_RESULT_NAME_Y := 203.0
 var player := Vector2(368, 372)
 var current_map := "town"
 var transition_active := false
@@ -2333,6 +2334,29 @@ func _draw_fish_portrait(center: Vector2, species_name: String, scale: float = 1
 	hud.draw_texture_rect(portrait, Rect2(center - size * 0.5, size), false, modulate)
 	return true
 
+func _reveal_art_source(species_name: String) -> String:
+	# Catch reveals should use the same illustrated species face as the field
+	# guide. Keep the compact portrait as a compatibility fallback for old
+	# saves or partial art bundles, but make the preferred source explicit so a
+	# new species cannot silently drift to a different-looking reveal.
+	if fish_cards.get(species_name) != null: return "card"
+	if fish_portraits.get(species_name) != null: return "portrait"
+	return "none"
+
+func _draw_reveal_art(center: Vector2, species_name: String, target_size: Vector2, width_scale: float = 1.0, modulate := Color.WHITE) -> bool:
+	var source: Texture2D = fish_cards.get(species_name)
+	if source == null: source = fish_portraits.get(species_name)
+	if source == null: return false
+	# Cards have different aspect ratios (wide originals and the newer 3:2
+	# illustrations), so fit before applying the horizontal flip squash. This
+	# keeps the species art crisp and prevents tall fins from being clipped.
+	var source_size := Vector2(source.get_width(), source.get_height())
+	var fit := minf(target_size.x / source_size.x, target_size.y / source_size.y)
+	var draw_size := source_size * fit
+	draw_size.x *= clampf(width_scale, 0.0, 1.0)
+	hud.draw_texture_rect(source, Rect2(center - draw_size * 0.5, draw_size), false, modulate)
+	return true
+
 func _draw_fish_card(center: Vector2, species_name: String, card_size: Vector2, modulate := Color.WHITE) -> bool:
 	# Fit transparent card illustrations without stretching them. If a species
 	# has no card, fall back to its compact portrait; callers can then keep the
@@ -2452,24 +2476,38 @@ func _draw_standard_reveal_result():
 		hud.draw_rect(Rect2(0, 0, 480, 270), Color(rarity_col, flip_glow))
 
 func _draw_reveal_fish(center: Vector2, scale: float, color: Color, revealed: bool, width_scale: float = 1.0, species_name: String = "") -> bool:
-	# The face of an expanded catch uses the same transparent polygon portrait
-	# as the encyclopedia. Keeping the silhouette for the hidden stages makes
-	# the reveal readable, while the species portrait makes the final flip match
-	# its field-guide card instead of every fish becoming one generic shape.
+	# The face of an expanded catch uses the same transparent illustration as the
+	# encyclopedia. Keeping a generic silhouette for the hidden stages preserves
+	# the species spoiler, while the card makes the final flip match the guide
+	# instead of every fish becoming one low-resolution generic portrait.
 	if revealed and not species_name.is_empty():
-		var portrait: Texture2D = fish_portraits.get(species_name)
-		if portrait != null:
-			var portrait_size := Vector2(portrait.get_width(), portrait.get_height()) * (1.58 * scale)
-			portrait_size.x *= width_scale
-			hud.draw_texture_rect(portrait, Rect2(center - portrait_size * 0.5, portrait_size), false, Color.WHITE)
-			return true
+		if _draw_reveal_art(center, species_name, Vector2(210, 140) * scale, width_scale): return true
 	var body := PackedVector2Array([Vector2(-84,0), Vector2(-55,-25), Vector2(29,-30), Vector2(65,-13), Vector2(87,0), Vector2(65,18), Vector2(30,30), Vector2(-51,25)])
 	var transformed := PackedVector2Array()
 	for point in body:
 		transformed.append(center + Vector2(point.x * width_scale, point.y) * scale)
+	# A small dorsal/ventral pair and an ink outline give the fallback silhouette
+	# the same deliberate polygon language as the generated field-guide art,
+	# without encoding a species-specific shape before the card flips.
+	var dorsal := PackedVector2Array([
+		center + Vector2(-27 * width_scale, -23) * scale,
+		center + Vector2(-2 * width_scale, -47) * scale,
+		center + Vector2(18 * width_scale, -27) * scale
+	])
+	var ventral := PackedVector2Array([
+		center + Vector2(-9 * width_scale, 23) * scale,
+		center + Vector2(16 * width_scale, 46) * scale,
+		center + Vector2(34 * width_scale, 22) * scale
+	])
+	hud.draw_colored_polygon(dorsal, color.darkened(0.10))
+	hud.draw_colored_polygon(ventral, color.darkened(0.18))
 	hud.draw_colored_polygon(transformed, color)
 	var tail := PackedVector2Array([center + Vector2(-67 * width_scale, 0) * scale, center + Vector2(-112 * width_scale, -36) * scale, center + Vector2(-108 * width_scale, 35) * scale])
 	hud.draw_colored_polygon(tail, color.darkened(0.18))
+	var outline := transformed.duplicate()
+	outline.append(transformed[0])
+	hud.draw_polyline(outline, color.lightened(0.18), maxf(1.0, 1.5 * scale), true)
+	hud.draw_polyline(PackedVector2Array([tail[0], tail[1], tail[2], tail[0]]), color.lightened(0.08), maxf(1.0, 1.2 * scale), true)
 	if revealed:
 		hud.draw_circle(center + Vector2(57 * width_scale, -8) * scale, 5.0 * scale, Color("#18263d"))
 		hud.draw_circle(center + Vector2(58 * width_scale, -10) * scale, 1.5 * scale, Color.WHITE)
@@ -2507,6 +2545,27 @@ func _draw_legendary_result():
 		if i % 4 == 0:
 			hud.draw_line(q-Vector2(sz*2.5,0),q+Vector2(sz*2.5,0),Color(1,1,0.85,col.a),1)
 			hud.draw_line(q-Vector2(0,sz*2.5),q+Vector2(0,sz*2.5),Color(1,1,0.85,col.a),1)
+	# Draw the fish before any result metadata. The card's transparent margins
+	# still let the rainbow field show through, while the name, size, and choice
+	# rows remain legible on top of even a tall legacy illustration.
+	var scale := 0.22 + rise * 0.55 + peak * 0.28
+	var legendary_art_revealed := false
+	if t >= 2.05:
+		var art_rect := _legendary_reveal_art_target_rect(0.72 + peak * 0.28)
+		legendary_art_revealed = _draw_reveal_art(art_rect.get_center(), str(last_catch), art_rect.size, 1.0)
+	if not legendary_art_revealed:
+		# Old saves can still lack a card; reuse the improved generic silhouette
+		# rather than reviving the old flat body/tail fallback. The rainbow
+		# treatment below remains a legendary-only cue for that path.
+		_draw_reveal_fish(center, scale, Color("#130f32") if t < 2.05 else Color("#fff1c2"), t >= 2.05)
+		if t >= 2.05:
+			for k in range(8):
+				var x := -50.0 + k * 14.0
+				var col := Color.from_hsv(fmod(float(k)/8.0+t*0.025,1.0),0.62,1.0)
+				hud.draw_rect(Rect2(center+Vector2(x,-18)*scale,Vector2(13,36)*scale),col)
+			hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-25,-26)*scale,center+Vector2(5,-53)*scale,center+Vector2(31,-26)*scale]),Color("#d0acff"))
+			hud.draw_circle(center+Vector2(57,-8)*scale,5*scale,Color("#162539"))
+			hud.draw_circle(center+Vector2(58,-10)*scale,1.5*scale,Color.WHITE)
 	if t < 0.82:
 		_center_text(56,"SOMETHING ENORMOUS...",19,Color("#c8e8ff"))
 		_center_text(219,"Feel the tide gathering",11,Color("#d4cefa"))
@@ -2521,39 +2580,25 @@ func _draw_legendary_result():
 		_center_text(53,"LEGENDARY!!",35,Color("#fff4bd"))
 		var legendary_marker := _metadata_marker(last_catch_metadata)
 		var legendary_name := str(last_catch).to_upper() + (" " + legendary_marker if legendary_marker != "" else "") + ("  CROWN" if bool(last_catch_metadata.get("crown", false)) else "")
-		_center_text(203,legendary_name,24,Color("#fff3c9"))
+		_center_text(LEGENDARY_RESULT_NAME_Y,legendary_name,24,Color("#fff3c9"))
 		_center_text(221,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
 		_center_text(234,"%.1f cm  /  %.2f kg  /  %s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant],9,Color("#d8d0ff"))
 		if promotion_result_label != "" or promotion_false_cue_revealed:
 			_center_text(LEGENDARY_RESULT_PROMOTION_Y,(promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED"),8,Color("#f7f0cb"))
 		# One fixed prompt line, well inside the 270px viewport.
 		_center_text(LEGENDARY_RESULT_CHOICE_Y,_catch_choice_prompt(),9,Color("#fff0d8"))
-	# The fish grows from a dark silhouette to its species-specific polygon
-	# portrait. Keep the rainbow-trophy fallback for old saves whose species has
-	# no imported art, while every current field-guide entry gets a matching face.
-	var scale := 0.22 + rise * 0.55 + peak * 0.28
-	var legendary_portrait: Texture2D = fish_portraits.get(str(last_catch))
-	if t >= 2.05 and legendary_portrait != null:
-		var portrait_size := Vector2(176, 118) * (0.72 + peak * 0.28)
-		hud.draw_texture_rect(legendary_portrait, Rect2(center - portrait_size * 0.5, portrait_size), false, Color.WHITE)
-	else:
-		var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])
-		var transformed := PackedVector2Array()
-		for p in body: transformed.append(center + p * scale)
-		hud.draw_colored_polygon(transformed,Color("#130f32") if t < 2.05 else Color("#fff1c2"))
-		hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-67,0)*scale,center+Vector2(-112,-36)*scale,center+Vector2(-108,35)*scale]),Color("#9184ff") if t >= 2.05 else Color("#130f32"))
-		if t >= 2.05:
-			for k in range(8):
-				var x := -50.0 + k * 14.0
-				var col := Color.from_hsv(fmod(float(k)/8.0+t*0.025,1.0),0.62,1.0)
-				hud.draw_rect(Rect2(center+Vector2(x,-18)*scale,Vector2(13,36)*scale),col)
-			hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-25,-26)*scale,center+Vector2(5,-53)*scale,center+Vector2(31,-26)*scale]),Color("#d0acff"))
-			hud.draw_circle(center+Vector2(57,-8)*scale,5*scale,Color("#162539"))
-			hud.draw_circle(center+Vector2(58,-10)*scale,1.5*scale,Color.WHITE)
 	# The initial reveal gets one soft glow, never repeated high-frequency flash.
 	if t >= 2.05 and t < 2.55:
 		var glow := sin((t-2.05)/0.5*PI)*0.20
 		hud.draw_rect(Rect2(0,0,480,270),Color(1,0.90,0.67,glow))
+
+func _legendary_reveal_art_target_rect(growth: float = 1.0) -> Rect2:
+	# Keep the maximum card box above the name and metadata rows. The artwork is
+	# drawn before those rows too, so this is both a layout guard and a readable
+	# composition if a future card has a denser alpha silhouette.
+	var center := Vector2(240,132)
+	var size := Vector2(206,138) * clampf(growth, 0.0, 1.0)
+	return Rect2(center - size * 0.5, size)
 
 func _center_text(y: float, value: String, size: int, color: Color):
 	var font := ThemeDB.fallback_font
