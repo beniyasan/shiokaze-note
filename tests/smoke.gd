@@ -406,6 +406,11 @@ func run():
 	check(game.fish_cards.has('Silver sprat') and game.fish_cards.has('Sand goby') and game.fish_cards.has('Moonfin trout') and game.fish_cards['Silver sprat'].get_width()>500,'encyclopedia loads generated fish card art')
 	check(game.fish_cards.has('Rainbow Kingfish') and game.fish_portraits.has('Rainbow Kingfish'),'legendary art assets are available for discovered entries')
 	check(not game.fish_cards.has('Old boot') and game._fish_art_visible('Old boot',0),'missing fish art keeps the generic fallback available')
+	# Art stems intentionally preserve punctuation and repeated internal spaces;
+	# this keeps the documented loader contract honest for future species names.
+	check(game._fish_art_stem('  Kelp Runner  ')=='kelp_runner','art stem trims edges and replaces literal spaces')
+	check(game._fish_art_stem("Angler-Fish")=='angler-fish','art stem preserves punctuation')
+	check(game._fish_art_stem("Angler's  Fish")=="angler's__fish",'art stem preserves repeated spaces')
 	var legendary_ledger_name := 'Rainbow Kingfish'
 	game.catches.erase(legendary_ledger_name); game.catch_metadata.erase(legendary_ledger_name); game.first_capture_metadata.erase(legendary_ledger_name); game.catch_latest.erase(legendary_ledger_name)
 	check(game.ledger_display_name(legendary_ledger_name,0)=='???','uncaught legendary encyclopedia card stays hidden as ???')
