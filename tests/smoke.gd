@@ -451,7 +451,8 @@ func run():
 	for expanded_name in expanded_fish_names:
 		if not game.fish_cards.has(expanded_name) or not game.fish_portraits.has(expanded_name): missing_expanded_art.append(expanded_name)
 	check(expanded_fish_names.size()==17 and missing_expanded_art.is_empty(),'all 17 remaining fish have matching card and reveal art')
-	check(game._draw_reveal_fish(Vector2(240,137),1.0,Color.WHITE,true,1.0,'Amber anchovy'),'catch reveal uses the matching species portrait')
+	check(game._reveal_art_source('Amber anchovy')=='card','catch reveal prefers the matching encyclopedia card art')
+	check(game._draw_reveal_fish(Vector2(240,137),1.0,Color.WHITE,true,1.0,'Amber anchovy'),'catch reveal uses the matching species illustration')
 	# Art stems intentionally preserve punctuation and repeated internal spaces;
 	# this keeps the documented loader contract honest for future species names.
 	check(game._fish_art_stem('  Kelp Runner  ')=='kelp_runner','art stem trims edges and replaces literal spaces')
