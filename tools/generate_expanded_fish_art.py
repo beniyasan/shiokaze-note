@@ -74,6 +74,7 @@ EXPANDED_FISH_STEMS = (
     "singing_herring",
 )
 SUPPORT_STEMS = ("old_boot", "aurora_koi")
+SAILFISH_SAFE_MARGIN = 8
 
 
 def rgba(color, alpha=255):
@@ -246,11 +247,14 @@ def draw_sailfish(d, style, s):
     def q(x, y): return (384 + x * style.scale, 260 + y * style.scale)
     draw_poly(d, [q(-280, 14), q(-176, -58), q(34, -76), q(224, -45), q(293, 8), q(232, 44), q(34, 68), q(-162, 57)], style.base)
     draw_poly(d, [q(-212, 15), q(-350, -65), q(-327, 12), q(-350, 91)], style.dark)
-    draw_poly(d, [q(-56, -62), q(-40, -249), q(-2, -114), q(37, -263), q(52, -46), q(94, -229), q(108, -34)], style.fin)
-    draw_poly(d, [q(220, -42), q(419, -17), q(230, 9)], style.light)
+    # Keep the signature sail and bill inside the 768x512 card.  The old
+    # peaks at y=-249/-263 and bill tip at x=495 were clipped after scaling,
+    # which made the sailfish silhouette lose its identifying features.
+    draw_poly(d, [q(-56, -62), q(-40, -205), q(-2, -114), q(37, -218), q(52, -46), q(94, -192), q(108, -34)], style.fin)
+    draw_poly(d, [q(220, -42), q(338, -17), q(230, 9)], style.light)
     draw_line(d, [q(-150, 5), q(248, 4)], style.accent, 5)
     ex, ey = q(232,-29); d.ellipse((int((ex - 18) * SCALE), int((ey - 18) * SCALE), int((ex + 18) * SCALE), int((ey + 18) * SCALE)), fill=INK); d.ellipse((int((ex - 5) * SCALE), int((ey - 8) * SCALE), int((ex + 5) * SCALE), int((ey + 2) * SCALE)), fill=FOAM)
-    draw_poly(d, [q(240, -12), q(495, -31), q(246, 18)], style.accent)
+    draw_poly(d, [q(240, -12), q(342, -31), q(246, 18)], style.accent)
 
 
 def draw_eel(d, style, s):
@@ -263,8 +267,28 @@ def draw_eel(d, style, s):
     draw_line(d, [q(342, 13), q(378, 20), q(342, 31)], style.dark, 4)
 
 
+def validate_sailfish_bounds(card: Image.Image):
+    """Reject sailfish cards whose alpha silhouette touches the canvas edge."""
+    bbox = card.getchannel("A").getbbox()
+    if bbox is None:
+        raise ValueError("night_sailfish generated an empty card")
+    left, top, right, bottom = bbox
+    if (
+        left < SAILFISH_SAFE_MARGIN
+        or top < SAILFISH_SAFE_MARGIN
+        or right > W - SAILFISH_SAFE_MARGIN
+        or bottom > H - SAILFISH_SAFE_MARGIN
+    ):
+        raise ValueError(
+            "night_sailfish silhouette exceeds its safe canvas bounds: "
+            f"bbox={bbox}, margin={SAILFISH_SAFE_MARGIN}"
+        )
+
+
 def save_style(stem: str, style: FishStyle):
     card = draw_fish(style)
+    if stem == "night_sailfish":
+        validate_sailfish_bounds(card)
     card.save(CARD_DIR / f"{stem}_v2.png", optimize=True)
     portrait = card.resize((96, 64), Image.Resampling.LANCZOS)
     portrait.save(PORTRAIT_DIR / f"{stem}.png", optimize=True)
