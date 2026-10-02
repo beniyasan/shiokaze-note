@@ -1494,7 +1494,11 @@ func _process_fishing(delta: float):
 	var choice_changed := false
 	# Thirty seconds leaves room for the reveal and another full tug-of-war.
 	fever_flash_t = maxf(0.0, fever_flash_t - delta)
-	if fever_active:
+	# FEVER's clock starts when it is announced, i.e. when the catch that earned
+	# it is settled. While that choice is still open the clock holds, so a result
+	# left on screen cannot burn FEVER down (and lose its banner) unseen.
+	var fever_waiting := fever_announce_pending and catch_choice_pending()
+	if fever_active and not fever_waiting:
 		fever_t = maxf(0.0, fever_t - delta)
 		if fever_t <= 0.0:
 			_break_chain()
@@ -1738,6 +1742,7 @@ func _break_chain() -> void:
 	fever_active = false
 	fever_t = 0.0
 	fever_flash_t = 0.0
+	fever_announce_pending = false
 	_music_call("set_fever", [false])
 	_music_call("set_combo", [0])
 
@@ -2259,6 +2264,9 @@ func _load_game(path: String = SAVE_PATH):
 	fever_active = fever_t > 0.0 and combo >= FEVER_THRESHOLD
 	if not fever_active: fever_t = 0.0
 	fever_flash_t = 0.0
+	# A banner request belongs to a landing in this session; a loaded game never
+	# inherits one (it would hold the restored FEVER clock).
+	fever_announce_pending = false
 	_music_call("set_fever", [fever_active])
 	_music_call("set_combo", [combo])
 	toast = "Welcome back to Saltmere"; toast_t = 3

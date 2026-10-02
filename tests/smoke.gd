@@ -771,6 +771,28 @@ func run():
 	game.register_pending_catch()
 	check(int(fx.counters.get('fever',0))==1 and fx.fever_target==1.0,'settling the catch announces FEVER and lights the frame')
 	game._break_chain(); game._reset_fishing()
+	# FEVER's clock starts when it is announced. A catch left unsettled must not
+	# burn FEVER down (and lose its banner) before the player chooses.
+	game.combo=2; fx.counters.clear()
+	game.cast_candidate={'name':'Silver sprat','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
+	game.reveal_t=2.0; game.reveal_stage=4
+	var held_fever_t: float = game.fever_t
+	for i in range(40): game._process_fishing(1.0)
+	check(game.fever_active and game.catch_choice_pending() and is_equal_approx(game.fever_t,held_fever_t),'FEVER waits while the catch that started it is unsettled')
+	game.register_pending_catch()
+	check(game.fever_active and int(fx.counters.get('fever',0))==1,'a catch held for a long time still announces FEVER')
+	game._process_fishing(1.0)
+	check(is_equal_approx(game.fever_t,held_fever_t-1.0),'FEVER counts down once the catch is settled')
+	# The pending announcement belongs to this session's landing: a stale flag
+	# must not freeze a loaded game's FEVER clock.
+	game._reset_fishing(); game.fever_announce_pending=true
+	game._load_game('user://fever-test.json')
+	check(not game.fever_announce_pending,'loading a save drops a stale FEVER announcement')
+	game._break_chain(); game._reset_fishing()
+	game.fever_announce_pending=true; game.combo=3; game.fever_active=true; game.fever_t=10.0
+	game._break_chain()
+	check(not game.fever_announce_pending,'ending FEVER drops its pending announcement')
+	game._reset_fishing()
 	# The tide ledger pauses the whole cue show, not only the fishing clock: no
 	# scheduled banner, heartbeat or particle may advance (or draw) behind it.
 	game.notebook_open=false
