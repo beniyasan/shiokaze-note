@@ -564,7 +564,10 @@ func _process(delta):
 	_advance_world_clock(delta)
 	# Hit-stop and slow motion scale only the fishing simulation; the clock,
 	# particles and camera keep real time so a freeze frame still feels alive.
-	fx.update(delta)
+	# The tide ledger pauses the whole cue show together with the fishing
+	# simulation (see _sync_fx_outputs), so a banner, heartbeat or burst cannot
+	# play out behind it and the cue is still there when the ledger closes.
+	if not notebook_open: fx.update(delta)
 	var game_delta: float = delta * float(fx.time_scale())
 	if transition_active:
 		transition_t += delta
@@ -609,12 +612,27 @@ func _process(delta):
 		var shake_power := 8.0 if last_rarity == "LEGENDARY" else (4.0 if last_rarity == "RARE" else 2.0)
 		if fx.reduced: shake_power *= 0.4
 		base_offset = Vector2(sin(elapsed*80.0), cos(elapsed*71.0)) * shake_power * minf(1.0, shake_t*8.0)
-	cam.offset = base_offset + fx.shake_offset()
-	cam.zoom = Vector2.ONE * float(fx.zoom_factor())
+	if notebook_open:
+		# The paused show must not leave the world shaking or zoomed.
+		cam.offset = Vector2.ZERO
+		cam.zoom = Vector2.ONE
+	else:
+		cam.offset = base_offset + fx.shake_offset()
+		cam.zoom = Vector2.ONE * float(fx.zoom_factor())
 	_sync_fx_outputs()
 	queue_redraw(); hud.queue_redraw()
 
 func _sync_fx_outputs() -> void:
+	# While the tide ledger is open the show is paused: its layers are hidden so
+	# a frozen cut-in, letterbox or chromatic pass never sits over the ledger,
+	# and the music returns to normal until the cue resumes on close.
+	var show_visible := not notebook_open
+	fx_back.visible = show_visible
+	fx_front.visible = show_visible
+	if not show_visible:
+		post_fx.visible = false
+		_music_call("set_duck", [1.0])
+		return
 	# Sounds, music ducking, the FEVER frame and the post pass all read from
 	# the director once per frame, so effect code never touches audio nodes.
 	fx.set_fever(fever_active)

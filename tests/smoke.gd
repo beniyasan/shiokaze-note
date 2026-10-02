@@ -771,6 +771,21 @@ func run():
 	game.register_pending_catch()
 	check(int(fx.counters.get('fever',0))==1 and fx.fever_target==1.0,'settling the catch announces FEVER and lights the frame')
 	game._break_chain(); game._reset_fishing()
+	# The tide ledger pauses the whole cue show, not only the fishing clock: no
+	# scheduled banner, heartbeat or particle may advance (or draw) behind it.
+	game.notebook_open=false
+	fx.cast(0); fx.premium_omen(); fx.zoom_punch(0.1, 2.0); fx.music_duck=0.1
+	fx.counters.clear(); fx.cutins.clear()
+	var ledger_time: float = fx.time
+	game.notebook_open=true
+	game._process(0.5)
+	check(is_equal_approx(fx.time,ledger_time) and fx.cutins.is_empty() and int(fx.counters.get('cutin_premium',0))==0 and not fx.scheduled.is_empty(),'opening the tide ledger pauses the cue show timers')
+	check(not game.fx_back.visible and not game.fx_front.visible and not game.post_fx.visible,'cue show layers are hidden behind the tide ledger')
+	check(game.cam.zoom==Vector2.ONE and game.cam.offset==Vector2.ZERO and is_equal_approx(game.music.get_duck(),1.0),'the ledger shows a still camera and normal music')
+	game.notebook_open=false
+	game._process(0.5)
+	check(int(fx.counters.get('cutin_premium',0))>=1 and game.fx_front.visible and is_equal_approx(game.music.get_duck(),fx.music_duck),'closing the ledger resumes the paused cue where it stopped')
+	game._reset_fishing()
 	game.queue_free()
 	await process_frame
 	print('RESULT: %d failure(s)' % failures)
