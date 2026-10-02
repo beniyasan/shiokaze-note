@@ -2361,8 +2361,8 @@ func _draw_standard_reveal_result():
 	var fish_width_scale := 1.0
 	if t >= flip_start and t < flip_end:
 		fish_width_scale = absf(cos(flip_p * PI))
-	_draw_reveal_fish(center, fish_scale, fish_col, face_visible, fish_width_scale)
-	if face_visible:
+	var reveal_art := _draw_reveal_fish(center, fish_scale, fish_col, face_visible, fish_width_scale, last_catch)
+	if face_visible and not reveal_art:
 		# Coloured bands remain subtle so the card and name carry the reveal.
 		for k in range(5):
 			var band_x := -38.0 + float(k) * 18.0
@@ -2398,7 +2398,18 @@ func _draw_standard_reveal_result():
 		var flip_glow := sin(flip_p * PI) * 0.10
 		hud.draw_rect(Rect2(0, 0, 480, 270), Color(rarity_col, flip_glow))
 
-func _draw_reveal_fish(center: Vector2, scale: float, color: Color, revealed: bool, width_scale: float = 1.0):
+func _draw_reveal_fish(center: Vector2, scale: float, color: Color, revealed: bool, width_scale: float = 1.0, species_name: String = "") -> bool:
+	# The face of an expanded catch uses the same transparent polygon portrait
+	# as the encyclopedia. Keeping the silhouette for the hidden stages makes
+	# the reveal readable, while the species portrait makes the final flip match
+	# its field-guide card instead of every fish becoming one generic shape.
+	if revealed and not species_name.is_empty():
+		var portrait: Texture2D = fish_portraits.get(species_name)
+		if portrait != null:
+			var portrait_size := Vector2(portrait.get_width(), portrait.get_height()) * (1.58 * scale)
+			portrait_size.x *= width_scale
+			hud.draw_texture_rect(portrait, Rect2(center - portrait_size * 0.5, portrait_size), false, Color.WHITE)
+			return true
 	var body := PackedVector2Array([Vector2(-84,0), Vector2(-55,-25), Vector2(29,-30), Vector2(65,-13), Vector2(87,0), Vector2(65,18), Vector2(30,30), Vector2(-51,25)])
 	var transformed := PackedVector2Array()
 	for point in body:
@@ -2409,6 +2420,7 @@ func _draw_reveal_fish(center: Vector2, scale: float, color: Color, revealed: bo
 	if revealed:
 		hud.draw_circle(center + Vector2(57 * width_scale, -8) * scale, 5.0 * scale, Color("#18263d"))
 		hud.draw_circle(center + Vector2(58 * width_scale, -10) * scale, 1.5 * scale, Color.WHITE)
+	return false
 
 func _draw_legendary_result():
 	var t := legendary_t
@@ -2463,21 +2475,28 @@ func _draw_legendary_result():
 			_center_text(LEGENDARY_RESULT_PROMOTION_Y,(promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED"),8,Color("#f7f0cb"))
 		# One fixed prompt line, well inside the 270px viewport.
 		_center_text(LEGENDARY_RESULT_CHOICE_Y,_catch_choice_prompt(),9,Color("#fff0d8"))
-	# The fish grows from a dark silhouette to a full-width rainbow trophy.
+	# The fish grows from a dark silhouette to its species-specific polygon
+	# portrait. Keep the rainbow-trophy fallback for old saves whose species has
+	# no imported art, while every current field-guide entry gets a matching face.
 	var scale := 0.22 + rise * 0.55 + peak * 0.28
-	var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])
-	var transformed := PackedVector2Array()
-	for p in body: transformed.append(center + p * scale)
-	hud.draw_colored_polygon(transformed,Color("#130f32") if t < 2.05 else Color("#fff1c2"))
-	hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-67,0)*scale,center+Vector2(-112,-36)*scale,center+Vector2(-108,35)*scale]),Color("#9184ff") if t >= 2.05 else Color("#130f32"))
-	if t >= 2.05:
-		for k in range(8):
-			var x := -50.0 + k * 14.0
-			var col := Color.from_hsv(fmod(float(k)/8.0+t*0.025,1.0),0.62,1.0)
-			hud.draw_rect(Rect2(center+Vector2(x,-18)*scale,Vector2(13,36)*scale),col)
-		hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-25,-26)*scale,center+Vector2(5,-53)*scale,center+Vector2(31,-26)*scale]),Color("#d0acff"))
-		hud.draw_circle(center+Vector2(57,-8)*scale,5*scale,Color("#162539"))
-		hud.draw_circle(center+Vector2(58,-10)*scale,1.5*scale,Color.WHITE)
+	var legendary_portrait: Texture2D = fish_portraits.get(str(last_catch))
+	if t >= 2.05 and legendary_portrait != null:
+		var portrait_size := Vector2(176, 118) * (0.72 + peak * 0.28)
+		hud.draw_texture_rect(legendary_portrait, Rect2(center - portrait_size * 0.5, portrait_size), false, Color.WHITE)
+	else:
+		var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])
+		var transformed := PackedVector2Array()
+		for p in body: transformed.append(center + p * scale)
+		hud.draw_colored_polygon(transformed,Color("#130f32") if t < 2.05 else Color("#fff1c2"))
+		hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-67,0)*scale,center+Vector2(-112,-36)*scale,center+Vector2(-108,35)*scale]),Color("#9184ff") if t >= 2.05 else Color("#130f32"))
+		if t >= 2.05:
+			for k in range(8):
+				var x := -50.0 + k * 14.0
+				var col := Color.from_hsv(fmod(float(k)/8.0+t*0.025,1.0),0.62,1.0)
+				hud.draw_rect(Rect2(center+Vector2(x,-18)*scale,Vector2(13,36)*scale),col)
+			hud.draw_colored_polygon(PackedVector2Array([center+Vector2(-25,-26)*scale,center+Vector2(5,-53)*scale,center+Vector2(31,-26)*scale]),Color("#d0acff"))
+			hud.draw_circle(center+Vector2(57,-8)*scale,5*scale,Color("#162539"))
+			hud.draw_circle(center+Vector2(58,-10)*scale,1.5*scale,Color.WHITE)
 	# The initial reveal gets one soft glow, never repeated high-frequency flash.
 	if t >= 2.05 and t < 2.55:
 		var glow := sin((t-2.05)/0.5*PI)*0.20
