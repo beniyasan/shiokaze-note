@@ -33,6 +33,15 @@ const RODS: Array[Dictionary] = [
 ]
 var day := 1
 var time_of_day := 0.35
+# Fishing conditions are part of the saved tide state.  The clock is a
+# normalized day (0.0 = midnight, 0.5 = midday), while weather and season are
+# plain strings so the forecast is readable in saves and easy to probe.
+var weather := "clear"
+var season := "spring"
+const DAY_LENGTH_SECONDS := 180.0
+const WEATHER_NAMES := ["clear", "overcast", "rain", "storm"]
+const SEASON_NAMES := ["spring", "summer", "autumn", "winter"]
+const WEATHER_CYCLE := ["clear", "clear", "overcast", "rain", "clear", "storm", "overcast"]
 var notebook_open := false
 var toast := "Follow the path east, then south to the pier"
 var toast_t := 5.0
@@ -194,6 +203,126 @@ func _ready():
 		_load_game()
 	queue_redraw()
 
+# ---- Tide forecast -------------------------------------------------------
+# The same deterministic rules drive the species pool, the ledger, and smoke
+# probes. A new day gets a repeatable forecast; no wall-clock randomness can
+# change which fish are legal for a cast.
+func _season_for_day(day_number: int) -> String:
+	var safe_day := maxi(1, day_number)
+	return SEASON_NAMES[((safe_day - 1) / 7) % SEASON_NAMES.size()]
+
+func _weather_for_day(day_number: int) -> String:
+	var safe_day := maxi(1, day_number)
+	return WEATHER_CYCLE[(safe_day - 1) % WEATHER_CYCLE.size()]
+
+func _normalize_weather(value: String) -> String:
+	var candidate := value.to_lower().strip_edges()
+	return candidate if WEATHER_NAMES.has(candidate) else "clear"
+
+func _normalize_season(value: String) -> String:
+	var candidate := value.to_lower().strip_edges()
+	return candidate if SEASON_NAMES.has(candidate) else "spring"
+
+func set_weather(value: String) -> void:
+	weather = _normalize_weather(value)
+
+func set_season(value: String) -> void:
+	season = _normalize_season(value)
+
+func _time_period(value: float = -1.0) -> String:
+	var clock := time_of_day if value < 0.0 else value
+	clock = fmod(clock, 1.0)
+	if clock < 0.0: clock += 1.0
+	if clock < 0.20 or clock >= 0.85: return "night"
+	if clock < 0.35: return "dawn"
+	if clock < 0.70: return "day"
+	return "dusk"
+
+func time_period() -> String:
+	return _time_period()
+
+func clock_text() -> String:
+	var minutes := int(round(time_of_day * 24.0 * 60.0)) % (24 * 60)
+	return "%02d:%02d" % [minutes / 60, minutes % 60]
+
+func environment_label() -> String:
+	return "%s  /  %s  /  %s" % [season.to_upper(), _time_period().to_upper(), weather.to_upper()]
+
+func _advance_world_clock(delta: float) -> void:
+	if delta <= 0.0: return
+	var previous_day := day
+	time_of_day += delta / DAY_LENGTH_SECONDS
+	while time_of_day >= 1.0:
+		time_of_day -= 1.0
+		day += 1
+	if day != previous_day:
+		season = _season_for_day(day)
+		weather = _weather_for_day(day)
+
+func _fish_entry(species: String) -> Dictionary:
+	for fish in FISH_SPECIES:
+		if str(fish.get("name", "")) == species: return fish
+	return {}
+
+func _fish_conditions(species: String) -> Dictionary:
+	# Unlisted species retain their old map-only availability. The named
+	# schedules add readable ecological variety without breaking old saves.
+	var all_times := ["night", "dawn", "day", "dusk"]
+	var all_weather := ["clear", "overcast", "rain", "storm"]
+	var all_seasons := ["spring", "summer", "autumn", "winter"]
+	match species:
+		"Silver sprat": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
+		"Sand goby": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
+		"Moonfin trout": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
+		"Old boot": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":all_seasons}
+		"Amber anchovy": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
+		"Dune flounder": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
+		"Tidepool blenny": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer"]}
+		"Copper mackerel": return {"times":["day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["summer", "autumn"]}
+		# Saltwater eel remains the town's broad fallback; the newer Storm sardine
+		# carries the weather-specific eel-like niche.
+		"Saltwater eel": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
+		"Lantern squid": return {"times":["night"], "weather":["clear", "rain"], "seasons":["summer", "autumn", "winter"]}
+		"Storm sardine": return {"times":["dusk", "night"], "weather":["rain", "storm"], "seasons":["summer", "autumn"]}
+		"Lighthouse ray": return {"times":["dawn", "day"], "weather":["clear", "overcast"], "seasons":["summer", "autumn"]}
+		"Tidemark carp": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer"]}
+		"Sea lavender perch": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
+		"Pearl puffer": return {"times":["day", "dusk"], "weather":["overcast", "rain"], "seasons":["summer", "autumn"]}
+		"Night sailfish": return {"times":["night"], "weather":["clear", "storm"], "seasons":["autumn", "winter"]}
+		"Crown snapper": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
+		# Singing herring keeps a broad town fallback so old map-only rescue and
+		# fever rolls always retain a rare option in daylight.
+		"Singing herring": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
+		# Aurora koi is the grotto's explicit discovery reward; the hidden spot
+		# gates it, while tide conditions should not make the one-off reward vanish.
+		"Aurora koi": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
+		_: return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
+
+func fish_available(species: String, map_name: String = "", at_time: float = -1.0, weather_name: String = "", season_name: String = "") -> bool:
+	var fish := _fish_entry(species)
+	if fish.is_empty(): return false
+	var map := current_map if map_name.is_empty() else map_name
+	var map_ok: bool = fish.maps.has(map)
+	if fish.maps.has("hidden") and map == "rocky": map_ok = _at_hidden_fishing_spot()
+	if not map_ok: return false
+	var conditions := _fish_conditions(species)
+	var forecast_weather := weather if weather_name.is_empty() else _normalize_weather(weather_name)
+	var forecast_season := season if season_name.is_empty() else _normalize_season(season_name)
+	return conditions.times.has(_time_period(at_time)) and conditions.weather.has(forecast_weather) and conditions.seasons.has(forecast_season)
+
+func available_fish(map_name: String = "", at_time: float = -1.0, weather_name: String = "", season_name: String = "") -> Array:
+	var available: Array = []
+	for fish in FISH_SPECIES:
+		var species := str(fish.get("name", ""))
+		if fish_available(species, map_name, at_time, weather_name, season_name): available.append(species)
+	return available
+
+func fish_availability(map_name: String = "", at_time: float = -1.0, weather_name: String = "", season_name: String = "") -> Array:
+	return available_fish(map_name, at_time, weather_name, season_name)
+
+func _available_fish(map_name: String = "", at_time: float = -1.0, weather_name: String = "", season_name: String = "") -> Array:
+	return available_fish(map_name, at_time, weather_name, season_name)
+
 func _build_world():
 	_build_map(current_map)
 
@@ -305,6 +434,7 @@ func _move_player(dir: Vector2, delta: float):
 
 func _process(delta):
 	elapsed += delta
+	_advance_world_clock(delta)
 	if transition_active:
 		transition_t += delta
 		transition_fade = minf(1.0, transition_t / 0.22)
@@ -416,7 +546,8 @@ func _at_hidden_fishing_spot() -> bool:
 func _species_pool() -> Array[Dictionary]:
 	var pool: Array[Dictionary] = []
 	for fish in FISH_SPECIES:
-		if fish.maps.has(current_map) or (fish.maps.has("hidden") and _at_hidden_fishing_spot()): pool.append(fish)
+		var species := str(fish.get("name", ""))
+		if fish_available(species): pool.append(fish)
 	return pool
 
 func _pick_species(grade: String, apply_rescue := false, exclude_legendary := false) -> Dictionary:
@@ -1199,7 +1330,7 @@ func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		toast = "Could not save. Please check available storage."; toast_t = 4; return
-	f.store_string(JSON.stringify({"version":9,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected}))
+	f.store_string(JSON.stringify({"version":10,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"weather":weather,"season":season,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected}))
 	toast = "Saved to the tide ledger"; toast_t = 2.4
 
 func _normalize_catch_metadata(raw: Dictionary, species: String, first_capture := true) -> Dictionary:
@@ -1235,6 +1366,8 @@ func _load_game(path: String = SAVE_PATH):
 	bait_index = clampi(int(data.get("bait", 0)), 0, BAITS.size()-1)
 	rod_index = clampi(int(data.get("rod", 0)), 0, RODS.size()-1)
 	time_of_day = clampf(float(data.get("time",0.35)),0.0,1.0)
+	weather = _normalize_weather(str(data.get("weather", _weather_for_day(day))))
+	season = _normalize_season(str(data.get("season", _season_for_day(day))))
 	var saved_pos := Vector2(float(data.get("x",368)),float(data.get("y",372)))
 	if _walkable(saved_pos): player = saved_pos
 	if data.get("catches",{}) is Dictionary: catches = data.get("catches",{})
@@ -1477,6 +1610,8 @@ func _draw_hud():
 	_panel(Rect2(8,8,174,34))
 	_text(Vector2(16,22),"SALTMERE  /  " + _map_display_name(),11)
 	_text(Vector2(16,35),"Day %02d    Fish %02d  Shells %02d" % [day,fish_count,shells],10)
+	_panel(Rect2(8,40,174,18))
+	_text(Vector2(15,53),environment_label() + "  " + clock_text(),8)
 	_panel(Rect2(294,8,178,22))
 	_text(Vector2(302,23),"[N] Ledger   [B] Bait: %s   [R] Rod: %s" % [bait_name(), rod_name()],10)
 	_panel(Rect2(8,244,464,19))
@@ -1503,7 +1638,7 @@ func _draw_hud():
 	if notebook_open:
 		_panel(Rect2(66,51,348,194),true)
 		_text(Vector2(85,75),"THE TIDE LEDGER",17,true)
-		_text(Vector2(85,94),"Saltmere / " + current_map.capitalize(),11,true)
+		_text(Vector2(85,94),"Saltmere / " + current_map.capitalize() + "  " + _time_period().to_upper(),10,true)
 		_text(Vector2(85,104),"Rescue: " + ("READY / next catch RARE+" if rescue_ready else "%d/%d unlucky pulls" % [pity_meter, PITY_THRESHOLD]),9,true)
 		# Three-column field guide: every species has a card fallback portrait.
 		var rows := 8

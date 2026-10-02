@@ -18,7 +18,13 @@ Space starts a cast at the shore or pier. After the bite, the fish battle is a s
 - Clean pulls ramp the procedural SE and screen effects; failed pulls strain the line and can snap it
 - A three-catch perfect combo unlocks Rainbow Kingfish (LEGENDARY)
 
-LEGENDARY follows a paced reveal: omen, rising energy, full-screen rainbow light/rays/particles, then a long afterglow. All SE are synthesized with Godot's AudioStreamGenerator and have no external audio-file dependency. The ledger records each catch, and save/load stores versioned position and catch data while rejecting unsafe legacy positions. First captures remain immutable discovery records; repeat catches use a shortened reveal, and a larger specimen updates a species crown record shown with a CROWN marker. Crown data is saved in the version 9 ledger format.
+LEGENDARY follows a paced reveal: omen, rising energy, full-screen rainbow light/rays/particles, then a long afterglow. All SE are synthesized with Godot's AudioStreamGenerator and have no external audio-file dependency. The ledger records each catch, and save/load stores versioned position and catch data while rejecting unsafe legacy positions. First captures remain immutable discovery records; repeat catches use a shortened reveal, and a larger specimen updates a species crown record shown with a CROWN marker. Crown data and the tide forecast are saved in the version 10 ledger format.
+
+## Tide forecast and fish availability
+
+The tide ledger carries a deterministic clock, weather forecast, and four-season cycle. A full in-game day lasts three real minutes; every seventh in-game day advances the season, and each new day receives a repeatable clear/overcast/rain/storm forecast. Fish pools respond to all three conditions: moonfin trout prefer autumn/winter dusk and night tides, storm sardines and saltwater eels favor rain or storms after dusk, and familiar sprat and gobies remain available in calmer daylight waters. The field guide's other species follow similarly readable seasonal windows.
+
+The HUD shows the current season, time period, weather, and clock. Forecast state is saved with the tide ledger; older saves fall back to the day-based forecast.
 
 Run headless smoke checks with:
 
