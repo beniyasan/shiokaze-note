@@ -964,12 +964,13 @@ func species_discovered(species: String, owned: int = -1) -> bool:
 	return count > 0 or catch_metadata.has(species) or first_capture_metadata.has(species) or catch_latest.has(species)
 
 func ledger_display_name(species: String, owned: int = -1) -> String:
-	# Keep the highest-rarity cards mysterious even after the player catches one.
-	# The count remains visible, but the field guide never leaks the legendary's
-	# name or a silhouette-like rarity portrait before the late-game reveal.
+	# Keep the highest-rarity cards mysterious until the first durable discovery.
+	# Once caught, the name and records stay visible even if the final inventory
+	# copy is sold, matching the rest of the field guide's collection UX.
 	var fish := _fish_entry(species)
-	if str(fish.get("rarity", "COMMON")) == "LEGENDARY": return "???"
-	var display_name := species if species_discovered(species, owned) else "????????"
+	var discovered := species_discovered(species, owned)
+	if str(fish.get("rarity", "COMMON")) == "LEGENDARY" and not discovered: return "???"
+	var display_name := species if discovered else "????????"
 	var marker := _ledger_marker(species, owned)
 	if marker != "": display_name += " " + marker
 	return display_name
@@ -1887,10 +1888,11 @@ func _draw_hud():
 			var x := 82.0 + col * 112.0
 			var y := 122.0 + row * 14.0
 			var owned := int(catches.get(str(fish.name),0))
-			var icon := Color("#b6c7d9") if owned == 0 or str(fish.rarity) == "LEGENDARY" else _rarity_color(str(fish.rarity))
+			var discovered := species_discovered(str(fish.name), owned)
+			var icon := Color("#b6c7d9") if not discovered else _rarity_color(str(fish.rarity))
 			hud.draw_rect(Rect2(x,y-9,8,8),icon)
 			var display_name := ledger_display_name(str(fish.name), owned)
-			if str(fish.rarity) != "LEGENDARY" and best_records.has(str(fish.name)): display_name += " ^"
+			if best_records.has(str(fish.name)): display_name += " ^"
 			_text(Vector2(x+11,y),display_name,8,true)
 			_text(Vector2(x+85,y),str(owned),8,true)
 		_text(Vector2(85,232),"Rumor: " + ("heard" if rumor_found else "ask Fisher Mera or read the notice"),9,true)

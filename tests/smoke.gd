@@ -303,7 +303,14 @@ func run():
 		check(game.fishing_challenge.done and game.fishing_state==game.FishingState.RESULT,'moving gauge completes rotated chain %d within time limit' % seed)
 	check(game.FISH_SPECIES.size()==23,'expanded field guide has 23 species')
 	check(game.FISH_SPECIES.any(func(f): return f.rarity=='EPIC') and game.FISH_SPECIES.any(func(f): return f.rarity=='LEGENDARY'),'field guide includes epic and legendary')
-	check(game.ledger_display_name('Rainbow Kingfish',0)=='???' and game.ledger_display_name('Rainbow Kingfish',1)=='???','legendary encyclopedia card stays hidden as ???')
+	var legendary_ledger_name := 'Rainbow Kingfish'
+	game.catches.erase(legendary_ledger_name); game.catch_metadata.erase(legendary_ledger_name); game.first_capture_metadata.erase(legendary_ledger_name); game.catch_latest.erase(legendary_ledger_name)
+	check(game.ledger_display_name(legendary_ledger_name,0)=='???','uncaught legendary encyclopedia card stays hidden as ???')
+	game.catches[legendary_ledger_name]=1
+	check(game.ledger_display_name(legendary_ledger_name,1)==legendary_ledger_name,'caught legendary reveals its encyclopedia name')
+	game.catches.erase(legendary_ledger_name); game.catch_metadata[legendary_ledger_name]={"species":legendary_ledger_name,"rarity":"LEGENDARY"}
+	check(game.ledger_display_name(legendary_ledger_name,0)==legendary_ledger_name and game.species_discovered(legendary_ledger_name,0),'selling the last legendary copy preserves its durable discovery')
+	game.catch_metadata.erase(legendary_ledger_name)
 	game.rumor_found=false; game.hidden_spot_unlocked=false; game.fish_count=0
 	game.current_map='town'; game._build_map('town'); game.player=Vector2(424,381); game._update_rumor_gate()
 	check(game.rumor_found,'fisher NPC reveals hidden fishing rumor')
