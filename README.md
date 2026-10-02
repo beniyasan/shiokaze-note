@@ -127,10 +127,13 @@ the line twitchier. These are different risk/reward choices rather than a free
 upgrade ladder. The HUD and bait/rod selection toasts show the exact
 shells-per-cast cost and trade-off.
 
-Misses and GOOD catches advance a visible three-step RESCUE meter. Each step
-adds a small, deterministic rarity nudge to the tide forecast and moves the
-promotion float forward, disclosed as `RESCUE TIDE`; it never resolves the
-timing battle. At RESCUE READY, the next landed battle gets a one-shot
-map-legal RARE-or-better floor, then the meter resets. Tackle selection and
-rescue progress are saved in the version 13 ledger; older saves keep their
-selected indices and start with the new derived forecast bonus.
+Misses and GOOD catches advance a visible three-step RESCUE meter. The first
+two misses each add a deterministic +6% PURPLE+ cue forecast (with a stronger
+weight lift for EPIC/LEGENDARY species), so purple-or-higher cues become more
+likely without resolving the timing battle. The HUD discloses this as
+`PURPLE+ cue`; the third miss arms a one-shot, map-legal RARE-or-better floor,
+then the meter resets. The rescue floor keeps the normal rarity weights inside
+that eligible pool rather than selecting each RARE-or-better species uniformly.
+Tackle selection and rescue progress are saved in the
+version 13 ledger; older saves keep their selected indices and start with the
+new derived forecast bonus.
