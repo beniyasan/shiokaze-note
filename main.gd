@@ -59,6 +59,14 @@ var walking := false
 var elapsed := 0.0
 var cast_timer := 0.0
 var catches: Dictionary = {}
+# A successful catch is held in a small, explicit decision queue.  The species
+# count is incremented when the catch lands (so existing ledgers and saves keep
+# their meaning), then selling removes that one held fish.  Registering simply
+# confirms the count.  Keeping the queue separate from the durable metadata
+# means selling can never erase a discovery or a crown record.
+var pending_catch: Dictionary = {}
+var pending_catch_state := "" # "pending", "registered", or "sold"
+var last_catch_decision := ""
 # Catch depth lives alongside the compact species -> count ledger.  The first
 # record is intentionally immutable so a repeat catch cannot erase the moment
 # a species was discovered.  `catch_latest` powers the current reveal while
@@ -783,6 +791,13 @@ func _capture_metadata(fish: Dictionary, grade: String) -> Dictionary:
 		"first_capture": true
 	}
 
+func _record_is_better(metadata: Dictionary, record: Dictionary) -> bool:
+	var specimen_size := float(metadata.get("size_cm", 0.0))
+	var specimen_weight := float(metadata.get("weight_kg", 0.0))
+	var record_size := float(record.get("size_cm", 0.0))
+	var record_weight := float(record.get("weight_kg", 0.0))
+	return specimen_size > record_size + 0.0001 or (is_equal_approx(specimen_size, record_size) and specimen_weight > record_weight + 0.0001)
+
 func _record_catch_metadata(fish: Dictionary, grade: String) -> Dictionary:
 	var fish_name := str(fish.get("name", "Unknown catch"))
 	var metadata := _capture_metadata(fish, grade)
@@ -796,13 +811,21 @@ func _record_catch_metadata(fish: Dictionary, grade: String) -> Dictionary:
 		reveal_shortened = true
 	catch_latest[fish_name] = metadata.duplicate(true)
 	var record: Dictionary = best_records.get(fish_name, {})
-	var is_crown := float(metadata.get("size_cm", 0.0)) > float(record.get("size_cm", 0.0))
+	# Size is the primary king-of-species measure.  Weight breaks a rounded
+	# size tie, so a heavier specimen can still take the crown without allowing
+	# a smaller fish to replace a larger one.
+	var specimen_size := float(metadata.get("size_cm", 0.0))
+	var specimen_weight := float(metadata.get("weight_kg", 0.0))
+	var is_crown := _record_is_better(metadata, record)
 	if is_crown:
-		record = {"size_cm":float(metadata.get("size_cm", 0.0)),"weight_kg":float(metadata.get("weight_kg", 0.0)),"day":day}
+		record = {"species":fish_name,"size_cm":specimen_size,"weight_kg":specimen_weight,"day":day,"map":current_map,"spot":str(metadata.get("spot", "Open water")),"variant":str(metadata.get("variant", "Standard")),"grade":grade}
 		best_records[fish_name] = record.duplicate(true)
 	metadata["crown"] = is_crown
 	metadata["record_size_cm"] = float(record.get("size_cm", metadata.get("size_cm", 0.0)))
 	metadata["record_weight_kg"] = float(record.get("weight_kg", metadata.get("weight_kg", 0.0)))
+	metadata["record_day"] = int(record.get("day", day))
+	metadata["record_map"] = str(record.get("map", current_map))
+	metadata["record_spot"] = str(record.get("spot", metadata.get("spot", "Open water")))
 	if is_first_capture:
 		catch_metadata[fish_name] = metadata.duplicate(true)
 		first_capture_metadata[fish_name] = metadata.duplicate(true)
@@ -819,6 +842,81 @@ func get_first_capture_metadata(species: String) -> Dictionary:
 
 func get_catch_metadata(species: String) -> Dictionary:
 	return (catch_metadata.get(species, {}) as Dictionary).duplicate(true)
+
+const SELL_VALUES := {"COMMON":2, "UNCOMMON":3, "RARE":5, "EPIC":8, "LEGENDARY":14}
+
+func catch_choice_pending() -> bool:
+	return pending_catch_state == "pending" and not pending_catch.is_empty()
+
+func pending_catch_species() -> String:
+	return str(pending_catch.get("species", last_catch)) if catch_choice_pending() else ""
+
+func pending_catch_sell_value() -> int:
+	if not catch_choice_pending(): return 0
+	var stored := int(pending_catch.get("sell_value", 0))
+	if stored > 0: return stored
+	return _catch_sell_value(pending_catch.get("metadata", {}) as Dictionary)
+
+func _catch_sell_value(metadata: Dictionary) -> int:
+	var rarity := str(metadata.get("rarity", "COMMON"))
+	var value := int(SELL_VALUES.get(rarity, SELL_VALUES["COMMON"]))
+	# A larger catch is worth a modest premium, while cosmetic variants stay
+	# cosmetic.  This is deterministic for a saved specimen and cannot be rerolled.
+	value += clampi(int(floor(float(metadata.get("size_cm", 0.0)) / 40.0)), 0, 4)
+	if str(metadata.get("variant", "Standard")) == "Gilded": value += 1
+	return maxi(1, value)
+
+func _open_catch_choice(metadata: Dictionary) -> void:
+	pending_catch = {
+		"species":last_catch,
+		"metadata":metadata.duplicate(true),
+		"sell_value":_catch_sell_value(metadata),
+		"ledger_counted":true,
+		"decision":"pending"
+	}
+	pending_catch_state = "pending"
+	last_catch_decision = ""
+
+func register_pending_catch() -> bool:
+	if not catch_choice_pending(): return false
+	var species := pending_catch_species()
+	# Keep the established one-shell catch reward, but grant it only when the
+	# player explicitly registers/keeps the fish.  A pending result therefore
+	# cannot be duplicated by repeated SPACE presses or by saving mid-choice.
+	shells += 1
+	pending_catch["decision"] = "registered"
+	pending_catch_state = "registered"
+	last_catch_decision = "registered"
+	toast = "REGISTERED  %s / safely kept in the tide ledger" % species
+	toast_t = 2.4
+	return true
+
+func sell_pending_catch() -> bool:
+	if not catch_choice_pending(): return false
+	var species := pending_catch_species()
+	var held := int(catches.get(species, 0))
+	# The catch was counted at landing.  Never decrement another specimen if a
+	# hand-edited or partially migrated save has no matching inventory entry.
+	if held > 0:
+		held -= 1
+		if held == 0: catches.erase(species)
+		else: catches[species] = held
+	var value := pending_catch_sell_value()
+	shells += value
+	pending_catch["decision"] = "sold"
+	pending_catch["sell_value"] = value
+	pending_catch_state = "sold"
+	last_catch_decision = "sold"
+	toast = "SOLD  %s / +%d shells  (record preserved)" % [species, value]
+	toast_t = 2.4
+	return true
+
+func _catch_choice_prompt() -> String:
+	if catch_choice_pending():
+		return "X SELL +%d shells   C REGISTER / KEEP" % pending_catch_sell_value()
+	if last_catch_decision == "sold": return "SOLD  /  record preserved   SPACE continue"
+	if last_catch_decision == "registered": return "REGISTERED / KEPT   SPACE continue"
+	return "SPACE  continue"
 
 func _ledger_marker(species: String, owned: int) -> String:
 	if owned <= 0: return "?"
@@ -982,7 +1080,17 @@ func _process_fishing(delta: float):
 			_handle_fishing_strike(gauge, counter)
 	elif fishing_state == FishingState.RESULT:
 		result_t -= delta
-		if Input.is_action_just_pressed("fish"):
+		if catch_choice_pending():
+			if Input.is_action_just_pressed("sell_catch"):
+				sell_pending_catch()
+			elif Input.is_action_just_pressed("register_catch"):
+				register_pending_catch()
+			elif Input.is_action_just_pressed("fish"):
+				# Space never silently chooses a disposition.  Keep the result on
+				# screen until the player explicitly sells or registers it.
+				toast = "Choose SELL or REGISTER / the catch is safely held"
+				toast_t = 1.8
+		elif Input.is_action_just_pressed("fish"):
 			_reset_fishing()
 		if last_rarity == "LEGENDARY":
 			var previous_legendary_t := legendary_t
@@ -1145,9 +1253,9 @@ func _resolve_fishing_timing(position: float):
 	_music_call("set_combo", [combo])
 	_music_call("play_fanfare", [legendary])
 	fish_count += 1
-	shells += 1
 	catches[last_catch] = int(catches.get(last_catch,0))+1
-	_record_catch_metadata(picked, grade)
+	var resolved_metadata := _record_catch_metadata(picked, grade)
+	_open_catch_choice(resolved_metadata)
 	fishing_state = FishingState.RESULT
 	cast_timer = 0.0
 	legendary_t = 0.0
@@ -1158,7 +1266,7 @@ func _resolve_fishing_timing(position: float):
 	flash_t = 0.90 if last_rarity == "LEGENDARY" else (0.32 if last_rarity == "RARE" else 0.18)
 	shake_t = 1.10 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
 	_play_se("catch" if last_rarity != "LEGENDARY" else "legendary")
-	toast = ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch + "  /  SPACE to cast again"
+	toast = ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch + "  /  C keep  X sell"
 	if rescue_was_ready and last_rescue_used:
 		toast = "RESCUE! RARE floor / " + last_catch
 	if fever_started: toast = "FEVER! Rarity boosted for 30s / " + last_catch
@@ -1281,6 +1389,10 @@ func _finish_cast():
 	_resolve_fishing_timing(0.5)
 
 func _reset_fishing():
+	# Internal callers from older saves/tests may dismiss a result directly. A
+	# direct reset safely registers the held fish rather than dropping it; the
+	# runtime SPACE path above still requires an explicit player choice.
+	if catch_choice_pending(): register_pending_catch()
 	fishing_state = FishingState.IDLE
 	_music_call("start_field")
 	cast_timer = 0.0
@@ -1295,6 +1407,9 @@ func _reset_fishing():
 	last_catch_variant = "Standard"
 	last_catch_mystery = false
 	last_rescue_used = false
+	pending_catch = {}
+	pending_catch_state = ""
+	last_catch_decision = ""
 	rescue_selection_used = false
 	legendary_t = 0.0
 	legendary_stage = 0
@@ -1330,7 +1445,7 @@ func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		toast = "Could not save. Please check available storage."; toast_t = 4; return
-	f.store_string(JSON.stringify({"version":10,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"weather":weather,"season":season,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected}))
+	f.store_string(JSON.stringify({"version":11,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"weather":weather,"season":season,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected,"pending_catch":pending_catch,"pending_catch_state":pending_catch_state,"last_catch_decision":last_catch_decision,"reveal_t":reveal_t,"reveal_stage":reveal_stage,"reveal_shortened":reveal_shortened,"legendary_t":legendary_t,"legendary_stage":legendary_stage}))
 	toast = "Saved to the tide ledger"; toast_t = 2.4
 
 func _normalize_catch_metadata(raw: Dictionary, species: String, first_capture := true) -> Dictionary:
@@ -1375,6 +1490,9 @@ func _load_game(path: String = SAVE_PATH):
 	first_capture_metadata.clear()
 	catch_latest.clear()
 	best_records.clear()
+	pending_catch = {}
+	pending_catch_state = ""
+	last_catch_decision = ""
 	var saved_metadata = data.get("catch_metadata", data.get("first_capture_metadata", {}))
 	if saved_metadata is Dictionary:
 		for species in saved_metadata:
@@ -1435,6 +1553,42 @@ func _load_game(path: String = SAVE_PATH):
 			if legacy_metadata or not latest.has("record_weight_kg"): latest["record_weight_kg"] = float(record.get("weight_kg", latest.get("weight_kg", 0.0)))
 			if legacy_metadata or not latest.has("crown"): latest["crown"] = is_equal_approx(float(latest.get("size_cm", 0.0)), float(record.get("size_cm", 0.0)))
 			catch_latest[key] = latest
+	# A v11 save may have been written while the result card was awaiting the
+	# player's disposition. Restore that card instead of silently discarding the
+	# held fish. Older saves have no pending fields and remain idle as before.
+	var saved_pending = data.get("pending_catch", {})
+	var saved_pending_state := str(data.get("pending_catch_state", ""))
+	if saved_pending is Dictionary and saved_pending_state == "pending" and not saved_pending.is_empty():
+		var pending_copy: Dictionary = saved_pending.duplicate(true)
+		var pending_species := str(pending_copy.get("species", ""))
+		var pending_meta_raw = pending_copy.get("metadata", {})
+		if pending_species != "" and pending_meta_raw is Dictionary:
+			pending_copy["species"] = pending_species
+			var pending_first_capture := bool(pending_meta_raw.get("first_capture", false))
+			pending_copy["metadata"] = _normalize_catch_metadata(pending_meta_raw, pending_species, pending_first_capture)
+			pending_copy["sell_value"] = maxi(1, int(pending_copy.get("sell_value", _catch_sell_value(pending_copy["metadata"]))))
+			pending_copy["ledger_counted"] = bool(pending_copy.get("ledger_counted", true))
+			pending_copy["decision"] = "pending"
+			pending_catch = pending_copy
+			pending_catch_state = "pending"
+			last_catch_decision = ""
+			last_catch = pending_species
+			last_catch_metadata = pending_copy["metadata"].duplicate(true)
+			last_rarity = str(last_catch_metadata.get("rarity", "COMMON"))
+			last_grade = str(last_catch_metadata.get("grade", "GOOD"))
+			last_catch_size_cm = float(last_catch_metadata.get("size_cm", 0.0))
+			last_catch_weight_kg = float(last_catch_metadata.get("weight_kg", 0.0))
+			last_catch_variant = str(last_catch_metadata.get("variant", "Standard"))
+			last_catch_mystery = bool(last_catch_metadata.get("mystery", false))
+			fishing_state = FishingState.RESULT
+			reveal_shortened = bool(data.get("reveal_shortened", not bool(last_catch_metadata.get("first_capture", false))))
+			reveal_stage = clampi(int(data.get("reveal_stage", 4)), 0, 4)
+			reveal_t = maxf(0.0, float(data.get("reveal_t", 2.0 if not reveal_shortened else 1.24)))
+			legendary_t = clampf(float(data.get("legendary_t", 6.0 if last_rarity == "LEGENDARY" else 0.0)), 0.0, 6.0)
+			legendary_stage = clampi(int(data.get("legendary_stage", 3 if last_rarity == "LEGENDARY" and legendary_t >= 3.75 else 0)), 0, 3)
+			result_t = 999.0
+			toast = "Catch restored / choose REGISTER or SELL"
+			toast_t = 4.0
 	rumor_found = bool(data.get("rumor_found", false))
 	hidden_spot_unlocked = bool(data.get("hidden_spot_unlocked", rumor_found and fish_count >= 3))
 	hidden_spot_collected = bool(data.get("hidden_spot_collected", false))
@@ -1614,6 +1768,9 @@ func _draw_hud():
 	_text(Vector2(15,53),environment_label() + "  " + clock_text(),8)
 	_panel(Rect2(294,8,178,22))
 	_text(Vector2(302,23),"[N] Ledger   [B] Bait: %s   [R] Rod: %s" % [bait_name(), rod_name()],10)
+	if catch_choice_pending():
+		_panel(Rect2(8,218,250,20))
+		_text(Vector2(15,232),_catch_choice_prompt(),9)
 	_panel(Rect2(8,244,464,19))
 	_text(Vector2(15,257),toast if toast_t>0 else _map_hint(),10)
 	var nearby_exit := _exit_hint()
@@ -1830,10 +1987,10 @@ func _draw_standard_reveal_result():
 		_center_text(225, "%s  /  COMBO x%d" % [last_rarity, combo], 10, Color("#d3deec"))
 		_center_text(239, "%.1f cm  /  %.2f kg  /  %s%s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant, "  NEW" if bool(last_catch_metadata.get("first_capture", false)) else ""], 9, Color("#c8d8e8"))
 		if promotion_result_label != "" or promotion_false_cue_revealed:
-			_center_text(250, promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED", 9, Color("#f7f0cb"))
-			_center_text(260, "SPACE  continue", 9, Color("#fff0d8"))
+			_center_text(249, promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED", 8, Color("#f7f0cb"))
+			_center_text(260, _catch_choice_prompt(), 8, Color("#fff0d8"))
 		else:
-			_center_text(250, "SPACE  continue", 10, Color("#fff0d8"))
+			_center_text(250, _catch_choice_prompt(), 9, Color("#fff0d8"))
 	# A single low-alpha wash at the flip keeps the card readable and avoids
 	# the rapid flashing that makes ordinary catches tiring to watch.
 	if t >= flip_start and t < flip_end:
@@ -1902,9 +2059,10 @@ func _draw_legendary_result():
 		_center_text(231,"BIG CATCH!   COMBO x%d" % combo,15,Color("#e4d2ff"))
 		_center_text(245,"%.1f cm  /  %.2f kg  /  %s" % [last_catch_size_cm, last_catch_weight_kg, last_catch_variant],9,Color("#d8d0ff"))
 		if promotion_result_label != "" or promotion_false_cue_revealed:
-			_center_text(258,(promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED") + "  /  SPACE",9,Color("#f7f0cb"))
+			_center_text(255,(promotion_result_label if promotion_result_label != "" else "FALSE CUE REVEALED"),8,Color("#f7f0cb"))
+			_center_text(266,_catch_choice_prompt(),8,Color("#fff0d8"))
 		else:
-			_center_text(258,"SPACE  continue",10,Color("#fff0d8"))
+			_center_text(258,_catch_choice_prompt(),8,Color("#fff0d8"))
 	# The fish grows from a dark silhouette to a full-width rainbow trophy.
 	var scale := 0.22 + rise * 0.55 + peak * 0.28
 	var body := PackedVector2Array([Vector2(-84,0),Vector2(-55,-25),Vector2(29,-30),Vector2(65,-13),Vector2(87,0),Vector2(65,18),Vector2(30,30),Vector2(-51,25)])

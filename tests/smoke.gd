@@ -136,6 +136,23 @@ func run():
 	var first_size := float(first_meta.get('size_cm',0.0))
 	check(bool(first_meta.get('crown', false)) and first_meta.has('record_size_cm'),'first capture persists crown metadata')
 	check(game.best_records.has(first_species) and float(game.best_records[first_species].get('size_cm',0.0))>=first_size,'first capture creates a size record')
+	check(game.best_records[first_species].has('map') and game.best_records[first_species].has('spot'),'crown record keeps its catch location')
+	check(game._record_is_better({'size_cm':42.0,'weight_kg':2.0},{'size_cm':42.0,'weight_kg':1.9}),'heavier equal-size specimen can take the crown')
+	check(not game._record_is_better({'size_cm':41.9,'weight_kg':9.0},{'size_cm':42.0,'weight_kg':1.0}),'smaller specimen cannot displace a size crown')
+	# A catch remains on the result card until the player explicitly chooses a
+	# disposition. Saving at that point must preserve the held fish and its
+	# deterministic sale value.
+	check(game.catch_choice_pending() and game.pending_catch_species()==first_species,'catch opens an explicit sell-or-register choice')
+	var pending_shells: int = game.shells
+	var pending_count := int(game.catches.get(first_species,0))
+	var pending_value: int = game.pending_catch_sell_value()
+	game._save_game('user://pending-catch.json')
+	game._reset_fishing()
+	game._load_game('user://pending-catch.json')
+	check(game.catch_choice_pending() and game.pending_catch_sell_value()==pending_value,'save restores pending catch choice without rerolling value')
+	check(bool(game.pending_catch.get('metadata',{}).get('first_capture',false)) and not game.reveal_shortened,'pending first-capture metadata survives save/load')
+	check(game.shells==pending_shells and int(game.catches.get(first_species,0))==pending_count,'pending choice does not duplicate currency or inventory')
+	check(game.register_pending_catch() and not game.catch_choice_pending() and game.shells==pending_shells+1,'register keeps fish and awards the established shell reward once')
 	# A repeat updates the current reveal while leaving the discovery record intact.
 	game._record_catch_metadata({'name':first_species,'rarity':str(first_meta.get('rarity','COMMON'))},'GOOD')
 	check(is_equal_approx(float(game.get_first_capture_metadata(first_species).get('size_cm',0.0)),first_size) and game.catch_latest.has(first_species),'first capture metadata is immutable across repeats')
@@ -143,7 +160,17 @@ func run():
 	var repeat_size := float(game.last_catch_metadata.get('size_cm',0.0))
 	var repeat_record_size := float(game.best_records[first_species].get('size_cm',0.0))
 	check(bool(game.last_catch_metadata.get('crown', false)) == is_equal_approx(repeat_size,repeat_record_size),'repeat crown marker matches the generated record')
+	# Selling removes only the held inventory copy.  Discovery metadata and the
+	# species crown remain available, so a player cannot lose a record by taking
+	# the shell payout.
 	var first_rarity := str(first_meta.get('rarity','COMMON'))
+	game._reset_fishing(); game.cast_candidate={'name':first_species,'rarity':first_rarity}; game._resolve_fishing_timing(0.5)
+	var sell_shells: int = game.shells
+	var sell_value: int = game.pending_catch_sell_value()
+	var sell_count_before := int(game.catches.get(first_species,0))
+	check(game.sell_pending_catch() and not game.catch_choice_pending(),'sell resolves the pending choice')
+	check(game.shells==sell_shells+sell_value and int(game.catches.get(first_species,0))==sell_count_before-1,'selling pays shells and removes only one held fish')
+	check(game.get_first_capture_metadata(first_species).has('size_cm') and game.best_records.has(first_species),'selling preserves discovery and crown records')
 	check(first_rarity == 'LEGENDARY' or game._reveal_stage_at(1.12,first_rarity)==4,'shortened reveal reaches face before standard timing')
 	game.weather='rain'; game.season='autumn'; game.time_of_day=0.74
 	var saved_fish=game.fish_count
