@@ -361,6 +361,10 @@ func _build_town():
 	_add_prop("cottage", Vector2(254,228), Rect2(-25,-29,50,25))
 	_add_prop("well", Vector2(366,401), Rect2(-10,-16,20,14))
 	_add_prop("sign", Vector2(468,381), Rect2(-6,-9,12,9))
+	# The notice is not the only way to discover the grotto.  Fisher Mera hangs
+	# around the plaza and shares the same rumor, so exploration and NPC talk
+	# both feed the Issue #1 hidden-tide loop.
+	landmarks.append({"kind":"rumor_npc","pos":Vector2(424,381),"label":"Fisher Mera"})
 	landmarks.append({"kind":"rumor_sign","pos":Vector2(468,381),"label":"Weathered notice"})
 	for pos in [Vector2(296,323),Vector2(306,337),Vector2(582,337),Vector2(475,452)]:
 		_add_prop("barrel",pos,Rect2(-7,-17,14,16))
@@ -546,9 +550,13 @@ func _fishing_spots() -> Array[Dictionary]:
 		_: return []
 
 func _update_rumor_gate() -> void:
-	if not rumor_found and current_map == "town" and player.distance_to(Vector2(468,381)) < 34.0:
-		rumor_found = true
-		toast = "The weathered notice whispers of a moonlit grotto"; toast_t = 3.0
+	if not rumor_found and current_map == "town":
+		var near_notice := player.distance_to(Vector2(468,381)) < 34.0
+		var near_fisher := player.distance_to(Vector2(424,381)) < 34.0
+		if near_notice or near_fisher:
+			rumor_found = true
+			toast = "Fisher Mera whispers of a moonlit grotto" if near_fisher and not near_notice else "The weathered notice whispers of a moonlit grotto"
+			toast_t = 3.0
 	if rumor_found and not hidden_spot_unlocked and fish_count >= 3:
 		hidden_spot_unlocked = true
 		toast = "A hidden fishing spot is now marked on the rocky shore"; toast_t = 3.0
@@ -954,6 +962,17 @@ func species_discovered(species: String, owned: int = -1) -> bool:
 	# field-guide discovery stored in catch metadata or the latest record.
 	var count := int(catches.get(species, 0)) if owned < 0 else owned
 	return count > 0 or catch_metadata.has(species) or first_capture_metadata.has(species) or catch_latest.has(species)
+
+func ledger_display_name(species: String, owned: int = -1) -> String:
+	# Keep the highest-rarity cards mysterious even after the player catches one.
+	# The count remains visible, but the field guide never leaks the legendary's
+	# name or a silhouette-like rarity portrait before the late-game reveal.
+	var fish := _fish_entry(species)
+	if str(fish.get("rarity", "COMMON")) == "LEGENDARY": return "???"
+	var display_name := species if species_discovered(species, owned) else "????????"
+	var marker := _ledger_marker(species, owned)
+	if marker != "": display_name += " " + marker
+	return display_name
 
 func _ledger_marker(species: String, owned: int) -> String:
 	if not species_discovered(species, owned): return "?"
@@ -1776,6 +1795,14 @@ func _draw_map_landmarks():
 			draw_circle(p+Vector2(0,-34),4.0,Color("#f4d67e"))
 			draw_line(p+Vector2(0,-34),p+Vector2(-39,-47),Color(1.0,0.92,0.63,0.18),3.0)
 			draw_line(p+Vector2(0,-34),p+Vector2(39,-47),Color(1.0,0.92,0.63,0.18),3.0)
+		elif kind == "rumor_npc":
+			# A tiny plaza fisherman gives the rumor loop a readable NPC source
+			# without adding a new sprite dependency.
+			draw_circle(p + Vector2(0,-12), 7.0, Color("#d6b27a"))
+			draw_rect(Rect2(p + Vector2(-8,-5), Vector2(16,17)), Color("#557f82"))
+			draw_line(p + Vector2(-6,12), p + Vector2(-10,21), Color("#3d4d51"), 3.0)
+			draw_line(p + Vector2(6,12), p + Vector2(10,21), Color("#3d4d51"), 3.0)
+			draw_line(p + Vector2(7,-2), p + Vector2(16,-14), Color("#8f6e4e"), 2.0)
 		# Landmark names are intentionally small, like hand-painted map notes.
 		draw_string(ThemeDB.fallback_font, p + Vector2(-34,27), str(landmark.label), HORIZONTAL_ALIGNMENT_CENTER, 68, 8, Color("#3f514d"))
 	# Fishing markers sit just inland of each water feature and pulse gently.
@@ -1860,15 +1887,13 @@ func _draw_hud():
 			var x := 82.0 + col * 112.0
 			var y := 122.0 + row * 14.0
 			var owned := int(catches.get(str(fish.name),0))
-			var icon := Color("#b6c7d9") if owned == 0 else _rarity_color(str(fish.rarity))
+			var icon := Color("#b6c7d9") if owned == 0 or str(fish.rarity) == "LEGENDARY" else _rarity_color(str(fish.rarity))
 			hud.draw_rect(Rect2(x,y-9,8,8),icon)
-			var marker := _ledger_marker(str(fish.name), owned)
-			var display_name := str(fish.name) if species_discovered(str(fish.name), owned) else "????????"
-			if marker != "": display_name += " " + marker
-			if best_records.has(str(fish.name)): display_name += " ^"
+			var display_name := ledger_display_name(str(fish.name), owned)
+			if str(fish.rarity) != "LEGENDARY" and best_records.has(str(fish.name)): display_name += " ^"
 			_text(Vector2(x+11,y),display_name,8,true)
 			_text(Vector2(x+85,y),str(owned),8,true)
-		_text(Vector2(85,232),"Rumor: " + ("heard" if rumor_found else "find the weathered notice"),9,true)
+		_text(Vector2(85,232),"Rumor: " + ("heard" if rumor_found else "ask Fisher Mera or read the notice"),9,true)
 		_text(Vector2(85,241),"? mystery  ~ shimmer  ! gilded  ^ crown  /  N close",8,true)
 		_text(Vector2(85,223),"N to close  /  Movement pauses while reading",10,true)
 
