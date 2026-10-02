@@ -12,6 +12,20 @@ func run():
 	check(not game._walkable(Vector2(240,300)),'inn blocks movement')
 	check(not game._walkable(Vector2(400,530)),'sea blocks movement')
 	check(game._walkable(Vector2(502,530)),'pier is walkable')
+	# Tide forecast gates species by map, time, weather, and season.
+	check(game._time_period(0.50)=='day' and game._time_period(0.25)=='dawn' and game._time_period(0.95)=='night','clock resolves fishing periods')
+	check(game.fish_available('Silver sprat','town',0.50,'clear','spring'),'daytime sprat are available in spring')
+	check(not game.fish_available('Silver sprat','town',0.50,'clear','winter'),'sprat leave in winter')
+	check(game.fish_available('Moonfin trout','beach',0.75,'clear','autumn'),'moonfin follows an autumn dusk tide')
+	check(not game.fish_available('Moonfin trout','beach',0.50,'clear','autumn'),'moonfin leaves after dusk')
+	check(game.fish_available('Storm sardine','rocky',0.95,'storm','summer'),'storm sardine follows a summer storm night')
+	check(not game.fish_available('Storm sardine','rocky',0.50,'storm','summer'),'storm sardine avoids daylight')
+	var forecast_before: Array = game.available_fish('rocky',0.95,'storm','summer')
+	check(forecast_before == game.fish_availability('rocky',0.95,'storm','summer'),'forecast aliases stay deterministic')
+	var old_day: int = game.day; var old_time: float = game.time_of_day; var old_weather: String = game.weather; var old_season: String = game.season
+	game.day = 7; game.time_of_day = 0.99; game.weather = 'storm'; game.season = 'spring'; game._advance_world_clock(3.0)
+	check(game.day==8 and game.season=='summer' and game.weather=='clear','clock rollover advances season and forecast')
+	game.day = old_day; game.time_of_day = old_time; game.weather = old_weather; game.season = old_season
 	# Route through town to the pier, using the same substep movement as runtime.
 	for target in [Vector2(500,530)]:
 		for i in range(1000):
@@ -131,12 +145,15 @@ func run():
 	check(bool(game.last_catch_metadata.get('crown', false)) == is_equal_approx(repeat_size,repeat_record_size),'repeat crown marker matches the generated record')
 	var first_rarity := str(first_meta.get('rarity','COMMON'))
 	check(first_rarity == 'LEGENDARY' or game._reveal_stage_at(1.12,first_rarity)==4,'shortened reveal reaches face before standard timing')
+	game.weather='rain'; game.season='autumn'; game.time_of_day=0.74
 	var saved_fish=game.fish_count
 	game._save_game('user://smoke-test.json')
-	game.player=Vector2(368,372); game.fish_count=999; game.catches={}
+	game.player=Vector2(368,372); game.fish_count=999; game.catches={}; game.weather='clear'; game.season='spring'; game.time_of_day=0.35
 	game.catch_metadata={}; game.first_capture_metadata={}; game.catch_latest={}
 	game._load_game('user://smoke-test.json')
 	check(game.fish_count==saved_fish and game.catches.size()>=1,'save restores ledger and count')
+	check(game.weather=='rain' and game.season=='autumn' and is_equal_approx(game.time_of_day,0.74),'save restores tide forecast')
+	game.weather='clear'; game.season='spring'; game.time_of_day=0.35
 	check(game.get_first_capture_metadata(first_species).has('size_cm') and is_equal_approx(float(game.get_first_capture_metadata(first_species).get('size_cm',0.0)),first_size),'save restores first capture metadata')
 	check(game.player.distance_to(Vector2(500,530))<2,'save restores valid position')
 	game.player=Vector2(368,372); game.cast_timer=0; game._try_fish()
