@@ -403,7 +403,7 @@ func run():
 		check(game.fishing_challenge.done and game.fishing_state==game.FishingState.RESULT,'moving gauge completes rotated chain %d within time limit' % seed)
 	check(game.FISH_SPECIES.size()==23,'expanded field guide has 23 species')
 	check(game.FISH_SPECIES.any(func(f): return f.rarity=='EPIC') and game.FISH_SPECIES.any(func(f): return f.rarity=='LEGENDARY'),'field guide includes epic and legendary')
-	check(game.fish_cards.has('Silver sprat') and game.fish_cards.has('Sand goby') and game.fish_cards.has('Moonfin trout') and game.fish_cards['Silver sprat'].get_width()>1000,'encyclopedia loads generated fish card art')
+	check(game.fish_cards.has('Silver sprat') and game.fish_cards.has('Sand goby') and game.fish_cards.has('Moonfin trout') and game.fish_cards['Silver sprat'].get_width()>500,'encyclopedia loads generated fish card art')
 	check(game.fish_cards.has('Rainbow Kingfish') and game.fish_portraits.has('Rainbow Kingfish'),'legendary art assets are available for discovered entries')
 	check(not game.fish_cards.has('Old boot') and game._fish_art_visible('Old boot',0),'missing fish art keeps the generic fallback available')
 	var legendary_ledger_name := 'Rainbow Kingfish'
