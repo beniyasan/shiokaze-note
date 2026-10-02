@@ -1,4 +1,11 @@
-"""Crop the six framed fish illustrations from the original concept sheet.
+"""Regenerate the six framed *legacy* fish cards from the concept sheet.
+
+This script intentionally writes opaque 480x320 ``<stem>.png`` files. They
+are compatibility fallbacks for cards that already use the old paper/frame
+treatment; this workflow does not produce the preferred transparent
+``<stem>_v2.png`` assets described in ``skills/fish-art-generation/SKILL.md``.
+For a new card, use a transparent RGBA crop/export workflow instead of treating
+this script as an ``_v2`` generator.
 
 The output is deliberately separate from assets/fish/: the latter remains tiny
 pixel art for the ledger strip, while these cards preserve the larger original

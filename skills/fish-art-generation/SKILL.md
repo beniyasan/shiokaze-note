@@ -8,10 +8,15 @@ gameplay work.
 
 ## Asset contract
 
-The display name is converted to a lowercase snake-case stem by
-`_fish_art_stem()` in `main.gd` (for example, `Kelp Runner` becomes
-`kelp_runner`). Unless the species entry supplies an `art` override, use that
-stem for both files:
+Unless the species entry supplies an `art` override, the loader derives the
+stem with `_fish_art_stem()` in `main.gd`. The current transformation is
+deliberately small and literal: it lowercases the name, strips leading and
+trailing whitespace, and replaces each ASCII space (` `) with `_`. It does not
+normalize punctuation, collapse repeated spaces, or transliterate other
+characters. For example, `Kelp Runner` becomes `kelp_runner`,
+`Angler-Fish` becomes `angler-fish`, and `Angler's  Fish` becomes
+`angler's__fish`. Use that exact result for both files, or provide an explicit
+`art` override when a punctuation-free filename is preferred:
 
 | Use | Path | Target | Required treatment |
 | --- | --- | --- | --- |
