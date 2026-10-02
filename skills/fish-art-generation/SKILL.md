@@ -50,6 +50,16 @@ portrait sits naturally beside the existing goby, sprat, trout, bream, and
 kingfish assets. If the art is generated outside the script, save the final
 96×64 file at the same path and still run the validation below.
 
+If using an image model instead of Pillow, generate the compact and card art as
+two views of the same side-profile reference. A useful compact prompt shape is:
+`original SFC-era pixel-art <species>, side profile, dark navy one-pixel outline,
+flat sea/sand palette, distinct tail and fins, one eye glint, transparent
+background, no words, no frame, no watermark`. Request a larger working image
+only to avoid jagged model output, then downsample to 96×64 with nearest-neighbor
+resampling and clean the background to alpha. Treat the prompt as a starting
+point; preserve the project's silhouette and palette rather than copying a
+model's incidental style.
+
 ### Illustrated encyclopedia card
 
 The card is a larger, more expressive side-profile illustration. It may have
@@ -65,6 +75,15 @@ and export a straight-alpha RGBA PNG. `tools/crop_fish_cards.py` documents the
 existing crop/mask approach; update its panel coordinates or source path for a
 new sheet rather than hand-cropping a screenshot. The older 480×320 framed cards
 are compatibility fallbacks only.
+
+For a new illustration, a matching prompt shape is: `original illustrated
+coastal field-guide card of <species>, same side profile and markings as the
+compact reference, expressive scales and fins, restrained <rarity> accent,
+centered with clear margins, transparent background, no text, no border, no
+watermark`. Supply the compact portrait as a visual reference when the tool
+supports it, or keep the species' eye, tail direction, and dominant colors in
+the prompt. Export at 768 px wide, preserve the aspect ratio, and remove any
+generated paper, frame, lettering, or checkerboard before saving the PNG.
 
 ## Rarity-specific treatment
 
