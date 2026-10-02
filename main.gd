@@ -65,6 +65,11 @@ var props: Array[Dictionary] = []
 var solids: Array[Rect2] = []
 var landmarks: Array[Dictionary] = []
 var textures: Dictionary = {}
+# Small portraits and larger card illustrations are used by the encyclopedia.
+# Missing art keeps the existing polygon/icon fallback so adding a new species
+# never blocks play.
+var fish_portraits: Dictionary = {}
+var fish_cards: Dictionary = {}
 var face := 0
 var walk_time := 0.0
 var walking := false
@@ -207,6 +212,7 @@ func _ready():
 	hero = load("res://assets/hero.png")
 	for asset in ["cottage", "inn", "shop", "tree0", "tree1", "tree2", "barrel", "sign", "rock", "well", "reeds"]:
 		textures[asset] = load("res://assets/" + asset + ".png")
+	_load_fish_art()
 	_build_world()
 	cam.position = player.round()
 	cam.position_smoothing_enabled = false
@@ -235,6 +241,36 @@ func _ready():
 	if not OS.get_cmdline_user_args().has("--fresh"):
 		_load_game()
 	queue_redraw()
+
+func _fish_art_stem(species_name: String) -> String:
+	# Keep the asset contract independent from the display name's spaces and
+	# punctuation. Existing files use lowercase snake_case stems.
+	return species_name.to_lower().strip_edges().replace(" ", "_")
+
+func _load_fish_art() -> void:
+	fish_portraits.clear()
+	fish_cards.clear()
+	for fish in FISH_SPECIES:
+		var species_name := str(fish.get("name", ""))
+		if species_name.is_empty(): continue
+		var stem := str(fish.get("art", _fish_art_stem(species_name)))
+		var portrait_path := "res://assets/fish/" + stem + ".png"
+		if ResourceLoader.exists(portrait_path):
+			var portrait := load(portrait_path) as Texture2D
+			if portrait != null: fish_portraits[species_name] = portrait
+		# The transparent v2 illustrations are the encyclopedia art. Keep the
+		# older framed card as a compatibility fallback for species without a v2
+		# asset, so a partial art bundle never removes a ledger entry.
+		var card_paths := [
+			"res://assets/fish_cards/" + stem + "_v2.png",
+			"res://assets/fish_cards/" + stem + ".png"
+		]
+		for card_path in card_paths:
+			if not ResourceLoader.exists(card_path): continue
+			var card := load(card_path) as Texture2D
+			if card != null:
+				fish_cards[species_name] = card
+				break
 
 # ---- Tide forecast -------------------------------------------------------
 # The same deterministic rules drive the species pool, the ledger, and smoke
@@ -1163,6 +1199,12 @@ func species_discovered(species: String, owned: int = -1) -> bool:
 	# field-guide discovery stored in catch metadata or the latest record.
 	var count := int(catches.get(species, 0)) if owned < 0 else owned
 	return count > 0 or catch_metadata.has(species) or first_capture_metadata.has(species) or catch_latest.has(species)
+
+func _fish_art_visible(species: String, owned: int = -1) -> bool:
+	# Legendary identity stays masked until the first durable discovery. Other
+	# species can show their illustration even while their name remains hidden.
+	var fish := _fish_entry(species)
+	return not fish.is_empty() and (str(fish.get("rarity", "COMMON")) != "LEGENDARY" or species_discovered(species, owned))
 
 func ledger_display_name(species: String, owned: int = -1) -> String:
 	# Keep the highest-rarity cards mysterious until the first durable discovery.
@@ -2139,11 +2181,15 @@ func _draw_hud():
 			var owned := int(catches.get(str(fish.name),0))
 			var discovered := species_discovered(str(fish.name), owned)
 			var icon := Color("#b6c7d9") if not discovered else _rarity_color(str(fish.rarity))
-			hud.draw_rect(Rect2(x,y-9,8,8),icon)
+			# Show available illustration art in the field guide, but keep an
+			# undiscovered legendary as a generic icon so its identity remains
+			# masked until the first catch.
+			var has_art := _fish_art_visible(str(fish.name), owned) and _draw_fish_card(Vector2(x+6,y-5), str(fish.name), Vector2(16,10))
+			if not has_art: hud.draw_rect(Rect2(x,y-9,8,8),icon)
 			if species_biting_now(str(fish.name)): hud.draw_circle(Vector2(x-3,y-5),2.0,Color("#4f9a6a"))
 			var display_name := ledger_display_name(str(fish.name), owned)
 			if best_records.has(str(fish.name)): display_name += " ^"
-			_text(Vector2(x+11,y),display_name,8,true)
+			_text(Vector2(x+17,y),display_name,8,true)
 			_text(Vector2(x+85,y),str(owned),8,true)
 		if heard_rumors.is_empty():
 			_text(Vector2(85,230),"Rumors: press SPACE beside Fisher Mera or the notice",8,true)
@@ -2226,6 +2272,27 @@ func _draw_challenge_target(pos: Vector2, size: Vector2):
 	hud.draw_rect(Rect2(left,pos.y-2,maxf(2.0,right-left),size.y+4),Color(color,0.38))
 	hud.draw_line(Vector2(left,pos.y-4),Vector2(left,pos.y+size.y+4),color,1.0)
 	hud.draw_line(Vector2(right,pos.y-4),Vector2(right,pos.y+size.y+4),color,1.0)
+
+func _draw_fish_portrait(center: Vector2, species_name: String, scale: float = 1.0, modulate := Color.WHITE) -> bool:
+	var portrait: Texture2D = fish_portraits.get(species_name)
+	if portrait == null: return false
+	var size := Vector2(portrait.get_width(), portrait.get_height()) * scale
+	hud.draw_texture_rect(portrait, Rect2(center - size * 0.5, size), false, modulate)
+	return true
+
+func _draw_fish_card(center: Vector2, species_name: String, card_size: Vector2, modulate := Color.WHITE) -> bool:
+	# Fit transparent card illustrations without stretching them. If a species
+	# has no card, fall back to its compact portrait; callers can then keep the
+	# existing procedural silhouette as the final fallback.
+	var card: Texture2D = fish_cards.get(species_name)
+	if card != null:
+		var source_size := Vector2(card.get_width(), card.get_height())
+		var fit := minf(card_size.x / source_size.x, card_size.y / source_size.y)
+		var draw_size := source_size * fit
+		hud.draw_texture_rect(card, Rect2(center - draw_size * 0.5, draw_size), false, modulate)
+		return true
+	var portrait_scale := minf(card_size.x / 96.0, card_size.y / 64.0)
+	return _draw_fish_portrait(center, species_name, portrait_scale, modulate)
 
 func _draw_fishing_result():
 	if last_rarity == "LEGENDARY":
