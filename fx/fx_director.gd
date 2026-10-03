@@ -286,13 +286,49 @@ func schedule(delay: float, fn: String, args: Array = []) -> void:
 	scheduled.append({"at": time + delay, "fn": fn, "args": args})
 
 func clear_show() -> void:
+	# A cast reset is a hard boundary between shows.  Targets alone are not
+	# enough here: drawables and delayed callbacks can outlive the result card
+	# and then appear over the next cast (especially after a Legendary shatter).
+	# Keep the rolling flash log intact so resetting cannot bypass the
+	# photosensitivity budget, but drop every active/transient show primitive.
 	letterbox_target = 0.0
 	dim_target = 0.0
 	vignette_target = 0.0
 	speed_target = 0.0
+	letterbox = 0.0
+	dim = 0.0
+	vignette = 0.0
+	speed = 0.0
 	danger = 0.0
 	heartbeat_on = false
+	heartbeat_t = 0.0
 	music_duck = 1.0
+	hitstop_t = 0.0
+	slowmo_t = 0.0
+	slowmo_scale = 1.0
+	shake_t = 0.0
+	shake_dur = 0.0
+	shake_power = 0.0
+	zoom_t = 0.0
+	zoom_dur = 0.0
+	zoom_amount = 0.0
+	chroma_t = 0.0
+	chroma_dur = 0.0
+	chroma_amount = 0.0
+	flash_alpha = 0.0
+	flash_t = 0.0
+	flash_dur = 0.0
+	cutins.clear()
+	pops.clear()
+	particles.clear()
+	school = {}
+	golden = {}
+	cracks.clear()
+	crack_t = -1.0
+	shards.clear()
+	scheduled.clear()
+	sounds.clear()
+	premium_active = false
 
 func _sound(kind: String) -> void:
 	sounds.append(kind)
@@ -304,16 +340,7 @@ func _count(key: String) -> void:
 
 func cast(heat: int) -> void:
 	clear_show()
-	school = {}
-	golden = {}
-	cracks.clear()
-	crack_t = -1.0
-	shards.clear()
-	# Drop leftovers from the last show, but keep a pending FEVER banner: a
-	# quick recast must not swallow the announcement.
-	scheduled = scheduled.filter(func(e): return str(e.fn) == "fever_start")
 	speed_heat = heat
-	premium_active = false
 
 func cue_step(stage: int, float_pos: Vector2) -> void:
 	_count("cue_step_%d" % stage)

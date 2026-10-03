@@ -760,6 +760,14 @@ func run():
 	check(int(fx.counters.get('cutin_premium',0))>=1,'golden tide lands its premium cut-in')
 	fx.cue_step(3, Vector2(240,160))
 	check(int(fx.counters.get('cutin_premium',0))>=2,'after the golden tide the rainbow step stays on the gold ladder')
+	# Resetting a cast is a hard boundary: no reveal particles, banners, shards,
+	# active flash or delayed callback may leak into the idle world/next cast.
+	fx.cast(3)
+	fx.flash_log.clear()
+	fx.legendary_shatter(); fx.cutin('STALE', '', 'hot'); fx.pop('STALE', Vector2(240,160), Color.WHITE)
+	fx.request_flash(Color.WHITE, 0.4, 0.4); fx.schedule(0.4, 'burst', [Vector2(240,160), Color.WHITE, 4, 20.0])
+	game._reset_fishing()
+	check(fx.cutins.is_empty() and fx.pops.is_empty() and fx.particles.is_empty() and fx.shards.is_empty() and fx.scheduled.is_empty() and fx.current_flash_alpha()==0.0 and fx.time_scale()==1.0,'cast reset clears all transient FX and delayed callbacks')
 	# Summon light: promotions climb one step at a time; broken promises fizzle.
 	game._reset_fishing()
 	game.last_rarity='EPIC'; game.reveal_shortened=false; game.reveal_glow_start=1
