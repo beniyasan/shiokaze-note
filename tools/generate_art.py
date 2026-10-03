@@ -82,23 +82,136 @@ for variant in range(3):
   p.line((cx-7,cy-2,cx-4,cy-5,cx+3,cy-5),fill='#65905a',width=2)
   p.line((cx+2,cy+5,cx+7,cy+3),fill='#294e42',width=2)
  a.save(ROOT/f'tree{variant}.png')
-# Hero 16x24, 4 facings x 4 walk frames.
+# Hero 16x24, 4 facings x 4 walk frames.  This is intentionally drawn at the
+# native pixel size: the broad cap brim, diagonal rod and little tackle bag
+# are the silhouette cues that should still read when the player is tiny on the
+# map.  Keep every shape grid-aligned so the game's nearest-neighbour filter
+# preserves the hand-pixeled edges.
 a,p=canvas(64,96)
+COL={
+ 'shadow':'#526750', 'outline':'#29313f', 'ink':'#382b3b', 'boot':'#2d3b46',
+ 'boot_hi':'#40545a', 'pants':'#3d555b', 'skin':'#e5b77f',
+ 'skin_hi':'#f0cb91', 'skin_shadow':'#b9795b', 'hair':'#75483f', 'hair_hi':'#a7624c', 'shirt':'#d8c08b',
+ 'vest':'#3d7172', 'vest_hi':'#6e9a8d', 'vest_shadow':'#31565d',
+ 'vest_edge':'#244b58', 'cap':'#587a78', 'cap_hi':'#88a694', 'cap_shadow':'#34555f', 'cap_band':'#d0ad67',
+ 'bag':'#8c6348', 'bag_hi':'#bb8a58', 'rod':'#60493c',
+ 'rod_hi':'#d0aa6a', 'metal':'#d7d5ad'
+}
+
+def _px(draw, ox, oy, box, color):
+    """Draw a rectangle in frame-local coordinates."""
+    x0,y0,x1,y1=box; draw.rectangle((ox+x0,oy+y0,ox+x1,oy+y1),fill=color)
+
+def _line(draw, ox, oy, points, color, width=1):
+    draw.line([(ox+x,oy+y) for x,y in points],fill=color,width=width)
+
+def _front(draw, ox, oy, frame):
+    # Rod sits outside the shoulder so it reads as a fishing tool, not a sword.
+    _line(draw,ox,oy,[(12,16),(14,9),(15,3)],COL['rod'],1)
+    _line(draw,ox,oy,[(13,15),(15,8)],COL['rod_hi'],1)
+    # Cap + brim. The little light band is visible against every background.
+    # Deep under-pixels give the hat a shaped crown instead of a flat bar.
+    _px(draw,ox,oy,(4,1,11,4),COL['ink']); _px(draw,ox,oy,(5,0,10,1),COL['ink'])
+    _px(draw,ox,oy,(4,2,11,3),COL['cap']); _px(draw,ox,oy,(5,1,10,2),COL['cap_hi'])
+    _px(draw,ox,oy,(4,3,11,4),COL['cap_shadow']); _px(draw,ox,oy,(3,4,13,5),COL['ink'])
+    _px(draw,ox,oy,(3,4,13,4),COL['cap_band']); _px(draw,ox,oy,(4,4,11,4),COL['cap_hi'])
+    # Face, ears, neck and a tiny shadow under the brim.
+    _px(draw,ox,oy,(4,6,11,11),COL['ink']); _px(draw,ox,oy,(5,6,10,11),COL['skin'])
+    _px(draw,ox,oy,(4,7,5,10),COL['hair']); _px(draw,ox,oy,(10,7,11,10),COL['hair'])
+    _px(draw,ox,oy,(4,7,4,8),COL['hair_hi']); _px(draw,ox,oy,(10,7,10,8),COL['skin_hi'])
+    _px(draw,ox,oy,(5,6,10,6),COL['skin_shadow'])
+    _px(draw,ox,oy,(6,8,6,8),COL['ink']); _px(draw,ox,oy,(9,8,9,8),COL['ink'])
+    _px(draw,ox,oy,(7,10,8,10),COL['skin_shadow']); _px(draw,ox,oy,(7,11,9,12),COL['skin'])
+    # Shirt sleeves frame the high-contrast teal fishing vest.
+    _px(draw,ox,oy,(3,12,5,17),COL['ink']); _px(draw,ox,oy,(10,12,12,17),COL['ink'])
+    _px(draw,ox,oy,(3,12,4,16),COL['shirt']); _px(draw,ox,oy,(11,12,12,16),COL['shirt'])
+    _px(draw,ox,oy,(4,12,11,18),COL['vest_edge']); _px(draw,ox,oy,(5,12,10,17),COL['vest'])
+    _px(draw,ox,oy,(6,13,6,16),COL['vest_hi']); _px(draw,ox,oy,(9,13,10,16),COL['vest_shadow'])
+    _px(draw,ox,oy,(7,12,8,12),COL['shirt'])
+    # Buckles and compact tackle pouch break up the body into readable gear.
+    _px(draw,ox,oy,(6,13,6,13),COL['cap_band']); _px(draw,ox,oy,(9,13,9,13),COL['cap_band'])
+    _px(draw,ox,oy,(7,14,7,16),COL['metal']); _px(draw,ox,oy,(8,15,8,15),COL['metal'])
+    _px(draw,ox,oy,(10,14,13,18),COL['ink']); _px(draw,ox,oy,(10,15,12,17),COL['bag']); _px(draw,ox,oy,(11,15,12,15),COL['bag_hi'])
+    _px(draw,ox,oy,(2,15,3,17),COL['skin']); _px(draw,ox,oy,(12,15,13,16),COL['skin'])
+    # Trouser gap and sturdy boots.
+    _px(draw,ox,oy,(4,17,6,20),COL['pants']); _px(draw,ox,oy,(9,17,11,20),COL['pants'])
+    _px(draw,ox,oy,(3,20,6,22),COL['boot']); _px(draw,ox,oy,(9,20,12,22),COL['boot'])
+    _px(draw,ox,oy,(3,21,5,21),COL['boot_hi']); _px(draw,ox,oy,(10,21,12,21),COL['boot_hi'])
+
+def _back(draw, ox, oy, frame):
+    # Rod angles away from the pack on the left side when viewed from behind.
+    _line(draw,ox,oy,[(3,16),(2,9),(1,3)],COL['rod'],1)
+    _line(draw,ox,oy,[(3,15),(1,8)],COL['rod_hi'],1)
+    _px(draw,ox,oy,(4,1,11,4),COL['ink']); _px(draw,ox,oy,(5,0,10,1),COL['ink'])
+    _px(draw,ox,oy,(4,2,11,3),COL['cap']); _px(draw,ox,oy,(5,1,10,2),COL['cap_hi'])
+    _px(draw,ox,oy,(4,3,11,4),COL['cap_shadow']); _px(draw,ox,oy,(3,4,13,5),COL['ink'])
+    _px(draw,ox,oy,(3,4,13,4),COL['cap_band']); _px(draw,ox,oy,(4,4,11,4),COL['cap_hi'])
+    # Back of head and neck peek beneath the cap.
+    _px(draw,ox,oy,(4,6,11,11),COL['ink']); _px(draw,ox,oy,(5,6,10,11),COL['hair'])
+    _px(draw,ox,oy,(6,6,9,10),COL['outline']); _px(draw,ox,oy,(6,6,8,6),COL['hair_hi'])
+    _px(draw,ox,oy,(7,10,9,12),COL['skin'])
+    _px(draw,ox,oy,(3,12,5,17),COL['ink']); _px(draw,ox,oy,(10,12,12,17),COL['ink'])
+    _px(draw,ox,oy,(3,12,4,16),COL['shirt']); _px(draw,ox,oy,(11,12,12,16),COL['shirt'])
+    _px(draw,ox,oy,(4,12,11,18),COL['vest_edge']); _px(draw,ox,oy,(5,12,10,17),COL['vest'])
+    _px(draw,ox,oy,(6,13,6,16),COL['vest_hi']); _px(draw,ox,oy,(9,13,10,16),COL['vest_shadow'])
+    # A clearly visible shoulder bag/strap gives the rear view its fisherman cue.
+    _line(draw,ox,oy,[(5,12),(9,17)],COL['bag_hi'],1)
+    _px(draw,ox,oy,(10,14,13,19),COL['ink']); _px(draw,ox,oy,(10,15,13,18),COL['bag']); _px(draw,ox,oy,(11,15,13,15),COL['bag_hi'])
+    _px(draw,ox,oy,(11,16,11,16),COL['metal'])
+    _px(draw,ox,oy,(2,15,3,17),COL['skin']); _px(draw,ox,oy,(12,15,13,17),COL['skin'])
+    _px(draw,ox,oy,(4,17,6,20),COL['pants']); _px(draw,ox,oy,(9,17,11,20),COL['pants'])
+    _px(draw,ox,oy,(3,20,6,22),COL['boot']); _px(draw,ox,oy,(9,20,12,22),COL['boot'])
+    _px(draw,ox,oy,(3,21,5,21),COL['boot_hi']); _px(draw,ox,oy,(10,21,12,21),COL['boot_hi'])
+
+def _side(draw, ox, oy, frame, right=False):
+    # Mirror the side-facing silhouette. Rod and nose point in travel direction.
+    s=1 if right else -1
+    def X(x): return x if right else 15-x
+    def box(b):
+        x0,y0,x1,y1=b; return (min(X(x0),X(x1)),y0,max(X(x0),X(x1)),y1)
+    def px(b,c): _px(draw,ox,oy,box(b),c)
+    def ln(points,c,w=1): _line(draw,ox,oy,[(X(x),y) for x,y in points],c,w)
+    ln([(11,16),(13,9),(15,3)],COL['rod'],1)
+    ln([(12,15),(14,8)],COL['rod_hi'],1)
+    px((5,1,10,4),COL['ink']); px((6,0,9,1),COL['ink'])
+    px((5,2,10,3),COL['cap']); px((6,1,9,2),COL['cap_hi']); px((5,3,10,4),COL['cap_shadow'])
+    px((3,4,12,5),COL['ink']); px((3,4,12,4),COL['cap_band']); px((4,4,11,4),COL['cap_hi'])
+    # Side profile: nose and one eye make facing unambiguous.
+    px((5,6,11,11),COL['ink']); px((6,6,10,11),COL['skin']); px((5,7,6,10),COL['hair'])
+    px((10,8,11,9),COL['skin_hi']); px((8,8,8,8),COL['ink'])
+    px((6,6,9,6),COL['hair_hi']); px((7,10,9,12),COL['skin'])
+    px((3,12,6,17),COL['ink']); px((10,12,12,17),COL['ink'])
+    px((4,12,6,16),COL['shirt']); px((10,12,11,16),COL['shirt'])
+    px((5,12,11,18),COL['vest_edge']); px((6,12,10,17),COL['vest']); px((7,13,7,16),COL['vest_hi']); px((9,13,10,16),COL['vest_shadow'])
+    px((7,13,7,13),COL['cap_band']); px((9,14,12,18),COL['ink']); px((9,15,11,17),COL['bag']); px((10,15,11,15),COL['bag_hi'])
+    px((10,16,10,16),COL['metal'])
+    px((3,15,4,17),COL['skin']); px((11,15,12,16),COL['skin'])
+    px((5,17,7,20),COL['pants']); px((9,17,11,20),COL['pants'])
+    px((4,20,7,22),COL['boot']); px((9,20,12,22),COL['boot'])
+    px((4,21,6,21),COL['boot_hi']); px((10,21,12,21),COL['boot_hi'])
+
 for face in range(4):
- for frame in range(4):
-  x,y=frame*16,face*24; bob=1 if frame in [1,3] else 0; yy=y+bob
-  p.ellipse((x+3,y+20,x+13,y+23),fill='#526750')
-  stride=1 if frame==1 else -1 if frame==3 else 0
-  p.rectangle((x+4,yy+17,x+6,yy+20+stride),fill='#344454'); p.rectangle((x+9,yy+17,x+11,yy+20-stride),fill='#344454')
-  p.rectangle((x+3,yy+21+stride,x+6,yy+21+stride),fill='#303b42'); p.rectangle((x+9,yy+21-stride,x+12,yy+21-stride),fill='#303b42')
-  p.rectangle((x+4,yy+10,x+11,yy+17),fill='#e5c68a'); p.rectangle((x+5,yy+12,x+10,yy+17),fill='#5a8392')
-  p.rectangle((x+3,yy+12,x+4,yy+16),fill='#e6b480'); p.rectangle((x+11,yy+12,x+12,yy+16),fill='#e6b480')
-  p.rectangle((x+5,yy+5,x+10,yy+10),fill='#edc394'); p.rectangle((x+4,yy+3,x+11,yy+6),fill='#79553f')
-  p.rectangle((x+4,yy+2,x+11,yy+4),fill='#d8b879'); p.rectangle((x+2,yy+5,x+13,yy+6),fill='#f0d499'); p.line((x+4,yy+4,x+11,yy+4),fill='#607d83')
-  if face==0:
-   p.point((x+6,yy+8),fill='#374648'); p.point((x+10,yy+8),fill='#374648'); p.point((x+8,yy+10),fill='#bc8760')
-  elif face==1: p.rectangle((x+5,yy+7,x+10,yy+10),fill='#79553f'); p.rectangle((x+6,yy+12,x+10,yy+16),fill='#ab8659')
-  else: p.point((x+(5 if face==2 else 10),yy+8),fill='#374648')
+    for frame in range(4):
+        x,y=frame*16,face*24
+        bob=1 if frame in [1,3] else 0
+        oy=y+bob
+        # Ground shadow makes the sprite sit in the world and matches props.
+        p.ellipse((x+2,y+22,x+13,y+23),fill=COL['shadow'])
+        if face == 0: _front(p,x,oy,frame)
+        elif face == 1: _back(p,x,oy,frame)
+        else: _side(p,x,oy,frame,right=face==3)
+        # Alternate boots for a readable four-frame walk without changing the silhouette.
+        if frame in [1,3]:
+            # cover the old feet with a one-pixel stride offset; all other gear stays still
+            stride = 1 if frame == 1 else -1
+            p.rectangle((x+3,oy+20,x+6,oy+22),fill=COL['shadow'])
+            p.rectangle((x+9,oy+20,x+12,oy+22),fill=COL['shadow'])
+            if face in (0,1):
+                p.rectangle((x+3,oy+20+stride,x+6,oy+22+stride),fill=COL['boot'])
+                p.rectangle((x+9,oy+20-stride,x+12,oy+22-stride),fill=COL['boot'])
+            else:
+                p.rectangle((x+4,oy+20+stride,x+7,oy+22+stride),fill=COL['boot'])
+                p.rectangle((x+9,oy+20-stride,x+12,oy+22-stride),fill=COL['boot'])
 a.save(ROOT/'hero.png')
 # small props
 for name in ['barrel','sign','rock','well','reeds']:
