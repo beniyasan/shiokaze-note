@@ -635,7 +635,7 @@ func _sync_fx_outputs() -> void:
 		return
 	# Sounds, music ducking, the FEVER frame and the post pass all read from
 	# the director once per frame, so effect code never touches audio nodes.
-	fx.set_fever(fever_active)
+	fx.set_fever(fever_active and not _fever_waiting())
 	for kind in fx.pop_sounds(): _play_se(kind)
 	_music_call("set_duck", [fx.music_duck])
 	var amount: float = fx.chroma()
@@ -1269,9 +1269,19 @@ func _commit_crown_record(species: String, metadata: Dictionary) -> bool:
 	best_records[species] = {"species":species,"size_cm":float(metadata.get("size_cm", 0.0)),"weight_kg":float(metadata.get("weight_kg", 0.0)),"day":int(metadata.get("day", day)),"map":str(metadata.get("map", current_map)),"spot":str(metadata.get("spot", "Open water")),"variant":str(metadata.get("variant", "Standard")),"grade":str(metadata.get("grade", "GOOD"))}
 	return true
 
+# FEVER is presented as one moment: the banner, flash, chime, music change and
+# rainbow frame all start when the catch that earned it is settled, and its
+# clock starts then too. While the choice is open, FEVER is "waiting".
+func _fever_waiting() -> bool:
+	return fever_announce_pending and catch_choice_pending()
+
 func _announce_fever_if_pending() -> void:
 	if fever_announce_pending and fever_active:
+		fever_announce_pending = false
 		fx.fever_start()
+		fever_flash_t = 1.0
+		_music_call("set_fever", [true])
+		_play_se("fever")
 	fever_announce_pending = false
 
 func register_pending_catch() -> bool:
@@ -1497,8 +1507,7 @@ func _process_fishing(delta: float):
 	# FEVER's clock starts when it is announced, i.e. when the catch that earned
 	# it is settled. While that choice is still open the clock holds, so a result
 	# left on screen cannot burn FEVER down (and lose its banner) unseen.
-	var fever_waiting := fever_announce_pending and catch_choice_pending()
-	if fever_active and not fever_waiting:
+	if fever_active and not _fever_waiting():
 		fever_t = maxf(0.0, fever_t - delta)
 		if fever_t <= 0.0:
 			_break_chain()
@@ -1723,11 +1732,10 @@ func _rarity_color(rarity: String) -> Color:
 		_: return Color("#b7c3d7")
 
 func _start_fever() -> void:
+	# State only. The catch that earned FEVER is still being revealed, so its
+	# presentation is deferred to _announce_fever_if_pending (see _fever_waiting).
 	fever_active = true
 	fever_t = FEVER_DURATION
-	fever_flash_t = 1.0
-	_music_call("set_fever", [true])
-	_play_se("fever")
 
 # Shown when a miss ends a chain, so a near-FEVER loss reads as a near miss.
 func _chain_break_note(lost_combo: int, lost_fever: bool) -> String:
@@ -2269,7 +2277,7 @@ func _load_game(path: String = SAVE_PATH):
 	# never inherited from this session's memory (a stale one would hold the
 	# restored clock), and older saves without the key simply have none.
 	fever_announce_pending = bool(data.get("fever_announce_pending", false)) and fever_active and catch_choice_pending()
-	_music_call("set_fever", [fever_active])
+	_music_call("set_fever", [fever_active and not fever_announce_pending])
 	_music_call("set_combo", [combo])
 	toast = "Welcome back to Saltmere"; toast_t = 3
 

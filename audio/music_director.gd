@@ -84,7 +84,7 @@ func _create_player() -> void:
 	_generator.mix_rate = SAMPLE_RATE
 	_generator.buffer_length = BUFFER_SECONDS
 	_stream_player.stream = _generator
-	_stream_player.volume_db = _music_volume_db
+	_stream_player.volume_db = get_effective_volume_db()
 	add_child(_stream_player)
 	_stream_player.play()
 	_playback = _stream_player.get_stream_playback() as AudioStreamGeneratorPlayback
@@ -126,16 +126,26 @@ func stop_music(fade_seconds: float = 0.6) -> void:
 
 func set_music_volume_db(value: float) -> void:
 	_music_volume_db = clampf(value, -40.0, 2.0)
-	if _stream_player != null:
-		_stream_player.volume_db = _music_volume_db
+	_apply_player_volume()
 
 func get_music_volume_db() -> float:
 	return _music_volume_db
 
+# The duck is applied as player gain, not baked into the generated samples. The
+# generator queue runs up to BUFFER_SECONDS ahead of what is heard, so a duck
+# baked into queued samples would reach the speakers over a second after the
+# visual cue it belongs to, and its release would lag the same way.
+func get_effective_volume_db() -> float:
+	if _muted: return -80.0
+	return _music_volume_db + linear_to_db(maxf(_duck, 0.001))
+
+func _apply_player_volume() -> void:
+	if _stream_player != null:
+		_stream_player.volume_db = get_effective_volume_db()
+
 func set_muted(value: bool) -> void:
 	_muted = value
-	if _stream_player != null:
-		_stream_player.volume_db = -80.0 if _muted else _music_volume_db
+	_apply_player_volume()
 
 func set_duck(level: float) -> void:
 	_duck_target = clampf(level, 0.0, 1.0)
@@ -219,6 +229,7 @@ func _update_transport(delta: float) -> void:
 	elapsed += delta
 	# Fall quickly into the hush, come back a little faster than that.
 	_duck = move_toward(_duck, _duck_target, delta * (5.0 if _duck_target > _duck else 2.2))
+	_apply_player_volume()
 	# Mode crossfades happen over a fraction of a beat. The note clock is never
 	# reset, so field -> fishing returns on the same motif phase.
 	var fade_rate := 1.0 / maxf(0.08, BEAT_SECONDS * 0.75)
@@ -304,7 +315,7 @@ func _sample_at(t: float) -> float:
 	v += _fanfare_voice(t) * fanfare_gain
 	# Master guard leaves headroom for main.gd's SE player. A final tanh soft
 	# clip catches rare stacked peaks without hard digital clipping.
-	var master := 0.34 * _duck
+	var master := 0.34
 	if _muted:
 		master = 0.0
 	return tanh(v * master)

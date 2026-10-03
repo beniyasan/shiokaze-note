@@ -186,7 +186,11 @@ func chroma() -> float:
 
 func current_flash_alpha() -> float:
 	if flash_t <= 0.0 or flash_dur <= 0.0: return 0.0
-	return flash_alpha * (flash_t / flash_dur)
+	# The cap is applied again here, not only when the flash was requested, so
+	# pressing F mid-flash dims a flash that is already on screen instead of
+	# letting it finish at the old, brighter level.
+	var cap := FLASH_ALPHA_CAP_REDUCED if reduced else FLASH_ALPHA_CAP
+	return minf(flash_alpha, cap) * (flash_t / flash_dur)
 
 # Smooth full-screen tints drawn by the HUD (reveal wash, LEGENDARY glow, FEVER
 # wash) are single low-alpha bumps rather than director flashes, so they skip

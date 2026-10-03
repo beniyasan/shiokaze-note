@@ -691,6 +691,16 @@ func run():
 	var rod_mult := float(game.RODS[game.rod_index].get('bite_mult',1.0))
 	var base_delay: float = game.bite_delay - fx.wait_extension(game.fx_heat)
 	check(base_delay >= 0.72*rod_mult - 0.001 and base_delay <= 1.42*rod_mult + 0.001,'bite delay is the base roll plus the heat extension')
+	# Documented contract: a natural cast never starts below H1 (gold is reachable
+	# on every cast), so the blue H0 look only appears when a reversal steps the
+	# float back, and every cast carries at least the gold wait extension.
+	var min_cast_heat := 9
+	game.rng.seed=2468
+	for i in range(300):
+		game._reset_fishing(); game.shells=100; game.combo=0; game.fever_active=false
+		game._try_fish()
+		if game.fishing_state == game.FishingState.ANTICIPATING: min_cast_heat = mini(min_cast_heat, game.fx_heat)
+	check(min_cast_heat==1,'natural casts start at gold or hotter (min cast heat %d)' % min_cast_heat)
 	# Photosensitivity guard.
 	game._reset_fishing()
 	fx.reduced=false; fx.flash_log.clear()
@@ -714,6 +724,12 @@ func run():
 	fx.reduced=true
 	check(fx.soft_overlay(0.2)==0.0 and fx.soft_overlay(0.1)==0.0,'reduced mode drops the HUD soft tints')
 	fx.reduced=false
+	# Pressing F while a flash is already on screen clamps that flash too.
+	fx.reduced=false; fx.flash_log.clear(); fx.request_flash(Color.WHITE, 0.5, 0.4)
+	var normal_flash: float = fx.current_flash_alpha()
+	fx.reduced=true
+	check(normal_flash>fx.FLASH_ALPHA_CAP_REDUCED and fx.current_flash_alpha()<=fx.FLASH_ALPHA_CAP_REDUCED+0.0001,'switching to reduced mode clamps a flash already on screen')
+	fx.reduced=false; fx.update(1.0)
 	# Source guard for the same promise: every light full-screen HUD rect goes
 	# through soft_overlay (the dark LEGENDARY backdrop is not a light flash).
 	var main_src: String = FileAccess.get_file_as_string('res://main.gd')
@@ -814,6 +830,36 @@ func run():
 	game._load_game('user://fever-settled-test.json')
 	check(not game.fever_announce_pending,'a settled FEVER is not announced again after loading')
 	game._break_chain(); game._reset_fishing()
+	# FEVER's whole presentation (flash, chime, music, frame, banner) and its
+	# clock start together when the catch is settled, not at landing.
+	game.music.set_fever(false); game.fever_flash_t=0.0; fx.fever_target=0.0
+	game.combo=2; fx.counters.clear()
+	game.cast_candidate={'name':'Silver sprat','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
+	game.reveal_t=2.0; game.reveal_stage=4
+	game._sync_fx_outputs()
+	check(game.fever_active and game.fever_flash_t==0.0 and not game.music.get_snapshot().fever and fx.fever_target==0.0,'FEVER flash, music and frame wait for the catch to be settled')
+	game.register_pending_catch()
+	game._sync_fx_outputs()
+	check(game.fever_flash_t>0.0 and game.music.get_snapshot().fever and fx.fever_target==1.0,'settling the catch starts the FEVER flash, music and frame together')
+	game._break_chain(); game._reset_fishing()
+	# A held FEVER restored from a save keeps its music quiet until it is settled.
+	game.combo=2; game._resolve_fishing_timing(0.5)
+	game.reveal_t=2.0; game.reveal_stage=4
+	game._save_game('user://fever-pending-music.json')
+	game._break_chain(); game._reset_fishing()
+	game._load_game('user://fever-pending-music.json')
+	check(game.fever_announce_pending and not game.music.get_snapshot().fever,'a loaded held FEVER keeps the music quiet until it is settled')
+	game.register_pending_catch()
+	check(game.music.get_snapshot().fever,'registering the restored catch starts the FEVER music')
+	game._break_chain(); game._reset_fishing()
+	# The music hush is applied as player gain, because the generator queue runs
+	# over a second ahead of what is heard and a baked-in duck would lag the cue.
+	var music_base_db: float = game.music.get_music_volume_db()
+	game.music.set_duck(0.1); game.music._update_transport(1.0)
+	check(is_equal_approx(game.music._stream_player.volume_db,music_base_db+linear_to_db(0.1)),'music duck is applied through the player gain')
+	game.music.set_duck(1.0); game.music._update_transport(1.0)
+	check(is_equal_approx(game.music._stream_player.volume_db,music_base_db),'releasing the duck restores the player gain')
+	game._reset_fishing()
 	# The tide ledger pauses the whole cue show, not only the fishing clock: no
 	# scheduled banner, heartbeat or particle may advance (or draw) behind it.
 	game.notebook_open=false

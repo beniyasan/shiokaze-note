@@ -104,7 +104,8 @@ The whole cast is staged as one escalating show, defined in
 - **Reveal.** The card glows in the promised heat, then promotes one step at a time
   to the real result (`UP!`) or quietly fizzles. The flip bursts in proportion to
   rarity, followed by `NEW!` / `CROWN!` stamps. LEGENDARY cracks the screen, then
-  shatters it. FEVER is announced once the catch is sold or registered.
+  shatters it. FEVER is announced once the catch is sold or registered: the banner,
+  flash, chime, music change and rainbow frame all start together then.
 - **Safety.** Full-screen flashes are limited to three per second with a brightness
   cap. F toggles reduced flashing (smaller flashes, gentler shake/zoom, no chromatic
   aberration, no soft full-screen tints, a steady danger edge); the setting is saved.
@@ -113,7 +114,7 @@ The whole cast is staged as one escalating show, defined in
 
 Three consecutive catches activate a 30-second FEVER window. The HUD shows chain
 progress and remaining time; a warm flash, original chime, and full music layers
-announce activation. FEVER and bait use rarity-sensitive weights: common fish
+announce activation once the catch that earned it is sold or registered. FEVER and bait use rarity-sensitive weights: common fish
 retain their baseline, while higher rarities receive progressively stronger boosts.
 
 The Rocky Shore legendary roll happens once, at cast time, when the upcoming catch
