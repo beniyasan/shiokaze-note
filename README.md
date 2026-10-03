@@ -125,7 +125,9 @@ not refresh the timer. A lost fish or an elapsed FEVER window resets the chain, 
 a miss that breaks a chain says how close it was (`惜しい!  one more catch for
 FEVER`). Reading the ledger and map transitions pause the timer with the fishing
 loop, and the timer holds while the catch that earned FEVER is still waiting for
-SELL/REGISTER: the 30 seconds start when the FEVER banner appears. Version 6+ saves retain the combo and remaining FEVER time; older saves start
+SELL/REGISTER: the 30 seconds start when the FEVER banner appears. Version 6+
+saves retain the combo and remaining FEVER time, and a save made while that catch is
+still held keeps the pending banner (and the held clock) with it; older saves start
 with no chain.
 
 ## Fair rescue (soft pity)

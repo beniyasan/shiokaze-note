@@ -793,6 +793,27 @@ func run():
 	game._break_chain()
 	check(not game.fever_announce_pending,'ending FEVER drops its pending announcement')
 	game._reset_fishing()
+	# Saved while the FEVER-starting catch awaits its choice: the banner request
+	# and the held clock come back together with the catch.
+	game._break_chain(); game.combo=2; fx.counters.clear()
+	game.cast_candidate={'name':'Silver sprat','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
+	game.reveal_t=2.0; game.reveal_stage=4
+	game._save_game('user://fever-pending-test.json')
+	game._break_chain(); game._reset_fishing()
+	game._load_game('user://fever-pending-test.json')
+	check(game.fever_active and game.catch_choice_pending() and game.fever_announce_pending,'save/load keeps the FEVER banner pending with its held catch')
+	var loaded_fever_t: float = game.fever_t
+	for i in range(40): game._process_fishing(1.0)
+	check(game.fever_active and is_equal_approx(game.fever_t,loaded_fever_t),'a loaded FEVER clock still waits for the held catch')
+	fx.counters.clear()
+	game.register_pending_catch()
+	check(int(fx.counters.get('fever',0))==1,'the restored banner plays once the held catch is settled')
+	# A save made after settling carries no banner request.
+	game._save_game('user://fever-settled-test.json')
+	game._break_chain(); game._reset_fishing()
+	game._load_game('user://fever-settled-test.json')
+	check(not game.fever_announce_pending,'a settled FEVER is not announced again after loading')
+	game._break_chain(); game._reset_fishing()
 	# The tide ledger pauses the whole cue show, not only the fishing clock: no
 	# scheduled banner, heartbeat or particle may advance (or draw) behind it.
 	game.notebook_open=false
