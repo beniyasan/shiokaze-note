@@ -6,7 +6,7 @@ All visuals are original primitive pixel-style shapes; no Dragon Quest, Final Fa
 
 ## Saltmere town slice (v3 local refinement)
 
-The playable slice uses a 480×270 integer-scaled viewport over the same broad 64×40 world. Original generated pixel art (`assets/`) adds a hand-authored-feeling terrain texture, three building variants, trees, rocks, reeds, well, barrels, and a 16×24 hero sprite sheet with four facing directions and four walking frames. The town route runs from the plaza down a cobbled path to the pier; shallow water and building footprints have collision, while the pier remains a valid fishing route.
+The playable slice uses a 480×270 integer-scaled viewport over the same broad 64×40 world. Original generated pixel art (`assets/`) adds a hand-authored-feeling terrain texture, three building variants, trees, rocks, reeds, well, barrels, and a 32×48 hero sprite sheet with four facing directions and four walking frames. The protagonist is drawn at two tiles tall so the cap brim, fishing rod, layered vest, tackle bag, and separated legs retain the reference's authored 16-bit silhouette. The renderer keeps the existing feet anchor and 8×5 movement collider, so movement, collision, map layout, and fishing interactions are unchanged. The town route runs from the plaza down a cobbled path to the pier; shallow water and building footprints have collision, while the pier remains a valid fishing route.
 
 ## Fishing battle
 
