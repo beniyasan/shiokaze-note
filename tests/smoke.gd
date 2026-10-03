@@ -95,13 +95,20 @@ func run():
 	game._resolve_fishing_timing(0.5)
 	check(game.last_grade=='PERFECT' and game.combo>=1,'perfect timing awards grade and combo')
 	# The cast keeps a PERFECT-pool candidate, while the mini-game grade still
-	# changes quality: GOOD downgrades a high-rarity candidate to RARE, whereas
-	# PERFECT adopts the candidate unchanged.
+	# changes quality: ordinary GOOD downgrades a high-rarity candidate to RARE,
+	# whereas PERFECT adopts the candidate unchanged.
 	var high_candidate: Dictionary = game.FISH_SPECIES[15].duplicate(true)
 	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game._resolve_fishing_timing(0.34)
 	check(game.last_catch!=str(high_candidate.name) and game.last_rarity=='RARE' and game.last_catch_metadata.get('original_rarity','')=='EPIC' and game.last_catch_metadata.get('downgraded_from_species','')==str(high_candidate.name) and game.result_t<=2.0,'GOOD timing swaps EPIC candidate for a map-legal RARE without legendary reveal')
 	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game._resolve_fishing_timing(0.5)
 	check(game.last_catch==str(high_candidate.name) and game.last_rarity=='EPIC' and game.last_catch_metadata.get('original_rarity','')=='EPIC','PERFECT timing keeps the cast candidate rarity')
+	# The premium golden-tide cue is a cast-time guarantee: GOOD timing must not
+	# downgrade either premium rarity, including the full Legendary reveal path.
+	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game.fx_premium=true; game._resolve_fishing_timing(0.34)
+	check(game.last_catch==str(high_candidate.name) and game.last_rarity=='EPIC' and game.last_catch_metadata.get('original_rarity','')=='EPIC' and game.last_catch_metadata.get('downgraded_from_species','')=='','premium EPIC keeps its rarity on GOOD timing')
+	var premium_legendary: Dictionary = game.FISH_SPECIES[4].duplicate(true)
+	game._reset_fishing(); game.cast_candidate=premium_legendary.duplicate(true); game.fx_premium=true; game._resolve_fishing_timing(0.34)
+	check(game.last_catch==str(premium_legendary.name) and game.last_rarity=='LEGENDARY' and game.result_t>6.0 and game.result_toast_pending.begins_with('BIG CATCH!!'),'premium LEGENDARY keeps its rarity and reveal on GOOD timing')
 	check(game._promotion_max_stage('COMMON')==1 and game._promotion_max_stage('UNCOMMON')==1 and game._promotion_max_stage('RARE')==2 and game._promotion_max_stage('EPIC')==3 and game._promotion_max_stage('LEGENDARY')==3,'promotion stage cap follows candidate rank')
 	game.promotion_stage=3; game.promotion_reversal=true
 	check(game._visible_promotion_stage()==2,'reversal visibly steps the float back one stage')
