@@ -2,6 +2,9 @@ extends Node2D
 
 const FishingChallengeScript = preload("res://fishing_challenge.gd")
 const MusicDirectorScript = preload("res://audio/music_director.gd")
+const FxDirectorScript = preload("res://fx/fx_director.gd")
+const FxCanvasScript = preload("res://fx/fx_canvas.gd")
+const PostFxShader = preload("res://fx/post_fx.gdshader")
 
 # Original v2 world dimensions retained; viewport now shows a walkable slice.
 const TILE := 16
@@ -186,7 +189,6 @@ var last_grade := ""
 var last_catch := ""
 var last_rarity := ""
 var result_t := 0.0
-var flash_t := 0.0
 var shake_t := 0.0
 var fish_particle_t := 0.0
 var legendary_t := 0.0
@@ -205,6 +207,27 @@ var music: Node
 var se_player := AudioStreamPlayer.new()
 const SE_RATE := 22050.0
 var hud := Node2D.new()
+# Dopamine FX (see EFFECTS_DESIGN.md). The director owns the heat ladder and
+# timing; main only reports events. It exists before _ready so direct calls
+# from tests and old saves can never hit a null effect target.
+var fx: RefCounted = FxDirectorScript.new()
+var fx_back = FxCanvasScript.new()
+var fx_front = FxCanvasScript.new()
+var post_fx := ColorRect.new()
+var se_players: Array[AudioStreamPlayer] = []
+var fx_heat := 0
+var fx_bite_heat := 0
+var fx_school := false
+var fx_premium := false
+var fx_school_done := false
+var fx_premium_done := false
+var fx_last_stage := 0
+var fx_last_pull_shown := false
+# Reveal "summon light": the card glow starts at the heat the player was shown
+# and climbs (or fizzles) to the real result. -1 means no cue was seen (old
+# saves, direct calls), so the glow simply starts at the result.
+var reveal_glow_start := -1
+var fever_announce_pending := false
 
 func _music_call(method: String, args: Array = []) -> void:
 	# Music is an optional child so older exported checkouts can still boot. Keep
@@ -227,17 +250,40 @@ func _ready():
 	cam.limit_left = 0; cam.limit_top = 0
 	cam.limit_right = int(WORLD_SIZE.x); cam.limit_bottom = int(WORLD_SIZE.y)
 	add_child(cam)
-	var layer := CanvasLayer.new()
+	# Screen-space layers: FX back (darkening, letterbox, speed lines) sits
+	# between the world and the HUD; FX front (cut-ins, particles, flash) and the
+	# post-process pass sit above it.
+	var back_layer := CanvasLayer.new(); back_layer.layer = 1
+	add_child(back_layer); back_layer.add_child(fx_back)
+	fx_back.director = fx; fx_back.layer_kind = "back"
+	var layer := CanvasLayer.new(); layer.layer = 2
 	add_child(layer); layer.add_child(hud); hud.draw.connect(_draw_hud)
+	var front_layer := CanvasLayer.new(); front_layer.layer = 3
+	add_child(front_layer); front_layer.add_child(fx_front)
+	fx_front.director = fx; fx_front.layer_kind = "front"
+	var post_layer := CanvasLayer.new(); post_layer.layer = 4
+	add_child(post_layer)
+	var post_material := ShaderMaterial.new()
+	post_material.shader = PostFxShader
+	post_fx.material = post_material
+	post_fx.size = Vector2(480, 270)
+	post_fx.mouse_filter = Control.MOUSE_FILTER_IGNORE
+	post_fx.visible = false
+	post_layer.add_child(post_fx)
 	# Keep the arcade feedback self-contained: the short SE are synthesized in
 	# memory, so the game has no external audio-file dependency.
-	var generator := AudioStreamGenerator.new()
-	generator.mix_rate = SE_RATE
-	generator.buffer_length = 0.8
-	se_player.stream = generator
-	se_player.volume_db = -8.0
-	add_child(se_player)
-	se_player.play()
+	# A small pool lets an impact, a cut-in whoosh and a heartbeat overlap
+	# instead of queueing one after another on a single generator.
+	for i in range(4):
+		var player_node := se_player if i == 0 else AudioStreamPlayer.new()
+		var generator := AudioStreamGenerator.new()
+		generator.mix_rate = SE_RATE
+		generator.buffer_length = 1.0
+		player_node.stream = generator
+		player_node.volume_db = -8.0
+		add_child(player_node)
+		player_node.play()
+		se_players.append(player_node)
 	# The field loop is layered at runtime. MusicDirector is optional while the
 	# prototype is being opened from an older checkout, so keep gameplay usable
 	# if that script has not been imported yet.
@@ -516,6 +562,13 @@ func _move_player(dir: Vector2, delta: float):
 func _process(delta):
 	elapsed += delta
 	_advance_world_clock(delta)
+	# Hit-stop and slow motion scale only the fishing simulation; the clock,
+	# particles and camera keep real time so a freeze frame still feels alive.
+	# The tide ledger pauses the whole cue show together with the fishing
+	# simulation (see _sync_fx_outputs), so a banner, heartbeat or burst cannot
+	# play out behind it and the cue is still there when the ledger closes.
+	if not notebook_open: fx.update(delta)
+	var game_delta: float = delta * float(fx.time_scale())
 	if transition_active:
 		transition_t += delta
 		transition_fade = minf(1.0, transition_t / 0.22)
@@ -549,16 +602,58 @@ func _process(delta):
 		if Input.is_action_just_pressed("fish") and fishing_state == FishingState.IDLE:
 			if rumor_source_near() != "": talk_to_rumor_source()
 			else: _try_fish()
-		_process_fishing(delta)
+		_process_fishing(game_delta)
 	if Input.is_action_just_pressed("save_game"): _save_game()
+	if InputMap.has_action("fx_toggle") and Input.is_action_just_pressed("fx_toggle"): toggle_reduced_flash()
 	toast_t = maxf(0.0, toast_t-delta)
 	cam.position = player.round()
+	var base_offset := Vector2.ZERO
 	if shake_t > 0.0:
 		var shake_power := 8.0 if last_rarity == "LEGENDARY" else (4.0 if last_rarity == "RARE" else 2.0)
-		cam.offset = Vector2(sin(elapsed*80.0), cos(elapsed*71.0)) * shake_power * minf(1.0, shake_t*8.0)
-	else:
+		if fx.reduced: shake_power *= 0.4
+		base_offset = Vector2(sin(elapsed*80.0), cos(elapsed*71.0)) * shake_power * minf(1.0, shake_t*8.0)
+	if notebook_open:
+		# The paused show must not leave the world shaking or zoomed.
 		cam.offset = Vector2.ZERO
+		cam.zoom = Vector2.ONE
+	else:
+		cam.offset = base_offset + fx.shake_offset()
+		cam.zoom = Vector2.ONE * float(fx.zoom_factor())
+	_sync_fx_outputs()
 	queue_redraw(); hud.queue_redraw()
+
+func _sync_fx_outputs() -> void:
+	# While the tide ledger is open the show is paused: its layers are hidden so
+	# a frozen cut-in, letterbox or chromatic pass never sits over the ledger,
+	# and the music returns to normal until the cue resumes on close.
+	var show_visible := not notebook_open
+	fx_back.visible = show_visible
+	fx_front.visible = show_visible
+	if not show_visible:
+		post_fx.visible = false
+		_music_call("set_duck", [1.0])
+		return
+	# Sounds, music ducking, the FEVER frame and the post pass all read from
+	# the director once per frame, so effect code never touches audio nodes.
+	fx.set_fever(fever_active and not _fever_waiting())
+	for kind in fx.pop_sounds(): _play_se(kind)
+	_music_call("set_duck", [fx.music_duck])
+	var amount: float = fx.chroma()
+	post_fx.visible = amount > 0.001
+	if post_fx.visible and post_fx.material is ShaderMaterial:
+		(post_fx.material as ShaderMaterial).set_shader_parameter("amount", amount)
+	fx_back.queue_redraw(); fx_front.queue_redraw()
+
+func toggle_reduced_flash() -> void:
+	fx.reduced = not fx.reduced
+	toast = "FLASH  REDUCED  (F to restore)" if fx.reduced else "FLASH  NORMAL  (F to reduce)"
+	toast_t = 2.0
+
+# Screen position (480x270 HUD space) of the float, for splashes and pops.
+func _float_screen_pos() -> Vector2:
+	var world := player.round() + Vector2(15, 32)
+	if not is_inside_tree(): return Vector2(240, 160)
+	return get_viewport().get_canvas_transform() * world
 
 func _check_map_exit():
 	if transition_active: return
@@ -881,13 +976,15 @@ func _pick_good_substitute(candidate: Dictionary) -> Dictionary:
 	# downgrades do not funnel every catch into one species.
 	return rare_pool[rng.randi_range(0, rare_pool.size() - 1)].duplicate(true)
 
-func _candidate_for_grade(candidate: Dictionary, grade: String) -> Dictionary:
+func _candidate_for_grade(candidate: Dictionary, grade: String, premium_locked := false) -> Dictionary:
 	var resolved := candidate.duplicate(true)
 	# The cast roll is intentionally a PERFECT-pool candidate.  A GOOD timing
 	# result downgrades an EPIC/LEGENDARY candidate to the deterministic RARE
 	# substitute selected at cast time, so a Legendary species never enters the
-	# ledger from a low-grade battle.
-	if grade == "GOOD" and _rarity_rank(str(resolved.get("rarity", "COMMON"))) > _rarity_rank("RARE"):
+	# ledger from a low-grade battle. The premium golden-tide cue is an explicit
+	# exception: it promises an EPIC-or-better result, so GOOD timing cannot
+	# contradict that promise.
+	if grade == "GOOD" and not premium_locked and _rarity_rank(str(resolved.get("rarity", "COMMON"))) > _rarity_rank("RARE"):
 		var original_rarity := str(resolved.get("rarity", "COMMON"))
 		var original_species := str(resolved.get("name", "Unknown catch"))
 		var substitute := cast_good_candidate.duplicate(true)
@@ -1174,8 +1271,24 @@ func _commit_crown_record(species: String, metadata: Dictionary) -> bool:
 	best_records[species] = {"species":species,"size_cm":float(metadata.get("size_cm", 0.0)),"weight_kg":float(metadata.get("weight_kg", 0.0)),"day":int(metadata.get("day", day)),"map":str(metadata.get("map", current_map)),"spot":str(metadata.get("spot", "Open water")),"variant":str(metadata.get("variant", "Standard")),"grade":str(metadata.get("grade", "GOOD"))}
 	return true
 
+# FEVER is presented as one moment: the banner, flash, chime, music change and
+# rainbow frame all start when the catch that earned it is settled, and its
+# clock starts then too. While the choice is open, FEVER is "waiting".
+func _fever_waiting() -> bool:
+	return fever_announce_pending and catch_choice_pending()
+
+func _announce_fever_if_pending() -> void:
+	if fever_announce_pending and fever_active:
+		fever_announce_pending = false
+		fx.fever_start()
+		fever_flash_t = 1.0
+		_music_call("set_fever", [true])
+		_play_se("fever")
+	fever_announce_pending = false
+
 func register_pending_catch() -> bool:
 	if not catch_choice_pending(): return false
+	_announce_fever_if_pending()
 	var species := pending_catch_species()
 	var metadata := pending_catch.get("metadata", {}) as Dictionary
 	# The reward is granted only when the player explicitly registers/keeps the
@@ -1195,6 +1308,7 @@ func register_pending_catch() -> bool:
 
 func sell_pending_catch() -> bool:
 	if not catch_choice_pending(): return false
+	_announce_fever_if_pending()
 	var species := pending_catch_species()
 	var held := int(catches.get(species, 0))
 	# The catch was counted at landing.  Never decrement another specimen if a
@@ -1329,6 +1443,7 @@ func _try_fish():
 		promotion_reversal_armed = rng.randf() < PROMOTION_REVERSAL_CHANCE
 		cast_timer = 1.8
 		bite_delay = rng.randf_range(0.72, 1.42) * float(RODS[rod_index].get("bite_mult", 1.0))
+		_plan_cast_fx()
 		bite_timer = 0.0
 		face = 0
 		toast = "Line out... %s" % tackle_summary()
@@ -1338,12 +1453,63 @@ func _try_fish():
 	else:
 		toast = "Cast from the water's edge or the end of the pier"; toast_t = 3.0
 
+func _promotion_stage_limit() -> int:
+	if promotion_false_cue:
+		return _promotion_max_stage(str(["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"][clampi(promotion_cue_rank, 0, 4)]))
+	return _promotion_max_stage(promotion_target_rarity)
+
+func _rarity_heat(rarity: String) -> int:
+	# Results sit on the same blue/gold/purple/rainbow ladder as the float.
+	return mini(3, _rarity_rank(rarity))
+
+func _plan_cast_fx() -> void:
+	# Optional cues are rolled on the FX director's own RNG, never the gameplay
+	# RNG, so tuning a cut-in cannot change which fish bites or when.
+	var actual_rank := _rarity_rank(promotion_target_rarity)
+	fx_premium = fx.roll_premium(actual_rank)
+	fx_school = fx.roll_school(actual_rank)
+	if fx_premium:
+		# The premium cue never lies, so it also removes every fake-out: the
+		# downward false cue and the mid-wait reversal (a visible step back).
+		# Both were rolled before this call, so clearing them leaves the
+		# gameplay RNG stream untouched.
+		promotion_false_cue = false
+		promotion_reversal_armed = false
+		promotion_cue_rank = actual_rank
+	fx_heat = fx.HEAT_PREMIUM if fx_premium else _promotion_stage_limit()
+	bite_delay += float(fx.wait_extension(fx_heat))
+	fx_bite_heat = 0
+	fx_school_done = false
+	fx_premium_done = false
+	fx_last_stage = 0
+	fx_last_pull_shown = false
+	reveal_glow_start = -1
+	fx.cast(fx_heat)
+
+func _update_cue_fx(promotion_progress: float) -> void:
+	var float_pos := _float_screen_pos()
+	if fx_premium and not fx_premium_done and promotion_progress >= 0.12:
+		fx_premium_done = true
+		fx.premium_omen()
+	if fx_school and not fx_school_done and promotion_progress >= 0.38:
+		fx_school_done = true
+		fx.school_pass()
+	var visible_stage := _visible_promotion_stage()
+	if visible_stage > fx_last_stage:
+		fx.cue_step(visible_stage, float_pos)
+	elif visible_stage < fx_last_stage:
+		fx.cue_reversal(float_pos)
+	fx_last_stage = visible_stage
+
 func _process_fishing(delta: float):
 	# Notebook and map transitions pause fishing; the same pause applies here.
 	var choice_changed := false
 	# Thirty seconds leaves room for the reveal and another full tug-of-war.
 	fever_flash_t = maxf(0.0, fever_flash_t - delta)
-	if fever_active:
+	# FEVER's clock starts when it is announced, i.e. when the catch that earned
+	# it is settled. While that choice is still open the clock holds, so a result
+	# left on screen cannot burn FEVER down (and lose its banner) unseen.
+	if fever_active and not _fever_waiting():
 		fever_t = maxf(0.0, fever_t - delta)
 		if fever_t <= 0.0:
 			_break_chain()
@@ -1359,13 +1525,19 @@ func _process_fishing(delta: float):
 		var stage_bias := 0.12 * float(promotion_cue_rank) + promotion_rescue_bonus * 0.60
 		var cue_progress := clampf(promotion_progress + stage_bias, 0.0, 1.0)
 		var raw_stage := 3 if cue_progress >= 0.86 else (2 if cue_progress >= 0.62 else (1 if cue_progress >= 0.34 else 0))
-		var stage_limit := _promotion_max_stage(promotion_target_rarity)
-		if promotion_false_cue: stage_limit = _promotion_max_stage(str(["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"][promotion_cue_rank]))
-		promotion_stage = mini(raw_stage, stage_limit)
+		promotion_stage = mini(raw_stage, _promotion_stage_limit())
 		if promotion_reversal_armed and promotion_progress > 0.62 and promotion_progress < 0.76: promotion_reversal = true
+		_update_cue_fx(promotion_progress)
 		cast_timer = maxf(0.0, cast_timer-delta)
 		if bite_timer >= bite_delay:
 			fishing_state = FishingState.TIMING
+			# The heat the player actually saw decides the reach and where the
+			# reveal's summon light starts.
+			fx_bite_heat = fx.HEAT_PREMIUM if fx_premium else _visible_promotion_stage()
+			# Only purple-or-hotter cues are a promise the reveal can break with
+			# a fizzle; a gold float is too common to deflate every catch.
+			reveal_glow_start = mini(3, fx_bite_heat) if fx_bite_heat >= 2 else mini(fx_bite_heat, _rarity_heat(promotion_target_rarity))
+			fx.bite(fx_bite_heat, _float_screen_pos())
 			# A bite opens a short tug-of-war instead of a one-frame skill check.
 			# The fish must be controlled through several good inputs.
 			fish_hp_max = 10 + mini(combo, 4)
@@ -1392,7 +1564,6 @@ func _process_fishing(delta: float):
 			challenge_hint_t = 2.4
 			toast = "BITE!  Keep the line in the gold zone!"
 			toast_t = 2.0
-			flash_t = 0.12
 			_play_se("bite")
 			_play_se("battle_start")
 		elif Input.is_action_just_pressed("fish"):
@@ -1424,6 +1595,7 @@ func _process_fishing(delta: float):
 		gauge += delta * (1.25 + battle_tension * 0.75) * gauge_direction
 		if gauge >= 1.0: gauge = 1.0; gauge_direction = -1.0
 		if gauge <= 0.0: gauge = 0.0; gauge_direction = 1.0
+		fx.set_danger(battle_tension)
 		if timing_timer <= 0.0 or battle_tension >= 1.0 or battle_escape >= 1.0:
 			# Running out of line is a miss even if the fish was nearly tired.
 			_resolve_fishing_timing(-1.0)
@@ -1464,30 +1636,62 @@ func _process_fishing(delta: float):
 			if previous_legendary_t < 0.82 and legendary_t >= 0.82:
 				legendary_stage = maxi(legendary_stage, 1)
 				_play_se("rise")
-				flash_t = maxf(flash_t, 0.42)
 				shake_t = maxf(shake_t, 0.65)
+				fx.legendary_crack()
 			if previous_legendary_t < 2.05 and legendary_t >= 2.05:
 				legendary_stage = maxi(legendary_stage, 2)
 				_play_se("peak")
-				flash_t = maxf(flash_t, 1.35)
 				shake_t = maxf(shake_t, 1.8)
+				fx.legendary_shatter()
 			if previous_legendary_t < 3.75 and legendary_t >= 3.75:
 				legendary_stage = maxi(legendary_stage, 3)
 				_play_se("after")
+				fx.legendary_afterglow()
 		elif last_grade != "MISS":
 			var previous_reveal_t := reveal_t
 			var reveal_duration := 1.24 if reveal_shortened else 2.0
 			reveal_t = minf(reveal_t + delta, reveal_duration)
 			reveal_stage = _reveal_stage_at(reveal_t, last_rarity)
-			# A single gentle chime marks the flip; no rapid white flashes.
+			# A single gentle chime marks the turn; the FX director adds the
+			# summon-light promotions and one rarity-scaled burst on the face.
 			var flip_time := 0.92 if reveal_shortened else 1.48
 			if previous_reveal_t < flip_time and reveal_t >= flip_time:
 				_play_se("rise")
+			for step in _reveal_glow_plan():
+				if previous_reveal_t < float(step.t) and reveal_t >= float(step.t):
+					if str(step.kind) == "promote": fx.reveal_promote(int(step.rank))
+					else: fx.reveal_fizzle()
+			var face_time := _reveal_face_time()
+			if previous_reveal_t < face_time and reveal_t >= face_time:
+				fx.reveal_flip(_rarity_heat(last_rarity), bool(last_catch_metadata.get("first_capture", false)), bool(last_catch_metadata.get("crown", false)))
 	if not choice_changed:
 		_flush_result_toast()
-	flash_t = maxf(0.0, flash_t-delta)
 	shake_t = maxf(0.0, shake_t-delta)
 	fish_particle_t += delta
+
+func _reveal_face_time() -> float:
+	return 1.78 * (0.62 if reveal_shortened else 1.0)
+
+# The summon light's steps on the reveal clock: each step up is a "promotion"
+# (gacha-style 昇格); a cue that promised more than the catch fizzles down once.
+func _reveal_glow_plan() -> Array[Dictionary]:
+	var plan: Array[Dictionary] = []
+	if last_rarity == "" or last_rarity == "LEGENDARY": return plan
+	var result := _rarity_heat(last_rarity)
+	var start := result if reveal_glow_start < 0 else reveal_glow_start
+	var scale := 0.62 if reveal_shortened else 1.0
+	if start < result:
+		for k in range(1, result - start + 1):
+			plan.append({"t": (0.86 + float(k - 1) * 0.18) * scale, "rank": start + k, "kind": "promote"})
+	elif start > result:
+		plan.append({"t": 0.86 * scale, "rank": result, "kind": "fizzle"})
+	return plan
+
+func _reveal_glow_rank_at(time: float) -> int:
+	var rank := _rarity_heat(last_rarity) if reveal_glow_start < 0 else reveal_glow_start
+	for step in _reveal_glow_plan():
+		if time >= float(step.t): rank = int(step.rank)
+	return rank
 
 # Stage boundaries are fixed so a seed, frame rate, or renderer cannot change
 # the order of the reveal.  Legendary reuses its existing six-second timing;
@@ -1530,11 +1734,10 @@ func _rarity_color(rarity: String) -> Color:
 		_: return Color("#b7c3d7")
 
 func _start_fever() -> void:
+	# State only. The catch that earned FEVER is still being revealed, so its
+	# presentation is deferred to _announce_fever_if_pending (see _fever_waiting).
 	fever_active = true
 	fever_t = FEVER_DURATION
-	fever_flash_t = 1.0
-	_music_call("set_fever", [true])
-	_play_se("fever")
 
 # Shown when a miss ends a chain, so a near-FEVER loss reads as a near miss.
 func _chain_break_note(lost_combo: int, lost_fever: bool) -> String:
@@ -1549,6 +1752,7 @@ func _break_chain() -> void:
 	fever_active = false
 	fever_t = 0.0
 	fever_flash_t = 0.0
+	fever_announce_pending = false
 	_music_call("set_fever", [false])
 	_music_call("set_combo", [0])
 
@@ -1560,6 +1764,7 @@ func _resolve_fishing_timing(position: float):
 		promotion_false_cue_revealed = promotion_false_cue
 		promotion_result_label = ""
 		chain_break_text = _chain_break_note(combo, fever_active)
+		fx.miss(_float_screen_pos(), chain_break_text.begins_with("惜しい"))
 		_break_chain()
 		_advance_pity("MISS")
 		last_catch = "The fish got away"
@@ -1600,8 +1805,11 @@ func _resolve_fishing_timing(position: float):
 		picked = _pick_cast_candidate(rescue_was_ready)
 		cast_candidate = picked.duplicate(true)
 	var candidate_rarity := str(picked.get("rarity", "COMMON"))
-	picked = _candidate_for_grade(picked, grade)
-	var legendary := grade == "PERFECT" and str(picked.get("rarity", "COMMON")) == "LEGENDARY"
+	# Golden tide is a cast-time guarantee. Keep its EPIC/LEGENDARY candidate
+	# intact through a GOOD timing result instead of downgrading it to RARE.
+	var premium_locked := fx_premium and _rarity_rank(candidate_rarity) >= _rarity_rank("EPIC")
+	picked = _candidate_for_grade(picked, grade, premium_locked)
+	var legendary := str(picked.get("rarity", "COMMON")) == "LEGENDARY"
 	var result_rank := _rarity_rank(str(picked.get("rarity", "COMMON")))
 	var candidate_rank := _rarity_rank(candidate_rarity)
 	var effective_cue_rank := maxi(0, promotion_cue_rank - (1 if promotion_reversal else 0))
@@ -1623,6 +1831,11 @@ func _resolve_fishing_timing(position: float):
 		_advance_pity("GOOD")
 	_music_call("set_combo", [combo])
 	_music_call("play_fanfare", [legendary])
+	fx.landed(_rarity_heat(last_rarity), last_rarity == "LEGENDARY", _float_screen_pos())
+	if fever_started:
+		# Announce FEVER when the player settles this catch, so the banner
+		# never covers the reveal that earned it and leads into the next cast.
+		fever_announce_pending = true
 	fish_count += 1
 	catches[last_catch] = int(catches.get(last_catch,0))+1
 	var resolved_metadata := _record_catch_metadata(picked, grade)
@@ -1634,7 +1847,6 @@ func _resolve_fishing_timing(position: float):
 	reveal_t = 0.0
 	reveal_stage = 0
 	result_t = 6.2 if last_rarity == "LEGENDARY" else 2.0
-	flash_t = 0.90 if last_rarity == "LEGENDARY" else (0.32 if last_rarity == "RARE" else 0.18)
 	shake_t = 1.10 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
 	_play_se("catch" if last_rarity != "LEGENDARY" else "legendary")
 	var catch_toast := ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch
@@ -1663,6 +1875,7 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 			battle_escape = clampf(battle_escape + 0.12, 0.0, 1.0)
 			shake_t = 0.24
 			_play_se("danger")
+			fx.strain(_float_screen_pos())
 			toast = "CHALLENGE MISSED!  " + challenge_round_event
 			toast_t = 1.2
 			if battle_tension >= 1.0 or battle_escape >= 1.0:
@@ -1681,6 +1894,7 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 		battle_escape = clampf(battle_escape + 0.16, 0.0, 1.0)
 		shake_t = 0.28
 		_play_se("danger")
+		fx.strain(_float_screen_pos())
 		toast = "LINE STRAIN! Counter the fish, then try again"
 		toast_t = 1.2
 		if battle_tension >= 1.0 or battle_escape >= 1.0:
@@ -1696,8 +1910,11 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	battle_escape = maxf(0.0, battle_escape - (0.24 if grade == "PERFECT" else 0.11))
 	gauge_direction = -gauge_direction
 	shake_t = maxf(shake_t, 0.14 + battle_hits * 0.06)
-	flash_t = maxf(flash_t, 0.10 + battle_hits * 0.025)
 	_play_se("perfect_tug" if grade == "PERFECT" else "tug")
+	fx.pull(grade, _float_screen_pos(), battle_hits, 1.0 - float(fish_hp) / maxf(1.0, float(fish_hp_max)))
+	if fish_hp > 0 and fish_hp <= 2 and not fx_last_pull_shown:
+		fx_last_pull_shown = true
+		fx.last_pull(fx_bite_heat, _float_screen_pos())
 	if fish_hp <= 0:
 		# Preserve the strongest grade across the battle for rarity/combos.
 		_resolve_fishing_timing(0.5 if perfect_pulls * 2 >= battle_hits else 0.34)
@@ -1705,17 +1922,33 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	toast = ("PERFECT PULL!  " if grade == "PERFECT" else "GOOD PULL!  ") + "Fish stamina %d/%d" % [fish_hp, fish_hp_max]
 	toast_t = 0.9
 
+func _se_playback() -> AudioStreamGeneratorPlayback:
+	# Pick the pool voice with the most free buffer so overlapping cues mix.
+	var best: AudioStreamGeneratorPlayback = null
+	var best_free := -1
+	var pool: Array = se_players if not se_players.is_empty() else [se_player]
+	for node in pool:
+		if node == null or node.stream == null or not node.playing: continue
+		var playback := node.get_stream_playback() as AudioStreamGeneratorPlayback
+		if playback == null: continue
+		var free := playback.get_frames_available()
+		if free > best_free:
+			best_free = free
+			best = playback
+	return best
+
 func _play_se(kind: String):
 	# Tiny procedural chimes keep the feedback punchy while avoiding bundled
 	# copyrighted assets. In headless tests the audio server may be absent, so
 	# every step is guarded and simply becomes a no-op there.
-	if se_player == null or se_player.stream == null: return
-	var playback := se_player.get_stream_playback() as AudioStreamGeneratorPlayback
+	var playback := _se_playback()
 	if playback == null: return
 	var duration := 0.18
 	var base := 280.0
 	var volume := 0.22
 	var sweep := 0.0
+	var noise := 0.0
+	var decay := 0.06
 	var tones: Array = []
 	match kind:
 		"cast":
@@ -1744,6 +1977,45 @@ func _play_se(kind: String):
 			base = 261.6; duration = 0.72; volume = 0.44; sweep = 80.0; tones = [329.6, 392.0, 523.2, 659.2]
 		"after":
 			base = 783.9; duration = 0.64; volume = 0.28; sweep = -260.0; tones = [523.2, 392.0]
+		# ---- dopamine FX cues (EFFECTS_DESIGN.md) ----
+		"step1":
+			base = 660.0; duration = 0.2; volume = 0.24; sweep = 330.0; tones = [990.0]
+		"step2":
+			base = 311.1; duration = 0.42; volume = 0.3; sweep = -30.0; tones = [370.0, 466.2]; decay = 0.2
+		"step3":
+			base = 523.2; duration = 0.55; volume = 0.34; sweep = 520.0; tones = [784.0, 1046.5]; noise = 0.12
+		"heartbeat":
+			base = 58.0; duration = 0.34; volume = 0.6; sweep = -12.0
+		"cutin":
+			base = 240.0; duration = 0.34; volume = 0.3; sweep = 900.0; noise = 0.5; tones = [523.2, 659.2]
+		"fizzle":
+			base = 330.0; duration = 0.26; volume = 0.16; sweep = -220.0
+		"school":
+			base = 880.0; duration = 0.5; volume = 0.2; sweep = 440.0; tones = [1318.5]; noise = 0.06
+		"premium":
+			base = 1046.5; duration = 0.95; volume = 0.3; tones = [1568.0, 2093.0, 2637.0]; decay = 0.8
+		"impact":
+			base = 110.0; duration = 0.13; volume = 0.42; sweep = -60.0; noise = 0.35
+		"landed":
+			base = 196.0; duration = 0.38; volume = 0.36; sweep = 200.0; tones = [392.0, 587.3]; noise = 0.2
+		"snap":
+			base = 900.0; duration = 0.22; volume = 0.26; sweep = -760.0; noise = 0.6
+		"promote":
+			base = 700.0 + 0.0; duration = 0.24; volume = 0.32; sweep = 520.0; tones = [1050.0, 1400.0]
+		"flip0":
+			base = 523.2; duration = 0.2; volume = 0.2; tones = [659.2]
+		"flip1":
+			base = 523.2; duration = 0.26; volume = 0.24; tones = [659.2, 784.0]
+		"flip2":
+			base = 587.3; duration = 0.36; volume = 0.3; sweep = 120.0; tones = [740.0, 880.0, 1174.7]; noise = 0.08
+		"flip3":
+			base = 523.2; duration = 0.6; volume = 0.36; sweep = 260.0; tones = [659.2, 784.0, 1046.5, 1318.5]; noise = 0.12; decay = 0.3
+		"stamp":
+			base = 150.0; duration = 0.12; volume = 0.42; sweep = -40.0; noise = 0.4
+		"crack":
+			base = 1600.0; duration = 0.28; volume = 0.3; sweep = -1100.0; noise = 0.8
+		"shatter":
+			base = 620.0; duration = 0.7; volume = 0.38; sweep = -380.0; noise = 0.6; tones = [523.2, 659.2, 784.0]; decay = 0.4
 		_: return
 	var frames := int(duration * SE_RATE)
 	for i in range(frames):
@@ -1754,9 +2026,16 @@ func _play_se(kind: String):
 		var sample := sin(TAU * freq * t) * 0.72
 		for tone in tones:
 			sample += sin(TAU * float(tone) * t) * 0.24
+		if noise > 0.0:
+			# Hash noise keeps whooshes and cracks deterministic and cheap.
+			var n := absf(fmod(sin(float(i) * 12.9898) * 43758.5453, 1.0))
+			sample = lerpf(sample, n * 2.0 - 1.0, noise)
 		# Quick attack and musical tail; no click at the boundaries.
-		var envelope := minf(1.0, t / 0.018) * minf(1.0, (duration - t) / 0.06)
-		playback.push_frame(Vector2.ONE * sample * volume * envelope)
+		var envelope := minf(1.0, t / 0.018) * minf(1.0, (duration - t) / decay)
+		if kind == "heartbeat":
+			# Two low thumps: lub-dub.
+			envelope = exp(-t / 0.035) + (exp(-(t - 0.16) / 0.04) * 0.8 if t >= 0.16 else 0.0)
+		playback.push_frame(Vector2.ONE * sample * volume * clampf(envelope, 0.0, 1.0))
 
 func _finish_cast():
 	# Compatibility helper for old saves/tests: resolve a generous GOOD hit.
@@ -1816,6 +2095,11 @@ func _reset_fishing():
 	promotion_reversal = false
 	promotion_result_label = ""
 	promotion_rescue_bonus = 0.0
+	fx.clear_show()
+	fx_premium = false
+	fx_school = false
+	fx_last_stage = 0
+	reveal_glow_start = -1
 	toast = "Ready to cast"
 	toast_t = 1.2
 
@@ -1823,7 +2107,7 @@ func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		toast = "Could not save. Please check available storage."; toast_t = 4; return
-	f.store_string(JSON.stringify({"version":13,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"weather":weather,"season":season,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"heard_rumors":heard_rumors,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected,"pending_catch":pending_catch,"pending_catch_state":pending_catch_state,"last_catch_decision":last_catch_decision,"reveal_t":reveal_t,"reveal_stage":reveal_stage,"reveal_shortened":reveal_shortened,"legendary_t":legendary_t,"legendary_stage":legendary_stage}))
+	f.store_string(JSON.stringify({"version":13,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"weather":weather,"season":season,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"heard_rumors":heard_rumors,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected,"pending_catch":pending_catch,"pending_catch_state":pending_catch_state,"last_catch_decision":last_catch_decision,"reveal_t":reveal_t,"reveal_stage":reveal_stage,"reveal_shortened":reveal_shortened,"legendary_t":legendary_t,"legendary_stage":legendary_stage,"fx_reduced":fx.reduced,"fever_announce_pending":fever_announce_pending and fever_active and catch_choice_pending()}))
 	toast = "Saved to the tide ledger"; toast_t = 2.4
 
 func _normalize_catch_metadata(raw: Dictionary, species: String, first_capture := true) -> Dictionary:
@@ -1852,6 +2136,7 @@ func _load_game(path: String = SAVE_PATH):
 	var data = JSON.parse_string(FileAccess.get_file_as_string(path))
 	if not data is Dictionary: return
 	var loaded_map := str(data.get("map","town"))
+	fx.reduced = bool(data.get("fx_reduced", false))
 	if loaded_map in ["town","beach","rocky"] and loaded_map != current_map:
 		current_map = loaded_map; _build_map(current_map)
 	day = maxi(1,int(data.get("day",1))); fish_count = maxi(0,int(data.get("fish",0)))
@@ -1992,7 +2277,12 @@ func _load_game(path: String = SAVE_PATH):
 	fever_active = fever_t > 0.0 and combo >= FEVER_THRESHOLD
 	if not fever_active: fever_t = 0.0
 	fever_flash_t = 0.0
-	_music_call("set_fever", [fever_active])
+	# A banner request belongs to the held catch that earned FEVER. It comes back
+	# from the save only together with that catch and the running FEVER; it is
+	# never inherited from this session's memory (a stale one would hold the
+	# restored clock), and older saves without the key simply have none.
+	fever_announce_pending = bool(data.get("fever_announce_pending", false)) and fever_active and catch_choice_pending()
+	_music_call("set_fever", [fever_active and not fever_announce_pending])
 	_music_call("set_combo", [combo])
 	toast = "Welcome back to Saltmere"; toast_t = 3
 
@@ -2030,6 +2320,15 @@ func _draw():
 		if visible_stage == 1: float_color = Color("#f0c65a")
 		elif visible_stage == 2: float_color = Color("#b383ff")
 		elif visible_stage >= 3: float_color = Color.from_hsv(fmod(elapsed*0.22,1.0),0.72,1.0)
+		if fx_premium and fx_premium_done: float_color = Color("#ffd44a").lerp(Color.WHITE, 0.3 + 0.3 * sin(elapsed * 8.0))
+		# Rings spread from the float; hotter cues ring faster and wider.
+		if visible_stage >= 1 or (fx_premium and fx_premium_done):
+			var rings := 2 + visible_stage
+			for r in range(rings):
+				var phase := fmod(elapsed * (0.8 + visible_stage * 0.35) + float(r) / float(rings), 1.0)
+				draw_arc(float_pos + Vector2(1, 2), 4.0 + phase * (8.0 + visible_stage * 6.0), 0, TAU, 20, Color(float_color, (1.0 - phase) * 0.7), 1.0)
+		if visible_stage >= 2:
+			draw_circle(float_pos+Vector2(1,1), 7.0 + sin(elapsed*12.0) * 1.5, Color(float_color, 0.22))
 		draw_circle(float_pos+Vector2(1,1),3.0+sin(elapsed*10)*1.2,float_color)
 
 func _exit_markers() -> Array[Dictionary]:
@@ -2178,7 +2477,7 @@ func _draw_result_status_hud():
 	hud_bar(Vector2(14,80),Vector2(76,4),fever_t / FEVER_DURATION if fever_active else float(combo) / FEVER_THRESHOLD,Color("#efbf69"))
 	_text(Vector2(14,99),_pity_label(),7)
 	if fever_flash_t > 0.0:
-		hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fever_flash_t*0.10))
+		hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fx.soft_overlay(fever_flash_t*0.10)))
 
 func _draw_hud():
 	_panel(Rect2(8,8,174,34))
@@ -2214,9 +2513,10 @@ func _draw_hud():
 			_text(Vector2(195,21),("FEVER %.0fs" % ceilf(fever_t)) if fever_active else ("CHAIN %d/%d" % [combo, FEVER_THRESHOLD]),10)
 			hud_bar(Vector2(195,27),Vector2(85,4),fever_t / FEVER_DURATION if fever_active else float(combo) / FEVER_THRESHOLD,Color("#efbf69"))
 			_panel(Rect2(188,40,100,18))
-			_text(Vector2(195,53),_pity_label(),8)
+			# Seven points keeps "RESCUE 2/3  PURPLE+16%" inside the 100px panel.
+			_text(Vector2(195,53),_pity_label(),7)
 			if fever_flash_t > 0.0:
-				hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fever_flash_t*0.10))
+				hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.62,0.18,fx.soft_overlay(fever_flash_t*0.10)))
 	if notebook_open:
 		_panel(Rect2(66,51,348,194),true)
 		_text(Vector2(85,75),"THE TIDE LEDGER",17,true)
@@ -2253,49 +2553,49 @@ func _draw_hud():
 		_text(Vector2(85,220),"N close  /  A D read rumors" + ("  /  grotto opens at %d%%" % HIDDEN_SPOT_COLLECTION_PERCENT if rumor_found and not hidden_spot_unlocked else ""),8,true)
 
 func _draw_fishing_hud():
-	if fishing_state == FishingState.TIMING:
-		var power := 1.0 - float(fish_hp) / maxf(1.0,fish_hp_max)
-		for i in range(14):
-			var a := float(i) * TAU / 14.0 + elapsed * 0.16
-			var start := Vector2(240,126) + Vector2(cos(a),sin(a))* (140.0 + power * 55.0)
-			var end := Vector2(240,126) + Vector2(cos(a),sin(a))* 350.0
-			hud.draw_line(start,end,Color.from_hsv(float(i)/14.0,0.55,1.0,0.10+power*0.46),2.0+power*3.0)
+	# Speed lines, letterbox and danger edges now live on the FX back layer.
 	var challenge_live: bool = fishing_challenge != null and not fishing_challenge.done
 	var challenge_offset := 30 if challenge_live else 0
+	if fishing_state == FishingState.ANTICIPATING:
+		# The wait is the stage for the cue show: keep the world and the float
+		# visible and put the readout in a slim strip near the bottom.
+		_panel(Rect2(96,180,288,36))
+		var p := clampf(bite_timer / maxf(0.01,bite_delay), 0.0, 1.0)
+		var stage := _visible_promotion_stage()
+		var cue: String = ["FLOAT BLUE  /  quiet water", "FLOAT GOLD  /  chance", "FLOAT PURPLE  /  hold your breath", "RAINBOW  /  激アツ"][stage]
+		if fx_premium and fx_premium_done: cue = "GOLDEN TIDE  /  確定"
+		_text(Vector2(106,195), cue, 10)
+		var bar_col: Color = Color("#ffd44a") if fx_premium and fx_premium_done else _heat_draw_color(stage, elapsed)
+		if stage == 0 and not (fx_premium and fx_premium_done): bar_col = Color("#6c9b91")
+		hud_bar(Vector2(106,202),Vector2(268,5),p,bar_col)
+		if promotion_rescue_bonus > 0.0:
+			_text(Vector2(106,213), "RESCUE TIDE  /  PURPLE+ cue +%d%%" % int(round(promotion_rescue_bonus * 100.0)), 7)
+		return
 	var panel := Rect2(96,48,288,160 + challenge_offset)
 	_panel(panel)
-	_text(Vector2(114,70), "FISHING  /  " + ("WAIT FOR THE BITE" if fishing_state == FishingState.ANTICIPATING else "TUG-OF-WAR"), 12)
-	if fishing_state == FishingState.ANTICIPATING:
-		var p := clampf(bite_timer / maxf(0.01,bite_delay), 0.0, 1.0)
-		hud_bar(Vector2(114,98),Vector2(252,8),p,Color("#6c9b91"))
-		var cue: String = ["FLOAT BLUE  /  quiet water", "FLOAT GOLD  /  promotion cue", "FLOAT PURPLE  /  hold your breath", "RAINBOW PROMOTION  /  BITE!"][_visible_promotion_stage()]
-		_text(Vector2(114,123), cue, 10)
-		_text(Vector2(114,137), "Read the float, then trust your timing", 8)
-		if promotion_rescue_bonus > 0.0:
-			_text(Vector2(114,149), "RESCUE TIDE  /  PURPLE+ cue +%d%%" % int(round(promotion_rescue_bonus * 100.0)), 8)
-	else:
-		if challenge_live:
-			_text(Vector2(114,86), fishing_challenge.round_label(), 9)
-			_text(Vector2(114,99), _challenge_prompt(), 8)
-			if challenge_hint_t > 0.0 and challenge_round_event != "":
-				_text(Vector2(114,110), challenge_round_event, 8)
-		var gauge_y := 98.0 + challenge_offset
-		# Gold center zone is the PERFECT band; wider teal band is GOOD.
-		_text(Vector2(114,87 + challenge_offset), "TIME %02ds   /   PULLS %d" % [ceili(maxf(0.0,timing_timer)),battle_hits], 9)
-		hud_bar(Vector2(114,gauge_y),Vector2(252,12),1.0,Color("#355a5a"))
-		hud_bar(Vector2(114+252*0.26,gauge_y),Vector2(252*0.54,12),1.0,Color("#7eb59d"))
-		hud_bar(Vector2(114+252*0.42,gauge_y),Vector2(252*0.20,12),1.0,Color("#edc467"))
-		if challenge_live:
-			_draw_challenge_target(Vector2(114,gauge_y),Vector2(252,12))
-		hud.draw_rect(Rect2(114+252*gauge-2,gauge_y-4,4,20),Color("#fff3c2"))
-		_text(Vector2(114,128 + challenge_offset), ("SPACE  PULL NOW!" if pull_cooldown <= 0.0 else "Recover... wait for next pull"), 11)
-		_text(Vector2(114,145 + challenge_offset), "FISH STAMINA  %d / %d" % [fish_hp,fish_hp_max], 9)
-		hud_bar(Vector2(114,151 + challenge_offset),Vector2(252,6),float(fish_hp)/maxf(1.0,fish_hp_max),Color("#a45f69"))
-		_text(Vector2(114,171 + challenge_offset), "LINE TENSION", 9)
-		hud_bar(Vector2(194,166 + challenge_offset),Vector2(172,6),battle_tension,Color("#bd7b58"))
-		_text(Vector2(114,186 + challenge_offset), "FISH " + ("<" if battle_direction < 0 else ">") + "  HOLD " + ("RIGHT" if battle_direction < 0 else "LEFT") + " TO COUNTER", 10)
-		_text(Vector2(114,201 + challenge_offset), "ESCAPE", 8)
-		hud_bar(Vector2(151,195 + challenge_offset),Vector2(215,4),battle_escape,Color("#c06363"))
+	_text(Vector2(114,70), "FISHING  /  TUG-OF-WAR", 12)
+	if challenge_live:
+		_text(Vector2(114,86), fishing_challenge.round_label(), 9)
+		_text(Vector2(114,99), _challenge_prompt(), 8)
+		if challenge_hint_t > 0.0 and challenge_round_event != "":
+			_text(Vector2(114,110), challenge_round_event, 8)
+	var gauge_y := 98.0 + challenge_offset
+	# Gold center zone is the PERFECT band; wider teal band is GOOD.
+	_text(Vector2(114,87 + challenge_offset), "TIME %02ds   /   PULLS %d" % [ceili(maxf(0.0,timing_timer)),battle_hits], 9)
+	hud_bar(Vector2(114,gauge_y),Vector2(252,12),1.0,Color("#355a5a"))
+	hud_bar(Vector2(114+252*0.26,gauge_y),Vector2(252*0.54,12),1.0,Color("#7eb59d"))
+	hud_bar(Vector2(114+252*0.42,gauge_y),Vector2(252*0.20,12),1.0,Color("#edc467"))
+	if challenge_live:
+		_draw_challenge_target(Vector2(114,gauge_y),Vector2(252,12))
+	hud.draw_rect(Rect2(114+252*gauge-2,gauge_y-4,4,20),Color("#fff3c2"))
+	_text(Vector2(114,128 + challenge_offset), ("SPACE  PULL NOW!" if pull_cooldown <= 0.0 else "Recover... wait for next pull"), 11)
+	_text(Vector2(114,145 + challenge_offset), "FISH STAMINA  %d / %d" % [fish_hp,fish_hp_max], 9)
+	hud_bar(Vector2(114,151 + challenge_offset),Vector2(252,6),float(fish_hp)/maxf(1.0,fish_hp_max),Color("#a45f69"))
+	_text(Vector2(114,171 + challenge_offset), "LINE TENSION", 9)
+	hud_bar(Vector2(194,166 + challenge_offset),Vector2(172,6),battle_tension,Color("#bd7b58"))
+	_text(Vector2(114,186 + challenge_offset), "FISH " + ("<" if battle_direction < 0 else ">") + "  HOLD " + ("RIGHT" if battle_direction < 0 else "LEFT") + " TO COUNTER", 10)
+	_text(Vector2(114,201 + challenge_offset), "ESCAPE", 8)
+	hud_bar(Vector2(151,195 + challenge_offset),Vector2(215,4),battle_escape,Color("#c06363"))
 
 func _challenge_prompt() -> String:
 	if fishing_challenge == null: return ""
@@ -2391,8 +2691,6 @@ func _draw_fishing_result():
 		_text(Vector2(116,160),"SPACE  cast again",10)
 	else:
 		_text(Vector2(116,155),"SPACE  cast again",11)
-	if flash_t > 0.0:
-		hud.draw_rect(Rect2(0,0,480,270),Color(1.0,0.9,0.55,flash_t*0.28))
 	if last_grade != "MISS":
 		var sparkle_color := Color("#ffffff") if last_rarity == "LEGENDARY" else (Color("#f8dc75") if last_rarity == "RARE" else Color("#c6e6b7"))
 		var sparkle_count := 28 if last_rarity == "LEGENDARY" else (20 if last_rarity == "EPIC" else (14 if last_rarity == "RARE" else 7))
@@ -2418,19 +2716,29 @@ func _draw_standard_reveal_result():
 	if t >= flip_start and t < flip_end:
 		card_half_width = maxf(7.0, 136.0 * absf(cos(flip_p * PI)))
 	var card_rect := Rect2(center.x - card_half_width, 35, card_half_width * 2.0, 211)
+	# Summon light: the card glows in the heat the player was promised, then
+	# steps up (or fizzles) to the real result before the flip.
+	var glow_rank := _reveal_glow_rank_at(t)
+	var glow_col := _heat_draw_color(glow_rank, t)
+	var glow_amt := (0.55 + 0.3 * pulse) * (0.6 + 0.4 * float(glow_rank) / 3.0)
+	for g in range(6):
+		hud.draw_rect(card_rect.grow(3.0 + g * 5.0), Color(glow_col, glow_amt * (0.24 - g * 0.035)))
 	_panel(card_rect)
 	hud.draw_rect(card_rect.grow(-5), Color(0.06, 0.10, 0.18, 0.72))
+	hud.draw_rect(card_rect.grow(-3), Color(glow_col, 0.55 + 0.35 * pulse), false, 2.0)
 	# Soft rings and rays make the silhouette grow without using strobing.
 	if t >= 0.42 * timing_scale:
 		for ring in range(3):
 			var radius := 28.0 + rise * (18.0 + ring * 15.0)
-			hud.draw_arc(center, radius, 0, TAU, 64, Color(rarity_col, 0.16 + pulse * 0.08), 1.5)
+			hud.draw_arc(center, radius, 0, TAU, 64, Color(glow_col, 0.16 + pulse * 0.08 + float(glow_rank) * 0.05), 1.5 + float(glow_rank) * 0.5)
 	if t >= 0.82 * timing_scale:
-		for i in range(12):
-			var a := float(i) * TAU / 12.0 + t * 0.10
+		var ray_count := 12 + glow_rank * 6
+		for i in range(ray_count):
+			var a := float(i) * TAU / float(ray_count) + t * (0.10 + float(glow_rank) * 0.12)
 			var inner := 40.0 + rise * 18.0
-			var outer := inner + 13.0 + rise * 28.0
-			hud.draw_line(center + Vector2(cos(a), sin(a)) * inner, center + Vector2(cos(a), sin(a)) * outer, Color(rarity_col, 0.22 + rise * 0.28), 1.0)
+			var outer := inner + 13.0 + rise * (28.0 + float(glow_rank) * 22.0)
+			var ray_col := Color.from_hsv(fmod(float(i) / float(ray_count) + t * 0.3, 1.0), 0.6, 1.0) if glow_rank >= 3 else glow_col
+			hud.draw_line(center + Vector2(cos(a), sin(a)) * inner, center + Vector2(cos(a), sin(a)) * outer, Color(ray_col, 0.22 + rise * 0.28), 1.0 + float(glow_rank) * 0.5)
 	var fish_scale := 0.28
 	if t >= 0.42 * timing_scale:
 		fish_scale = 0.36 + rise * 0.64
@@ -2448,11 +2756,18 @@ func _draw_standard_reveal_result():
 		_center_text(68, "???", 28, Color("#e7edf7"))
 		_center_text(207, "A hidden tide catch", 10, Color("#b4c5db"))
 	elif t < 0.82 * timing_scale:
-		_center_text(66, "RARITY...", 18, rarity_col.lightened(0.22))
+		_center_text(66, "RARITY...", 18, glow_col.lightened(0.22))
 		_center_text(207, "The water holds its breath", 10, Color("#c4d1e2"))
 	elif t < flip_start:
-		_center_text(64, last_rarity, 22, rarity_col.lightened(0.22))
-		_center_text(207, "Something is surfacing", 10, Color("#d5e2ef"))
+		# While the light is still climbing, the seal names the current step so
+		# each promotion reads as UNCOMMON -> RARE -> EPIC. A fizzle never shows
+		# the higher, untrue rarity name.
+		var seal := last_rarity
+		var result_heat := _rarity_heat(last_rarity)
+		if glow_rank < result_heat: seal = str(["COMMON", "UNCOMMON", "RARE", "EPIC"][glow_rank])
+		_center_text(64, seal, 22, (glow_col if glow_rank < result_heat else rarity_col).lightened(0.22))
+		var promoted := reveal_glow_start >= 0 and reveal_glow_start < result_heat
+		_center_text(207, "PROMOTION!" if promoted and t >= 0.86 * timing_scale else "Something is surfacing", 10, Color("#fff0b0") if promoted else Color("#d5e2ef"))
 	elif not face_visible:
 		_center_text(64, last_rarity, 18, rarity_col.lightened(0.16))
 		_center_text(207, "TURNING THE CARD...", 10, Color("#e3e7ee"))
@@ -2473,7 +2788,7 @@ func _draw_standard_reveal_result():
 	# the rapid flashing that makes ordinary catches tiring to watch.
 	if t >= flip_start and t < flip_end:
 		var flip_glow := sin(flip_p * PI) * 0.10
-		hud.draw_rect(Rect2(0, 0, 480, 270), Color(rarity_col, flip_glow))
+		hud.draw_rect(Rect2(0, 0, 480, 270), Color(rarity_col, fx.soft_overlay(flip_glow)))
 
 func _draw_reveal_fish(center: Vector2, scale: float, color: Color, revealed: bool, width_scale: float = 1.0, species_name: String = "") -> bool:
 	# The face of an expanded catch uses the same transparent illustration as the
@@ -2590,7 +2905,7 @@ func _draw_legendary_result():
 	# The initial reveal gets one soft glow, never repeated high-frequency flash.
 	if t >= 2.05 and t < 2.55:
 		var glow := sin((t-2.05)/0.5*PI)*0.20
-		hud.draw_rect(Rect2(0,0,480,270),Color(1,0.90,0.67,glow))
+		hud.draw_rect(Rect2(0,0,480,270),Color(1,0.90,0.67,fx.soft_overlay(glow)))
 
 func _legendary_reveal_art_target_rect(growth: float = 1.0) -> Rect2:
 	# Keep the maximum card box above the name and metadata rows. The artwork is
@@ -2599,6 +2914,10 @@ func _legendary_reveal_art_target_rect(growth: float = 1.0) -> Rect2:
 	var center := Vector2(240,132)
 	var size := Vector2(206,138) * clampf(growth, 0.0, 1.0)
 	return Rect2(center - size * 0.5, size)
+
+func _heat_draw_color(heat: int, time: float = 0.0) -> Color:
+	if heat >= 3: return Color.from_hsv(fmod(time * 0.35 + elapsed * 0.1, 1.0), 0.6, 1.0)
+	return fx.HEAT_COLORS[clampi(heat, 0, 2)]
 
 func _center_text(y: float, value: String, size: int, color: Color):
 	var font := ThemeDB.fallback_font

@@ -56,6 +56,10 @@ var _fade_out_seconds := 0.0
 var _fade_out_elapsed := 0.0
 var _music_volume_db := -15.0
 var _muted := false
+# Ducking lets the anticipation phase pull the music almost to silence (the
+# "hold your breath" beat) and snap back on the bite without changing mode.
+var _duck := 1.0
+var _duck_target := 1.0
 var _enabled := true
 var _stream_player: AudioStreamPlayer
 var _generator: AudioStreamGenerator
@@ -80,7 +84,7 @@ func _create_player() -> void:
 	_generator.mix_rate = SAMPLE_RATE
 	_generator.buffer_length = BUFFER_SECONDS
 	_stream_player.stream = _generator
-	_stream_player.volume_db = _music_volume_db
+	_stream_player.volume_db = get_effective_volume_db()
 	add_child(_stream_player)
 	_stream_player.play()
 	_playback = _stream_player.get_stream_playback() as AudioStreamGeneratorPlayback
@@ -122,16 +126,32 @@ func stop_music(fade_seconds: float = 0.6) -> void:
 
 func set_music_volume_db(value: float) -> void:
 	_music_volume_db = clampf(value, -40.0, 2.0)
-	if _stream_player != null:
-		_stream_player.volume_db = _music_volume_db
+	_apply_player_volume()
 
 func get_music_volume_db() -> float:
 	return _music_volume_db
 
+# The duck is applied as player gain, not baked into the generated samples. The
+# generator queue runs up to BUFFER_SECONDS ahead of what is heard, so a duck
+# baked into queued samples would reach the speakers over a second after the
+# visual cue it belongs to, and its release would lag the same way.
+func get_effective_volume_db() -> float:
+	if _muted: return -80.0
+	return _music_volume_db + linear_to_db(maxf(_duck, 0.001))
+
+func _apply_player_volume() -> void:
+	if _stream_player != null:
+		_stream_player.volume_db = get_effective_volume_db()
+
 func set_muted(value: bool) -> void:
 	_muted = value
-	if _stream_player != null:
-		_stream_player.volume_db = -80.0 if _muted else _music_volume_db
+	_apply_player_volume()
+
+func set_duck(level: float) -> void:
+	_duck_target = clampf(level, 0.0, 1.0)
+
+func get_duck() -> float:
+	return _duck_target
 
 func is_muted() -> bool:
 	return _muted
@@ -170,6 +190,7 @@ func get_snapshot() -> Dictionary:
 		"fever": fever_active,
 		"muted": _muted,
 		"volume_db": _music_volume_db,
+		"duck": _duck_target,
 		"beat": maxi(0, _last_beat),
 		"playing": _playback != null and mode != MODE_SILENT,
 	}
@@ -206,6 +227,9 @@ func _process(delta: float) -> void:
 
 func _update_transport(delta: float) -> void:
 	elapsed += delta
+	# Fall quickly into the hush, come back a little faster than that.
+	_duck = move_toward(_duck, _duck_target, delta * (5.0 if _duck_target > _duck else 2.2))
+	_apply_player_volume()
 	# Mode crossfades happen over a fraction of a beat. The note clock is never
 	# reset, so field -> fishing returns on the same motif phase.
 	var fade_rate := 1.0 / maxf(0.08, BEAT_SECONDS * 0.75)

@@ -1,6 +1,6 @@
 # Tidebound Notebook v2
 
-A compact Godot 4 coastal fishing RPG prototype with an intentionally small SFC-era hero on a broad 64×40 tile overworld (16 px tile basis). Explore separate Saltmere town, amber beach, and rocky shore maps connected by short fade transitions at marked exits. Walk with WASD/arrow keys, cast with Space near water, open the tide ledger with N, and save with F6.
+A compact Godot 4 coastal fishing RPG prototype with an intentionally small SFC-era hero on a broad 64×40 tile overworld (16 px tile basis). Explore separate Saltmere town, amber beach, and rocky shore maps connected by short fade transitions at marked exits. Walk with WASD/arrow keys, cast with Space near water, open the tide ledger with N, save with F6, and press F to toggle reduced flashing.
 
 All visuals are original primitive pixel-style shapes; no Dragon Quest, Final Fantasy, or other protected character/asset content is used.
 
@@ -45,7 +45,7 @@ For contributors adding a species or regenerating its artwork, see the
 the compact polygon portrait and transparent encyclopedia-card contracts,
 rarity treatment, loader fallbacks, and validation commands.
 
-The rebuilt slice includes 23 field-guide entries across Saltmere town, Amber Beach, and Rocky Shore, with COMMON, UNCOMMON, RARE, EPIC, and LEGENDARY rarity. Every entry has a deterministic transparent polygon illustration in `assets/fish_cards/*_v2.png` and a compact matching portrait in `assets/fish/`; the encyclopedia illustration is reused for the species-specific catch reveal after the generic silhouette flips, with the compact portrait as a compatibility fallback. Run `python tools/generate_expanded_fish_art.py` to regenerate the 17 remaining fish styles. The script also refreshes art for the existing Old boot junk catch and Aurora koi hidden legendary support entries; neither is counted among those 17 fish. The six original PR #9 cards remain unchanged. The ledger opens as a three-column field guide and keeps undiscovered Legendary identities masked. Casting rolls one PERFECT-pool candidate up front. PERFECT timing keeps that candidate; GOOD timing deterministically swaps an EPIC/LEGENDARY candidate for a map-legal RARE catch, so low-grade results never register a Legendary species. Staged promotion cues are capped by candidate rank (gold for COMMON/UNCOMMON, purple for RARE, rainbow for EPIC/LEGENDARY) but can occasionally mislead or reverse. A false rainbow or purple float is sized against the chance of a genuine one in the current tide pool, so a rainbow float stays honest roughly three times in four whichever pool is active. The result card discloses the mismatch as “逆転!” or “ガセ…”, and nothing about the catch (toast, SELL/REGISTER prices, name) is shown until the card has flipped.
+The rebuilt slice includes 23 field-guide entries across Saltmere town, Amber Beach, and Rocky Shore, with COMMON, UNCOMMON, RARE, EPIC, and LEGENDARY rarity. Every entry has a deterministic transparent polygon illustration in `assets/fish_cards/*_v2.png` and a compact matching portrait in `assets/fish/`; the encyclopedia illustration is reused for the species-specific catch reveal after the generic silhouette flips, with the compact portrait as a compatibility fallback. Run `python tools/generate_expanded_fish_art.py` to regenerate the 17 remaining fish styles. The script also refreshes art for the existing Old boot junk catch and Aurora koi hidden legendary support entries; neither is counted among those 17 fish. The six original PR #9 cards remain unchanged. The ledger opens as a three-column field guide and keeps undiscovered Legendary identities masked. Casting rolls one PERFECT-pool candidate up front. PERFECT timing keeps that candidate; GOOD timing deterministically swaps an EPIC/LEGENDARY candidate for a map-legal RARE catch unless the golden-tide premium cue has locked that EPIC/LEGENDARY result. Staged promotion cues are capped by candidate rank (gold for COMMON/UNCOMMON, purple for RARE, rainbow for EPIC/LEGENDARY) but can occasionally mislead or reverse. A false rainbow or purple float is sized against the chance of a genuine one in the current tide pool, so a rainbow float stays honest roughly three times in four whichever pool is active. The result card discloses the mismatch as “逆転!” or “ガセ…”, and nothing about the catch (toast, SELL/REGISTER prices, name) is shown until the card has flipped.
 
 ### Rumors, hints and the grotto gate
 
@@ -83,22 +83,53 @@ registers it. The prompt shows both prices, e.g. `X SELL +8   C REGISTER +5  NEW
 `N` opens the ledger. `A`/`D` page through heard rumors. `? mystery`, `~ shimmer`,
 `! gilded` and `^ crown` mark specimens; a green dot means that species is biting now.
 
+## Cue show: heat ladder and reduced flashing
+
+The whole cast is staged as one escalating show, defined in
+[EFFECTS_DESIGN.md](EFFECTS_DESIGN.md) and driven by `fx/fx_director.gd`:
+
+- **Heat ladder.** Float, cut-ins, speed lines and the reveal's summon light all use
+  one colour ladder: blue → gold → purple → rainbow, plus a premium gold. Gold is a
+  quiet glint (it appears on most casts); purple dims the world, hushes the music and
+  starts a heartbeat; rainbow fires a `激アツ!!` cut-in, speed lines and a brief
+  chromatic pulse. Hotter cues hold the bite back longer (up to +1.7 s).
+- **Extra cues.** A glowing fish school sometimes crosses the screen (often, but not
+  always, RARE or better). The golden tide (`黄金の潮`) only ever appears for an
+  EPIC-or-better candidate, and a golden-tide cast never fakes out (no downward false
+  cue, no mid-wait reversal). These rolls use the FX director's own RNG, so they never
+  change which fish bites.
+- **Reach.** Purple-or-hotter bites enter a letterboxed REACH / SUPER REACH. Each pull
+  has a short hit-stop, splash and callout; banners use a slim top strip so the timing
+  gauge is never covered.
+- **Reveal.** The card glows in the promised heat, then promotes one step at a time
+  to the real result (`UP!`) or quietly fizzles. The flip bursts in proportion to
+  rarity, followed by `NEW!` / `CROWN!` stamps. LEGENDARY cracks the screen, then
+  shatters it. FEVER is announced once the catch is sold or registered: the banner,
+  flash, chime, music change and rainbow frame all start together then.
+- **Safety.** Full-screen flashes are limited to three per second with a brightness
+  cap. F toggles reduced flashing (smaller flashes, gentler shake/zoom, no chromatic
+  aberration, no soft full-screen tints, a steady danger edge); the setting is saved.
+
 ## Chain FEVER
 
 Three consecutive catches activate a 30-second FEVER window. The HUD shows chain
 progress and remaining time; a warm flash, original chime, and full music layers
-announce activation. FEVER and bait use rarity-sensitive weights: common fish
+announce activation once the catch that earned it is sold or registered. FEVER and bait use rarity-sensitive weights: common fish
 retain their baseline, while higher rarities receive progressively stronger boosts.
 
 The Rocky Shore legendary roll happens once, at cast time, when the upcoming catch
 would be the third in the chain or later; timing does not create a second roll. It starts at
 1%, FEVER and Moonseed add 2% each, and it is capped at 5%. PERFECT keeps the
 rolled candidate, while GOOD downgrades an EPIC/LEGENDARY candidate to a map-legal
-RARE catch (keeping its lower-quality metadata and rescue-meter effect). Catches do
+RARE catch (keeping its lower-quality metadata and rescue-meter effect), except on
+a golden-tide cast whose premium cue guarantees the EPIC/LEGENDARY result. Catches do
 not refresh the timer. A lost fish or an elapsed FEVER window resets the chain, and
 a miss that breaks a chain says how close it was (`惜しい!  one more catch for
 FEVER`). Reading the ledger and map transitions pause the timer with the fishing
-loop. Version 6+ saves retain the combo and remaining FEVER time; older saves start
+loop, and the timer holds while the catch that earned FEVER is still waiting for
+SELL/REGISTER: the 30 seconds start when the FEVER banner appears. Version 6+
+saves retain the combo and remaining FEVER time, and a save made while that catch is
+still held keeps the pending banner (and the held clock) with it; older saves start
 with no chain.
 
 ## Fair rescue (soft pity)
