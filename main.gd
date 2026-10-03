@@ -2453,7 +2453,11 @@ func _exit_arrow(direction: Vector2) -> String:
 
 func _draw_player():
 	var frame := int(walk_time*9)%4 if walking else 0
-	draw_texture_rect_region(hero,Rect2(player.round()-Vector2(8,22),Vector2(16,24)),Rect2(frame*16,face*24,16,24))
+	# The authored hero uses a 32x48 atlas cell so the reference's head/body/leg
+	# proportions survive nearest-neighbor scaling.  Keep the same feet anchor
+	# used by the 8x5 movement collider: the extra canopy sits above the player,
+	# while the shadow still lands on the world position.
+	draw_texture_rect_region(hero,Rect2(player.round()-Vector2(16,46),Vector2(32,48)),Rect2(frame*32,face*48,32,48))
 
 func _panel(rect: Rect2, paper := false):
 	hud.draw_rect(rect,Color("#e5d5ab") if paper else Color("#263e43"))
