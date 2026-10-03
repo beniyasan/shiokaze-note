@@ -976,13 +976,15 @@ func _pick_good_substitute(candidate: Dictionary) -> Dictionary:
 	# downgrades do not funnel every catch into one species.
 	return rare_pool[rng.randi_range(0, rare_pool.size() - 1)].duplicate(true)
 
-func _candidate_for_grade(candidate: Dictionary, grade: String) -> Dictionary:
+func _candidate_for_grade(candidate: Dictionary, grade: String, premium_locked := false) -> Dictionary:
 	var resolved := candidate.duplicate(true)
 	# The cast roll is intentionally a PERFECT-pool candidate.  A GOOD timing
 	# result downgrades an EPIC/LEGENDARY candidate to the deterministic RARE
 	# substitute selected at cast time, so a Legendary species never enters the
-	# ledger from a low-grade battle.
-	if grade == "GOOD" and _rarity_rank(str(resolved.get("rarity", "COMMON"))) > _rarity_rank("RARE"):
+	# ledger from a low-grade battle. The premium golden-tide cue is an explicit
+	# exception: it promises an EPIC-or-better result, so GOOD timing cannot
+	# contradict that promise.
+	if grade == "GOOD" and not premium_locked and _rarity_rank(str(resolved.get("rarity", "COMMON"))) > _rarity_rank("RARE"):
 		var original_rarity := str(resolved.get("rarity", "COMMON"))
 		var original_species := str(resolved.get("name", "Unknown catch"))
 		var substitute := cast_good_candidate.duplicate(true)
@@ -1803,8 +1805,11 @@ func _resolve_fishing_timing(position: float):
 		picked = _pick_cast_candidate(rescue_was_ready)
 		cast_candidate = picked.duplicate(true)
 	var candidate_rarity := str(picked.get("rarity", "COMMON"))
-	picked = _candidate_for_grade(picked, grade)
-	var legendary := grade == "PERFECT" and str(picked.get("rarity", "COMMON")) == "LEGENDARY"
+	# Golden tide is a cast-time guarantee. Keep its EPIC/LEGENDARY candidate
+	# intact through a GOOD timing result instead of downgrading it to RARE.
+	var premium_locked := fx_premium and _rarity_rank(candidate_rarity) >= _rarity_rank("EPIC")
+	picked = _candidate_for_grade(picked, grade, premium_locked)
+	var legendary := str(picked.get("rarity", "COMMON")) == "LEGENDARY"
 	var result_rank := _rarity_rank(str(picked.get("rarity", "COMMON")))
 	var candidate_rank := _rarity_rank(candidate_rarity)
 	var effective_cue_rank := maxi(0, promotion_cue_rank - (1 if promotion_reversal else 0))
