@@ -1,6 +1,3 @@
-Warning: truncated output (original token count: 36600)
-Total output lines: 2947
-
 extends Node2D
 
 const FishingChallengeScript = preload("res://fishing_challenge.gd")
@@ -1291,7 +1288,573 @@ func _announce_fever_if_pending() -> void:
 
 func register_pending_catch() -> bool:
 	if not catch_choice_pending(): return false
-	_announce_f…6600 tokens truncated…er the flip.
+	_announce_fever_if_pending()
+	var species := pending_catch_species()
+	var metadata := pending_catch.get("metadata", {}) as Dictionary
+	# The reward is granted only when the player explicitly registers/keeps the
+	# fish, so a pending result cannot be duplicated by repeated SPACE presses or
+	# by saving mid-choice.
+	var reward := _register_value(metadata)
+	var new_crown := _commit_crown_record(species, metadata)
+	result_toast_pending = ""
+	shells += reward
+	pending_catch["decision"] = "registered"
+	pending_catch["register_value"] = reward
+	pending_catch_state = "registered"
+	last_catch_decision = "registered"
+	toast = "REGISTERED  %s / +%d shells%s" % [species, reward, "  /  CROWN recorded" if new_crown else ""]
+	toast_t = 2.4
+	return true
+
+func sell_pending_catch() -> bool:
+	if not catch_choice_pending(): return false
+	_announce_fever_if_pending()
+	var species := pending_catch_species()
+	var held := int(catches.get(species, 0))
+	# The catch was counted at landing.  Never decrement another specimen if a
+	# hand-edited or partially migrated save has no matching inventory entry.
+	if held > 0:
+		held -= 1
+		if held == 0: catches.erase(species)
+		else: catches[species] = held
+	var value := pending_catch_sell_value()
+	var gave_up_crown := bool((pending_catch.get("metadata", {}) as Dictionary).get("crown", false))
+	result_toast_pending = ""
+	shells += value
+	pending_catch["decision"] = "sold"
+	pending_catch["sell_value"] = value
+	pending_catch_state = "sold"
+	last_catch_decision = "sold"
+	toast = "SOLD  %s / +%d shells  (discovery kept%s)" % [species, value, ", crown not recorded" if gave_up_crown else ""]
+	toast_t = 2.4
+	return true
+
+func _catch_choice_prompt() -> String:
+	if catch_choice_pending():
+		var metadata := pending_catch.get("metadata", {}) as Dictionary
+		var tag := ""
+		if bool(metadata.get("first_capture", false)): tag += "  NEW"
+		if bool(metadata.get("crown", false)): tag += "  CROWN"
+		return "X SELL +%d   C REGISTER +%d%s" % [pending_catch_sell_value(), pending_catch_register_value(), tag]
+	if last_catch_decision == "sold": return "SOLD  /  discovery kept   SPACE continue"
+	if last_catch_decision == "registered": return "REGISTERED / KEPT   SPACE continue"
+	return "SPACE  continue"
+
+func species_discovered(species: String, owned: int = -1) -> bool:
+	# Inventory is transient: selling the last copy must not erase the durable
+	# field-guide discovery stored in catch metadata or the latest record.
+	var count := int(catches.get(species, 0)) if owned < 0 else owned
+	return count > 0 or catch_metadata.has(species) or first_capture_metadata.has(species) or catch_latest.has(species)
+
+func _fish_art_visible(species: String, owned: int = -1) -> bool:
+	# Legendary identity stays masked until the first durable discovery. Other
+	# species can show their illustration even while their name remains hidden.
+	var fish := _fish_entry(species)
+	return not fish.is_empty() and (str(fish.get("rarity", "COMMON")) != "LEGENDARY" or species_discovered(species, owned))
+
+func ledger_display_name(species: String, owned: int = -1) -> String:
+	# Keep the highest-rarity cards mysterious until the first durable discovery.
+	# Once caught, the name and records stay visible even if the final inventory
+	# copy is sold, matching the rest of the field guide's collection UX.
+	var fish := _fish_entry(species)
+	var discovered := species_discovered(species, owned)
+	if str(fish.get("rarity", "COMMON")) == "LEGENDARY" and not discovered: return "???"
+	var display_name := species if discovered or heard_rumors.has(species) else "????????"
+	var marker := _ledger_marker(species, owned)
+	if marker != "": display_name += " " + marker
+	return display_name
+
+func _ledger_marker(species: String, owned: int) -> String:
+	if not species_discovered(species, owned): return "?"
+	var metadata := get_first_capture_metadata(species)
+	return _metadata_marker(metadata)
+
+func _metadata_marker(metadata: Dictionary) -> String:
+	# Mystery takes precedence over cosmetic variants.  Keep the fallback marker
+	# explicit so old/hand-authored saves still render an unknown catch clearly.
+	if bool(metadata.get("mystery", false)):
+		var mystery_marker := str(metadata.get("mystery_marker", "?"))
+		return mystery_marker if mystery_marker != "" else "?"
+	var variant_marker := str(metadata.get("variant_marker", ""))
+	return variant_marker
+
+func bait_name() -> String: return str(BAITS[bait_index].name)
+func rod_name() -> String: return str(RODS[rod_index].name)
+func bait_cost() -> int: return int(BAITS[bait_index].get("cost", 0))
+func rod_cost() -> int: return int(RODS[rod_index].get("cost", 0))
+func tackle_cost() -> int: return bait_cost() + rod_cost()
+func can_afford_tackle() -> bool: return shells >= tackle_cost()
+func tackle_summary() -> String:
+	return "%s %d + %s %d = %d shells/cast" % [bait_name(), bait_cost(), rod_name(), rod_cost(), tackle_cost()]
+func cycle_bait(step: int = 1) -> void:
+	if fishing_state != FishingState.IDLE: return
+	bait_index = posmod(bait_index + step, BAITS.size())
+	toast = "%s selected (%d shells/cast, rarity +%d%%, %s)" % [bait_name(), bait_cost(), int(BAITS[bait_index].rarity_bonus * 100.0), str(BAITS[bait_index].get("risk", "steady"))]
+	toast_t = 2.0
+func cycle_rod(step: int = 1) -> void:
+	if fishing_state != FishingState.IDLE: return
+	rod_index = posmod(rod_index + step, RODS.size())
+	toast = "%s selected (%d shells/cast, strain x%.2f, escape x%.2f, %s)" % [rod_name(), rod_cost(), float(RODS[rod_index].tension_mult), float(RODS[rod_index].escape_mult), str(RODS[rod_index].get("risk", "steady"))]
+	toast_t = 2.0
+
+func _try_fish():
+	if notebook_open: return
+	if fishing_state == FishingState.RESULT:
+		_reset_fishing()
+		return
+	if fishing_state != FishingState.IDLE: return
+	if _can_fish():
+		var cast_cost := tackle_cost()
+		if shells < cast_cost:
+			toast = "Need %d shells for %s (you have %d)" % [cast_cost, tackle_summary(), shells]; toast_t = 2.5
+			return
+		shells -= cast_cost
+		fishing_state = FishingState.ANTICIPATING
+		promotion_t = 0.0
+		promotion_stage = 0
+		promotion_reversal = false
+		promotion_false_cue = false
+		promotion_false_cue_revealed = false
+		promotion_reversal_armed = false
+		promotion_result_label = ""
+		promotion_rescue_bonus = rescue_forecast_bonus()
+		cast_candidate = _pick_cast_candidate(true)
+		cast_good_candidate = _pick_good_substitute(cast_candidate)
+		promotion_target_rarity = str(cast_candidate.get("rarity", "COMMON"))
+		promotion_cue_rank = _rarity_rank(promotion_target_rarity)
+		# The cue is decided once, at cast time.  A high-rarity candidate can
+		# occasionally look ordinary, and a common/uncommon candidate can flash a
+		# misleading high promotion.  No new random roll occurs while the float is
+		# moving, so the same cast always tells the same visual story.
+		var cue_roll := rng.randf()
+		var rainbow_share := _candidate_share_at_least(3)
+		var purple_share := maxf(0.0, _candidate_share_at_least(2) - rainbow_share)
+		var false_rainbow_chance := minf(PROMOTION_FALSE_RAINBOW_CHANCE, rainbow_share * PROMOTION_RAINBOW_LIE_RATIO)
+		var false_purple_chance := minf(PROMOTION_FALSE_PURPLE_CHANCE, purple_share * PROMOTION_PURPLE_LIE_RATIO)
+		if cue_roll < PROMOTION_FALSE_CUE_CHANCE and promotion_cue_rank >= 2:
+			promotion_false_cue = true
+			promotion_cue_rank = maxi(0, promotion_cue_rank - 2)
+		elif cue_roll < false_rainbow_chance and promotion_cue_rank <= 1:
+			promotion_false_cue = true
+			promotion_cue_rank = 3
+		elif cue_roll < false_rainbow_chance + false_purple_chance and promotion_cue_rank <= 1:
+			promotion_false_cue = true
+			promotion_cue_rank = 2
+		promotion_reversal_armed = rng.randf() < PROMOTION_REVERSAL_CHANCE
+		cast_timer = 1.8
+		bite_delay = rng.randf_range(0.72, 1.42) * float(RODS[rod_index].get("bite_mult", 1.0))
+		_plan_cast_fx()
+		bite_timer = 0.0
+		face = 0
+		toast = "Line out... %s" % tackle_summary()
+		toast_t = 2.0
+		_music_call("start_fishing", [combo])
+		_play_se("cast")
+	else:
+		toast = "Cast from the water's edge or the end of the pier"; toast_t = 3.0
+
+func _promotion_stage_limit() -> int:
+	if promotion_false_cue:
+		return _promotion_max_stage(str(["COMMON", "UNCOMMON", "RARE", "EPIC", "LEGENDARY"][clampi(promotion_cue_rank, 0, 4)]))
+	return _promotion_max_stage(promotion_target_rarity)
+
+func _rarity_heat(rarity: String) -> int:
+	# Results sit on the same blue/gold/purple/rainbow ladder as the float.
+	return mini(3, _rarity_rank(rarity))
+
+func _plan_cast_fx() -> void:
+	# Optional cues are rolled on the FX director's own RNG, never the gameplay
+	# RNG, so tuning a cut-in cannot change which fish bites or when.
+	var actual_rank := _rarity_rank(promotion_target_rarity)
+	fx_premium = fx.roll_premium(actual_rank)
+	fx_school = fx.roll_school(actual_rank)
+	if fx_premium:
+		# The premium cue never lies, so it also removes every fake-out: the
+		# downward false cue and the mid-wait reversal (a visible step back).
+		# Both were rolled before this call, so clearing them leaves the
+		# gameplay RNG stream untouched.
+		promotion_false_cue = false
+		promotion_reversal_armed = false
+		promotion_cue_rank = actual_rank
+	fx_heat = fx.HEAT_PREMIUM if fx_premium else _promotion_stage_limit()
+	bite_delay += float(fx.wait_extension(fx_heat))
+	fx_bite_heat = 0
+	fx_school_done = false
+	fx_premium_done = false
+	fx_last_stage = 0
+	fx_last_pull_shown = false
+	reveal_glow_start = -1
+	fx.cast(fx_heat)
+
+func _update_cue_fx(promotion_progress: float) -> void:
+	var float_pos := _float_screen_pos()
+	if fx_premium and not fx_premium_done and promotion_progress >= 0.12:
+		fx_premium_done = true
+		fx.premium_omen()
+	if fx_school and not fx_school_done and promotion_progress >= 0.38:
+		fx_school_done = true
+		fx.school_pass()
+	var visible_stage := _visible_promotion_stage()
+	if visible_stage > fx_last_stage:
+		fx.cue_step(visible_stage, float_pos)
+	elif visible_stage < fx_last_stage:
+		fx.cue_reversal(float_pos)
+	fx_last_stage = visible_stage
+
+func _process_fishing(delta: float):
+	# Notebook and map transitions pause fishing; the same pause applies here.
+	var choice_changed := false
+	# Thirty seconds leaves room for the reveal and another full tug-of-war.
+	fever_flash_t = maxf(0.0, fever_flash_t - delta)
+	# FEVER's clock starts when it is announced, i.e. when the catch that earned
+	# it is settled. While that choice is still open the clock holds, so a result
+	# left on screen cannot burn FEVER down (and lose its banner) unseen.
+	if fever_active and not _fever_waiting():
+		fever_t = maxf(0.0, fever_t - delta)
+		if fever_t <= 0.0:
+			_break_chain()
+			toast = "FEVER ended / Build another three-catch chain"
+			toast_t = 2.0
+	if fishing_state == FishingState.ANTICIPATING:
+		bite_timer += delta
+		promotion_t = bite_timer
+		var promotion_progress := clampf(bite_timer / maxf(0.01, bite_delay), 0.0, 1.0)
+		# The rescue tide is a visible promotion assist, not an auto-catch. It
+		# brings the float forward a little after repeated misses/GOOD catches,
+		# while the player still has to win the timing battle below.
+		var stage_bias := 0.12 * float(promotion_cue_rank) + promotion_rescue_bonus * 0.60
+		var cue_progress := clampf(promotion_progress + stage_bias, 0.0, 1.0)
+		var raw_stage := 3 if cue_progress >= 0.86 else (2 if cue_progress >= 0.62 else (1 if cue_progress >= 0.34 else 0))
+		promotion_stage = mini(raw_stage, _promotion_stage_limit())
+		if promotion_reversal_armed and promotion_progress > 0.62 and promotion_progress < 0.76: promotion_reversal = true
+		_update_cue_fx(promotion_progress)
+		cast_timer = maxf(0.0, cast_timer-delta)
+		if bite_timer >= bite_delay:
+			fishing_state = FishingState.TIMING
+			# The heat the player actually saw decides the reach and where the
+			# reveal's summon light starts.
+			fx_bite_heat = fx.HEAT_PREMIUM if fx_premium else _visible_promotion_stage()
+			# Only purple-or-hotter cues are a promise the reveal can break with
+			# a fizzle; a gold float is too common to deflate every catch.
+			reveal_glow_start = mini(3, fx_bite_heat) if fx_bite_heat >= 2 else mini(fx_bite_heat, _rarity_heat(promotion_target_rarity))
+			fx.bite(fx_bite_heat, _float_screen_pos())
+			# A bite opens a short tug-of-war instead of a one-frame skill check.
+			# The fish must be controlled through several good inputs.
+			fish_hp_max = 10 + mini(combo, 4)
+			fish_hp = fish_hp_max
+			battle_hits = 0
+			battle_required = fish_hp_max
+			battle_elapsed = 0.0
+			pull_cooldown = 1.0
+			perfect_pulls = 0
+			direction_timer = 2.0
+			battle_tension = clampf(0.22 + float(BAITS[bait_index].tension_bonus), 0.0, 0.9)
+			battle_escape = 0.0
+			battle_direction = -1.0 if rng.randf() < 0.5 else 1.0
+			timing_timer = 20.0
+			gauge = 0.0
+			gauge_direction = 1.0
+			# The challenge chain sits on top of the existing tug-of-war.  A
+			# growing combo asks for more varied beats, while the line tension and
+			# stamina model below remain authoritative for the actual catch.
+			challenge_strength = clampi(combo + 1, 1, 3)
+			fishing_challenge = FishingChallengeScript.new()
+			fishing_challenge.configure(challenge_strength, combo, rng.randi())
+			challenge_round_event = fishing_challenge.round_label()
+			challenge_hint_t = 2.4
+			toast = "BITE!  Keep the line in the gold zone!"
+			toast_t = 2.0
+			_play_se("bite")
+			_play_se("battle_start")
+		elif Input.is_action_just_pressed("fish"):
+			# Early taps are ignored so anticipation remains readable.
+			toast = "Not yet... watch the float"
+			toast_t = 0.6
+	elif fishing_state == FishingState.TIMING:
+		timing_timer -= delta
+		# The fish surges against the line. The moving target gets more urgent
+		# as tension rises, giving each pull a readable battle rhythm.
+		battle_elapsed += delta
+		pull_cooldown = maxf(0.0, pull_cooldown - delta)
+		direction_timer -= delta
+		if direction_timer <= 0.0:
+			battle_direction = -battle_direction
+			direction_timer = rng.randf_range(2.0, 3.3)
+		var counter := Input.get_axis("move_left", "move_right")
+		var countering := counter * battle_direction < -0.25
+		var straining := counter * battle_direction > 0.25
+		if fishing_challenge != null and not fishing_challenge.done:
+			fishing_challenge.tick(delta, counter)
+			challenge_hint_t = maxf(0.0, challenge_hint_t-delta)
+		var escape_rate := float(RODS[rod_index].escape_mult) * float(BAITS[bait_index].get("escape_mult", 1.0))
+		# Bait risk applies to uncountered surges only. A deliberate counter
+		# remains a reliable recovery action regardless of the lure selected.
+		var escape_change := -0.035 * float(RODS[rod_index].escape_mult) if countering else (0.095 if straining else 0.055) * escape_rate
+		battle_escape = clampf(battle_escape + delta * escape_change, 0.0, 1.0)
+		battle_tension = clampf(battle_tension + delta * (-0.045 if countering else (0.07 if straining else -0.014)) * float(RODS[rod_index].tension_mult), 0.0, 1.0)
+		gauge += delta * (1.25 + battle_tension * 0.75) * gauge_direction
+		if gauge >= 1.0: gauge = 1.0; gauge_direction = -1.0
+		if gauge <= 0.0: gauge = 0.0; gauge_direction = 1.0
+		fx.set_danger(battle_tension)
+		if timing_timer <= 0.0 or battle_tension >= 1.0 or battle_escape >= 1.0:
+			# Running out of line is a miss even if the fish was nearly tired.
+			_resolve_fishing_timing(-1.0)
+		elif Input.is_action_just_pressed("fish"):
+			_handle_fishing_strike(gauge, counter)
+	elif fishing_state == FishingState.RESULT:
+		result_t -= delta
+		# Flush a queued reveal toast before reading disposition input. If
+		# SELL/REGISTER is pressed on this same frame, its confirmation replaces
+		# the reveal toast and the final guard below cannot overwrite it.
+		_flush_result_toast()
+		if catch_choice_pending():
+			# The prompt is hidden until the card flips, so ignore blind presses.
+			if not catch_reveal_complete():
+				pass
+			elif Input.is_action_just_pressed("sell_catch"):
+				choice_changed = sell_pending_catch()
+			elif Input.is_action_just_pressed("register_catch"):
+				choice_changed = register_pending_catch()
+			elif Input.is_action_just_pressed("fish"):
+				# Space never silently chooses a disposition.  Keep the result on
+				# screen until the player explicitly sells or registers it.
+				result_toast_pending = ""
+				toast = "Choose SELL or REGISTER / the catch is safely held"
+				toast_t = 1.8
+				choice_changed = true
+		elif Input.is_action_just_pressed("fish"):
+			_reset_fishing()
+		if last_rarity == "LEGENDARY":
+			var previous_legendary_t := legendary_t
+			legendary_t = minf(legendary_t + delta, 6.0)
+			# Keep the generic reveal state in sync for deterministic probes and
+			# future result skins; legendary keeps its established six-second arc.
+			reveal_t = legendary_t
+			reveal_stage = _reveal_stage_at(reveal_t, last_rarity)
+			# The catch is deliberately paced: a small omen, rising energy, a
+			# full-screen climax, then a long rainbow afterglow.
+			if previous_legendary_t < 0.82 and legendary_t >= 0.82:
+				legendary_stage = maxi(legendary_stage, 1)
+				_play_se("rise")
+				shake_t = maxf(shake_t, 0.65)
+				fx.legendary_crack()
+			if previous_legendary_t < 2.05 and legendary_t >= 2.05:
+				legendary_stage = maxi(legendary_stage, 2)
+				_play_se("peak")
+				shake_t = maxf(shake_t, 1.8)
+				fx.legendary_shatter()
+			if previous_legendary_t < 3.75 and legendary_t >= 3.75:
+				legendary_stage = maxi(legendary_stage, 3)
+				_play_se("after")
+				fx.legendary_afterglow()
+		elif last_grade != "MISS":
+			var previous_reveal_t := reveal_t
+			var reveal_duration := 1.24 if reveal_shortened else 2.0
+			reveal_t = minf(reveal_t + delta, reveal_duration)
+			reveal_stage = _reveal_stage_at(reveal_t, last_rarity)
+			# A single gentle chime marks the turn; the FX director adds the
+			# summon-light promotions and one rarity-scaled burst on the face.
+			var flip_time := 0.92 if reveal_shortened else 1.48
+			if previous_reveal_t < flip_time and reveal_t >= flip_time:
+				_play_se("rise")
+			for step in _reveal_glow_plan():
+				if previous_reveal_t < float(step.t) and reveal_t >= float(step.t):
+					if str(step.kind) == "promote": fx.reveal_promote(int(step.rank))
+					else: fx.reveal_fizzle()
+			var face_time := _reveal_face_time()
+			if previous_reveal_t < face_time and reveal_t >= face_time:
+				fx.reveal_flip(_rarity_heat(last_rarity), bool(last_catch_metadata.get("first_capture", false)), bool(last_catch_metadata.get("crown", false)))
+	if not choice_changed:
+		_flush_result_toast()
+	shake_t = maxf(0.0, shake_t-delta)
+	fish_particle_t += delta
+
+func _reveal_face_time() -> float:
+	return 1.78 * (0.62 if reveal_shortened else 1.0)
+
+# The summon light's steps on the reveal clock: each step up is a "promotion"
+# (gacha-style 昇格); a cue that promised more than the catch fizzles down once.
+func _reveal_glow_plan() -> Array[Dictionary]:
+	var plan: Array[Dictionary] = []
+	if last_rarity == "" or last_rarity == "LEGENDARY": return plan
+	var result := _rarity_heat(last_rarity)
+	var start := result if reveal_glow_start < 0 else reveal_glow_start
+	var scale := 0.62 if reveal_shortened else 1.0
+	if start < result:
+		for k in range(1, result - start + 1):
+			plan.append({"t": (0.86 + float(k - 1) * 0.18) * scale, "rank": start + k, "kind": "promote"})
+	elif start > result:
+		plan.append({"t": 0.86 * scale, "rank": result, "kind": "fizzle"})
+	return plan
+
+func _reveal_glow_rank_at(time: float) -> int:
+	var rank := _rarity_heat(last_rarity) if reveal_glow_start < 0 else reveal_glow_start
+	for step in _reveal_glow_plan():
+		if time >= float(step.t): rank = int(step.rank)
+	return rank
+
+# Stage boundaries are fixed so a seed, frame rate, or renderer cannot change
+# the order of the reveal.  Legendary reuses its existing six-second timing;
+# standard catches fit the same two-second result window they had before.
+func _reveal_stage_at(time: float, rarity: String) -> int:
+	if rarity == "LEGENDARY":
+		if time < 0.82: return 0 # unknown omen
+		if time < 2.05: return 1 # rarity and energy rising
+		if time < 3.75: return 2 # full-screen reveal
+		return 3 # afterglow
+	var scale := 0.62 if reveal_shortened else 1.0
+	if time < 0.42 * scale: return 0 # card back and ???
+	if time < 0.82 * scale: return 1 # rarity seal
+	if time < 1.42 * scale: return 2 # growing silhouette/light
+	if time < 1.78 * scale: return 3 # card flip
+	return 4 # fish name revealed
+
+func reveal_stage_name() -> String:
+	if last_rarity == "LEGENDARY":
+		match reveal_stage:
+			0: return "UNKNOWN"
+			1: return "RISING"
+			2: return "CLIMAX"
+			3: return "AFTERGLOW"
+			_: return "UNKNOWN"
+	match reveal_stage:
+		0: return "UNKNOWN"
+		1: return "RARITY"
+		2: return "RISING"
+		3: return "FLIPPING"
+		4: return "REVEALED"
+		_: return "UNKNOWN"
+
+func _rarity_color(rarity: String) -> Color:
+	match rarity:
+		"RARE": return Color("#72c7e8")
+		"UNCOMMON": return Color("#8bd59c")
+		"EPIC": return Color("#d19cff")
+		"LEGENDARY": return Color("#f6c76b")
+		_: return Color("#b7c3d7")
+
+func _start_fever() -> void:
+	# State only. The catch that earned FEVER is still being revealed, so its
+	# presentation is deferred to _announce_fever_if_pending (see _fever_waiting).
+	fever_active = true
+	fever_t = FEVER_DURATION
+
+# Shown when a miss ends a chain, so a near-FEVER loss reads as a near miss.
+func _chain_break_note(lost_combo: int, lost_fever: bool) -> String:
+	if lost_fever: return "FEVER lost at CHAIN %d" % lost_combo
+	var remaining := FEVER_THRESHOLD - lost_combo
+	if lost_combo <= 0 or remaining <= 0: return ""
+	if remaining == 1: return "惜しい!  one more catch for FEVER"
+	return "CHAIN %d lost  /  %d more for FEVER" % [lost_combo, remaining]
+
+func _break_chain() -> void:
+	combo = 0
+	fever_active = false
+	fever_t = 0.0
+	fever_flash_t = 0.0
+	fever_announce_pending = false
+	_music_call("set_fever", [false])
+	_music_call("set_combo", [0])
+
+func _resolve_fishing_timing(position: float):
+	var grade := "MISS"
+	if position >= 0.42 and position <= 0.62: grade = "PERFECT"
+	elif position >= 0.26 and position <= 0.80: grade = "GOOD"
+	if grade == "MISS":
+		promotion_false_cue_revealed = promotion_false_cue
+		promotion_result_label = ""
+		chain_break_text = _chain_break_note(combo, fever_active)
+		fx.miss(_float_screen_pos(), chain_break_text.begins_with("惜しい"))
+		_break_chain()
+		_advance_pity("MISS")
+		last_catch = "The fish got away"
+		last_rarity = ""
+		last_grade = grade
+		last_catch_metadata = {}
+		last_catch_size_cm = 0.0
+		last_catch_weight_kg = 0.0
+		last_catch_variant = "Standard"
+		last_catch_mystery = true
+		last_rescue_used = false
+		fishing_state = FishingState.RESULT
+		cast_timer = 0.0
+		result_t = 1.3
+		shake_t = 0.12
+		_music_call("set_combo", [0])
+		_music_call("start_field")
+		_play_se("miss")
+		toast = "MISS!  " + (chain_break_text + "  /  " if chain_break_text != "" else "") + "SPACE to cast again"
+		toast_t = result_t
+		return
+	combo += 1
+	var fever_started := combo >= FEVER_THRESHOLD and not fever_active
+	if fever_started: _start_fever()
+	last_grade = grade
+	var rescue_was_ready := rescue_ready
+	# The species roll belongs to the cast, not to the final timing frame.  This
+	# keeps the promotion cue, the revealed fish, and the ledger in lockstep.
+	# Timing still has explicit effects: PERFECT keeps the clean grade/pity reset
+	# and allows the bounded legendary reveal, while GOOD records a lower-quality
+	# catch and advances the rescue meter when appropriate.
+	promotion_false_cue_revealed = promotion_false_cue
+	var picked: Dictionary = cast_candidate.duplicate(true)
+	if picked.is_empty():
+		# Compatibility callers such as _finish_cast may resolve without opening a
+		# visible anticipation state first.  Establish the candidate once, then use
+		# that same dictionary for the result.
+		picked = _pick_cast_candidate(rescue_was_ready)
+		cast_candidate = picked.duplicate(true)
+	var candidate_rarity := str(picked.get("rarity", "COMMON"))
+	# Golden tide is a cast-time guarantee. Keep its EPIC/LEGENDARY candidate
+	# intact through a GOOD timing result instead of downgrading it to RARE.
+	var premium_locked := fx_premium and _rarity_rank(candidate_rarity) >= _rarity_rank("EPIC")
+	picked = _candidate_for_grade(picked, grade, premium_locked)
+	var legendary := str(picked.get("rarity", "COMMON")) == "LEGENDARY"
+	var result_rank := _rarity_rank(str(picked.get("rarity", "COMMON")))
+	var candidate_rank := _rarity_rank(candidate_rarity)
+	var effective_cue_rank := maxi(0, promotion_cue_rank - (1 if promotion_reversal else 0))
+	if result_rank > effective_cue_rank and result_rank >= _rarity_rank("RARE"):
+		promotion_result_label = "逆転!"
+	elif result_rank < effective_cue_rank:
+		promotion_result_label = "惜しい!  PERFECTなら " + candidate_rarity if candidate_rank > result_rank and not promotion_false_cue else "ガセ…"
+	else:
+		promotion_result_label = ""
+	last_catch = str(picked.name)
+	last_rarity = str(picked.rarity)
+	last_rescue_used = rescue_was_ready and rescue_selection_used and _rarity_rank(last_rarity) >= _rarity_rank("RARE")
+	# A clean or genuinely rare catch closes the unlucky streak.  GOOD/common
+	# outcomes remain visible on the meter, allowing the one-shot rescue hook to
+	# arm without silently granting a win.
+	if _rarity_rank(last_rarity) >= _rarity_rank("RARE") or grade == "PERFECT":
+		_reset_pity()
+	else:
+		_advance_pity("GOOD")
+	_music_call("set_combo", [combo])
+	_music_call("play_fanfare", [legendary])
+	fx.landed(_rarity_heat(last_rarity), last_rarity == "LEGENDARY", _float_screen_pos())
+	if fever_started:
+		# Announce FEVER when the player settles this catch, so the banner
+		# never covers the reveal that earned it and leads into the next cast.
+		fever_announce_pending = true
+	fish_count += 1
+	catches[last_catch] = int(catches.get(last_catch,0))+1
+	var resolved_metadata := _record_catch_metadata(picked, grade)
+	_open_catch_choice(resolved_metadata)
+	fishing_state = FishingState.RESULT
+	cast_timer = 0.0
+	legendary_t = 0.0
+	legendary_stage = 0
+	reveal_t = 0.0
+	reveal_stage = 0
+	result_t = 6.2 if last_rarity == "LEGENDARY" else 2.0
+	shake_t = 1.10 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
+	_play_se("catch" if last_rarity != "LEGENDARY" else "legendary")
+	var catch_toast := ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch
+	if rescue_was_ready and last_rescue_used:
+		catch_toast = "RESCUE! RARE floor / " + last_catch
+	if fever_started: catch_toast = "FEVER! Rarity boosted for 30s / " + last_catch
+	# Every variant names the fish (or its rarity), so none may appear while the
+	# card is still face-down; _flush_result_toast shows it after the flip.
 	result_toast_pending = catch_toast
 	toast = ""
 	toast_t = 0.0

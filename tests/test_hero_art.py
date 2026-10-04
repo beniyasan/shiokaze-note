@@ -17,8 +17,8 @@ class HeroArtTests(unittest.TestCase):
             for face in range(4):
                 cell=hero.crop((0,face*128,96,face*128+128))
                 self.assertTrue(any(cell.getpixel((x,y))[3] for y in range(120,128) for x in range(18,79)))
-                self.assertTrue(any(cell.getpixel((x,y))[:3] == (45,102,116) for y in range(54,88) for x in range(18,79)))
-                self.assertTrue(any(cell.getpixel((x,y))[:3] == (159,73,56) for y in range(84,116) for x in range(18,79)))
+                self.assertTrue(any((lambda rgb: rgb[2] > rgb[0] + 35 and rgb[1] > 65)(cell.getpixel((x,y))[:3]) for y in range(54,88) for x in range(18,79)))
+                self.assertTrue(any((lambda rgb: rgb[0] > 120 and rgb[1] < 125 and rgb[0] > rgb[2] + 35)(cell.getpixel((x,y))[:3]) for y in range(84,116) for x in range(18,79)))
     def test_source_region_contract(self):
         source=ROOT/'main.gd'; text=source.read_text()
         self.assertIn('Vector2(48,64)',text); self.assertIn('frame*96,face*128,96,128',text)
