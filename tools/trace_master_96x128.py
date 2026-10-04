@@ -5,9 +5,10 @@ at the game-native 96x128 grid; no master pixels are sampled or copied into the
 runtime atlas. Runtime assets remain untouched.
 """
 from pathlib import Path
+import os
 from PIL import Image,ImageDraw,ImageFont
 ROOT=Path(__file__).resolve().parents[1]; ART=ROOT/'artifacts'; ART.mkdir(exist_ok=True)
-MASTER=Path('/workspace/scratch/292fc4632731/generated_images/exec-381b8c8c-1fb5-4a2a-8fe5-fca352009cca.png')
+MASTER=Path(os.environ.get('STYLE_MASTER_PATH', '/workspace/scratch/292fc4632731/generated_images/exec-381b8c8c-1fb5-4a2a-8fe5-fca352009cca.png'))
 BASE=ROOT/'assets/hero.png'
 P={'ink':'#1a2033','ink2':'#2a3047','hair':'#202a45','hair_hi':'#354465','hair_l':'#52658a','skin':'#e7a06c','skin_hi':'#ffc88b','skin_l':'#ffe0aa','skin_sh':'#a65b50','skin_deep':'#743b46','cap':'#29465a','cap_hi':'#4d717b','cap_l':'#77999a','cap_band':'#c7a66d','cap_band_hi':'#f0d09a','jacket':'#2d6674','jacket_hi':'#61969a','jacket_l':'#8db0a4','jacket_sh':'#1f4f63','cream':'#e5d0a7','cream_hi':'#f7e7c4','cream_sh':'#a98d70','pants':'#9f4938','pants_hi':'#d26745','pants_l':'#ee8650','pants_sh':'#6f3540','boot':'#4c3741','boot_hi':'#8d5644','boot_l':'#bc7048','bag':'#5d5643','bag_hi':'#927a55','bag_l':'#c7a36a','rod':'#4d3547','rod_hi':'#d8ae69','metal':'#d9c89b','reel':'#596579'}
 def R(d,b,c): d.rectangle(b,fill=P[c])
@@ -83,7 +84,8 @@ def ft(n):
  return ImageFont.load_default()
 def comparison(trace):
  b=Image.new('RGBA',(1780,720),(11,23,32,255));d=ImageDraw.Draw(b);d.text((32,18),'Master-guided 96×128 reconstruction · native clusters',font=ft(28),fill=(248,229,176,255));d.text((32,54),'visual guide only; manually traced face, navy cap, teal/cream jacket, orange trousers, pack and reel',font=ft(16),fill=(173,197,194,255))
- master=Image.open(MASTER).convert('RGBA') if MASTER.exists() else trace.crop((192,256,288,384)); current=Image.open(BASE).convert('RGBA').crop((192,256,288,384)); traced=trace.crop((192,256,288,384)); front=trace.crop((0,0,96,128))
+ if not MASTER.exists(): raise FileNotFoundError(f'master reference missing: {MASTER}')
+ master=Image.open(MASTER).convert('RGBA'); current=Image.open(BASE).convert('RGBA').crop((192,256,288,384)); traced=trace.crop((192,256,288,384)); front=trace.crop((0,0,96,128))
  cards=[('Generated master · guide',master),('Current eye-refined · profile',current),('New trace · profile',traced),('New trace · front',front)];x=28
  for title,im in cards:
   d.rounded_rectangle((x,88,x+420,594),radius=12,fill=(20,36,44,255),outline=(75,105,110,255),width=2);d.text((x+12,100),title,font=ft(19),fill=(240,220,165,255)); aw,ah=im.size;maxw,maxh=396,452;fit=min(maxw/aw,maxh/ah); scaled=im.resize((max(1,int(aw*fit)),max(1,int(ah*fit))),Image.Resampling.NEAREST);b.alpha_composite(scaled,(x+(420-scaled.width)//2,145+(452-scaled.height)//2));x+=435
