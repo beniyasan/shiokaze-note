@@ -1,4 +1,7 @@
-"""Generate original, grid-aligned pixel art. No third-party art assets."""
+"""Generate original, grid-aligned pixel art. No third-party art assets.
+
+The legacy 16×24 hero is written to hero-legacy-64x96.png so rerunning this
+scene-art generator cannot overwrite the integrated 96×128 runtime atlas."""
 from PIL import Image, ImageDraw
 from pathlib import Path
 import random
@@ -99,7 +102,7 @@ for face in range(4):
    p.point((x+6,yy+8),fill='#374648'); p.point((x+10,yy+8),fill='#374648'); p.point((x+8,yy+10),fill='#bc8760')
   elif face==1: p.rectangle((x+5,yy+7,x+10,yy+10),fill='#79553f'); p.rectangle((x+6,yy+12,x+10,yy+16),fill='#ab8659')
   else: p.point((x+(5 if face==2 else 10),yy+8),fill='#374648')
-a.save(ROOT/'hero.png')
+a.save(ROOT/'hero-legacy-64x96.png')
 # small props
 for name in ['barrel','sign','rock','well','reeds']:
  a,p=canvas(24,28)

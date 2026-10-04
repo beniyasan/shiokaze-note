@@ -1,0 +1,11 @@
+atlas_size=(384, 512)
+mode=RGBA
+cell_size=96x128
+cells=16
+alpha_cutoff=96
+palette_target=56
+feet_bottoms=0:0=126,0:1=126,0:2=126,0:3=126,1:0=126,1:1=126,1:2=126,1:3=126,2:0=126,2:1=126,2:2=126,2:3=126,3:0=126,3:1=126,3:2=126,3:3=126
+PASS every cell non-empty
+PASS feet anchor y=126 across all cells
+weak_alpha_pixels=0
+PASS hard alpha
