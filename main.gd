@@ -2455,7 +2455,10 @@ func _draw_player():
 	var frame := int(walk_time*9)%4 if walking else 0
 	# Native 96×128 atlas rendered at 48×64 (2× nearest reduction).
 	# Feet land at local y=126 → world player.y+1, matching the 8×5 collider.
-	draw_texture_rect_region(hero,Rect2(player.round()-Vector2(24,62),Vector2(48,64)),Rect2(frame*96,face*128,96,128))
+	# The approved turnaround draws right profile on row 2 and left profile on row 3;
+	# runtime face indices keep the historical left=2/right=3 convention.
+	var atlas_face := 3 if face == 2 else 2 if face == 3 else face
+	draw_texture_rect_region(hero,Rect2(player.round()-Vector2(24,62),Vector2(48,64)),Rect2(frame*96,atlas_face*128,96,128))
 
 func _panel(rect: Rect2, paper := false):
 	hud.draw_rect(rect,Color("#e5d5ab") if paper else Color("#263e43"))

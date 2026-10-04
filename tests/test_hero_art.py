@@ -21,5 +21,5 @@ class HeroArtTests(unittest.TestCase):
                 self.assertTrue(any((lambda rgb: rgb[0] > 120 and rgb[1] < 125 and rgb[0] > rgb[2] + 35)(cell.getpixel((x,y))[:3]) for y in range(84,116) for x in range(18,79)))
     def test_source_region_contract(self):
         source=ROOT/'main.gd'; text=source.read_text()
-        self.assertIn('Vector2(48,64)',text); self.assertIn('frame*96,face*128,96,128',text)
+        self.assertIn('Vector2(48,64)',text); self.assertIn('frame*96,atlas_face*128,96,128',text); self.assertIn('atlas_face := 3 if face == 2 else 2 if face == 3 else face',text)
 if __name__=='__main__': unittest.main()
