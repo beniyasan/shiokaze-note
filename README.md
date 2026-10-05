@@ -19,13 +19,13 @@ Space starts a cast at the shore or pier. After the bite, the fish battle is a s
 - A pull is ready again after about one second; fish stamina is the same at every chain length, and a longer chain only adds bonus rounds
 - The slalom round asks for the same direction as the counter prompt
 - Clean pulls ramp the procedural SE and screen effects; failed pulls strain the line and can snap it
-- A three-catch perfect combo unlocks Rainbow Kingfish (LEGENDARY)
+- A three-catch perfect combo can surface Storm tuna (LEGENDARY)
 
 LEGENDARY follows a paced reveal: omen, rising energy, full-screen rainbow light/rays/particles, then a long afterglow. All SE are synthesized with Godot's AudioStreamGenerator and have no external audio-file dependency. After the reveal, the catch stays safely on the result card until the player chooses C to register/keep it or X to sell it for shells; Space never dismisses an undecided catch. A pending choice is saved and restored, so closing the game cannot discard a fish. Selling removes only the held inventory copy while preserving its discovery (see Sell or register for how crowns work). First captures remain immutable discovery records; repeat catches use a shortened reveal, and a larger registered specimen updates a species crown record shown with a CROWN marker. Size breaks ties by weight, and crown records retain map, spot, day, variant, and grade. Crown data, pending choices, heard rumors, and the tide forecast are saved in the version 13 ledger format.
 
 ## Tide forecast and fish availability
 
-The tide ledger carries a deterministic clock, weather forecast, and four-season cycle. A full in-game day lasts three real minutes; every seventh in-game day advances the season, and each new day receives a repeatable clear/overcast/rain/storm forecast. Fish pools respond to all three conditions: moonfin trout prefer autumn/winter dusk and night tides, storm sardines and saltwater eels favor rain or storms after dusk, and familiar sprat and gobies remain available in calmer daylight waters. The field guide's other species follow similarly readable seasonal windows.
+The tide ledger carries a deterministic clock, weather forecast, and four-season cycle. A full in-game day lasts three real minutes; every seventh in-game day advances the season, and each new day receives a repeatable clear/overcast/rain/storm forecast. Fish pools respond to all three conditions: Moonfish prefer autumn/winter dusk and night tides, Storm tuna favor rain or storms after dusk, and Sunrise bream remain available in calmer daylight waters. The field guide's other species follow similarly readable seasonal windows.
 
 The HUD shows the current season, time period, weather, and clock. Forecast state is saved with the tide ledger; older saves fall back to the day-based forecast.
 
@@ -48,7 +48,9 @@ For contributors adding a species or regenerating its artwork, see the
 the compact polygon portrait and transparent encyclopedia-card contracts,
 rarity treatment, loader fallbacks, and validation commands.
 
-The rebuilt slice includes 23 field-guide entries across Saltmere town, Amber Beach, and Rocky Shore, with COMMON, UNCOMMON, RARE, EPIC, and LEGENDARY rarity. Every entry has a deterministic transparent polygon illustration in `assets/fish_cards/*_v2.png` and a compact matching portrait in `assets/fish/`; the encyclopedia illustration is reused for the species-specific catch reveal after the generic silhouette flips, with the compact portrait as a compatibility fallback. Run `python tools/generate_expanded_fish_art.py` to regenerate the 17 remaining fish styles. The script also refreshes art for the existing Old boot junk catch and Aurora koi hidden legendary support entries; neither is counted among those 17 fish. The six original PR #9 cards remain unchanged. The ledger opens as a three-column field guide and keeps undiscovered Legendary identities masked. Casting rolls one PERFECT-pool candidate up front. PERFECT timing keeps that candidate; GOOD timing deterministically swaps an EPIC/LEGENDARY candidate for a map-legal RARE catch unless the golden-tide premium cue has locked that EPIC/LEGENDARY result. Staged promotion cues are capped by candidate rank (gold for COMMON/UNCOMMON, purple for RARE, rainbow for EPIC/LEGENDARY) but can occasionally mislead or reverse. A false rainbow or purple float is sized against the chance of a genuine one in the current tide pool, so a rainbow float stays honest roughly three times in four whichever pool is active. The result card discloses the mismatch as “逆転!” or “ガセ…”, and nothing about the catch (toast, SELL/REGISTER prices, name) is shown until the card has flipped.
+The rebuilt slice now uses the attached approved 25-fish set as its complete active roster across Saltmere town, Amber Beach, Rocky Shore, and Moonlit Grotto. `fish_name_mapping.json` is the authoritative ID and asset-path manifest: only Amber anchovy, Aurora koi, and Tidepool blenny retain matching original IDs; the other 22 entries receive their own game references. Each entry has a matching transparent encyclopedia illustration in `assets/fish_cards/*_v2.png` (768×512 RGBA) and compact portrait in `assets/fish/` (96×64 RGBA); the card is reused for the species-specific catch reveal after the generic silhouette flips, with the portrait as a compatibility fallback. The old prototype roster and its fish files were removed rather than guessed onto the approved names. The ledger opens as a three-column field guide and keeps undiscovered Legendary identities masked. Casting rolls one PERFECT-pool candidate up front. PERFECT timing keeps that candidate; GOOD timing deterministically swaps an EPIC/LEGENDARY candidate for a map-legal RARE catch unless the golden-tide premium cue has locked that EPIC/LEGENDARY result. Staged promotion cues are capped by candidate rank (gold for COMMON/UNCOMMON, purple for RARE, rainbow for EPIC/LEGENDARY) but can occasionally mislead or reverse. A false rainbow or purple float is sized against the chance of a genuine one in the current tide pool, so a rainbow float stays honest roughly three times in four whichever pool is active. The result card discloses the mismatch as “逆転!” or “ガセ…”, and nothing about the catch (toast, SELL/REGISTER prices, name) is shown until the card has flipped.
+
+The materialized bundle also includes unchanged map, hero, and world-prop references; those files remain outside the fish replacement and are byte-identical to the approved archive's unchanged entries.
 
 ### Rumors, hints and the grotto gate
 
@@ -56,14 +58,14 @@ Stand beside Fisher Mera or the weathered notice in the Saltmere plaza (a bobbin
 `!` marks an unheard rumor) and press SPACE to hear the next rumor. Each source
 knows five: the grotto rumor plus four species hints. A species hint is generated
 from the same condition table that decides the species pool (for example
-`Moonfin trout: dusk or night / clear or rain / autumn or winter`), so it can never
+`Moonfish: dusk or night / clear or rain / autumn or winter`), so it can never
 disagree with the water. Heard rumors are listed in the tide ledger (N, then A/D to
 page), a rumor names an otherwise `????????` card, and the ledger draws a green dot
 beside every discovered or rumored species that is biting on the current map,
 time, weather and season.
 
 Moonlit Grotto appears as a distinct rocky-shore pool once the grotto rumor has been
-heard **and** the field guide is 25% discovered (6 of 23 species); the ledger shows
+heard **and** the field guide is 25% discovered (7 of 25 species); the ledger shows
 the guide percentage. Visiting it completes discovery and can surface Aurora koi.
 Undiscovered legendary field-guide cards stay `???` with a generic icon; after the
 first catch, their name, icon, and durable discovery remain visible even if the last
