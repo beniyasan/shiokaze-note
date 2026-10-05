@@ -522,8 +522,8 @@ func _build_rocky():
 	# Rocky shore: sparse windblown trees and stone shelves.
 	landmarks = [
 		{"kind":"breakwater","pos":Vector2(310,420),"label":"Stone Breakwater"},
-		{"kind":"pool","pos":Vector2(170,585),"label":"Blackglass Pool"},
-		{"kind":"pool","pos":Vector2(520,573),"label":"Gull's Pool"},
+		{"kind":"pool","pos":Vector2(497,151),"label":"Blackglass Pool"},
+		{"kind":"pool","pos":Vector2(614,375),"label":"Gull's Pool"},
 		{"kind":"lighthouse","pos":Vector2(704,154),"label":"Farwatch Lighthouse"},
 		{"kind":"hidden_pool","pos":Vector2(690,520),"label":"Moonlit Grotto"}
 	]
@@ -557,7 +557,10 @@ func _add_prop(kind: String, pos: Vector2, body: Rect2):
 
 func _shore(x: float) -> float:
 	if current_map == "beach": return 500.0
-	if current_map == "rocky": return 620.0 - (int(x/96.0)%3)*12
+	# Rocky Shore artwork places the authored lower bank around y=500. Keep
+	# movement and casts on that bank instead of allowing the hero into the
+	# visibly deep water below it.
+	if current_map == "rocky": return 500.0
 	if current_map == "grotto": return 620.0
 	if x < 240: return 464
 	if x < 416: return 480
@@ -746,7 +749,7 @@ func _fishing_spots() -> Array[Dictionary]:
 			{"pos":Vector2(620,487),"label":"South Tide Pool"}
 		]
 		"rocky":
-			var spots: Array[Dictionary] = [{"pos":Vector2(170,590),"label":"Blackglass Pool"},{"pos":Vector2(520,578),"label":"Gull's Pool"}]
+			var spots: Array[Dictionary] = [{"pos":Vector2(497,151),"label":"Blackglass Pool"},{"pos":Vector2(614,375),"label":"Gull's Pool"}]
 			if hidden_spot_unlocked: spots.append({"pos":Vector2(690,520),"label":"Moonlit Grotto"})
 			return spots
 		"grotto": return [{"pos":Vector2(512,520),"label":"Moonlit Grotto"}]
