@@ -23,7 +23,7 @@ func run():
 	# Tide forecast gates species by map, time, weather, and season.
 	check(game._time_period(0.50)=='day' and game._time_period(0.25)=='dawn' and game._time_period(0.95)=='night','clock resolves fishing periods')
 	check(game.fish_available('Sunrise bream','town',0.50,'clear','spring'),'daytime bream are available in spring')
-	check(not game.fish_available('Sunrise bream','town',0.50,'clear','winter'),'bream leave in winter')
+	check(game.fish_available('Sunrise bream','town',0.50,'clear','winter') and not game.fish_available('Sunrise bream','town',0.95,'clear','winter'),'bream stay through winter days but not nights')
 	check(game.fish_available('Moonfish','beach',0.75,'clear','autumn'),'moonfish follows an autumn dusk tide')
 	check(not game.fish_available('Moonfish','beach',0.50,'clear','autumn'),'moonfish leaves after dusk')
 	check(game.fish_available('Storm tuna','rocky',0.95,'storm','summer'),'storm tuna follows a summer storm night')
@@ -644,7 +644,40 @@ func run():
 	check(game.heard_rumors.has('Night angler') and game.talk_to_rumor_source() and game.heard_rumors.size()==heard_after_all and game.toast.contains('nothing new'),'an exhausted source says it has nothing new')
 	# Rumors become a readable hint, and the ledger shows what is biting right now.
 	check(game.fish_condition_hint('Moonfish')=='Moonfish: dusk or night / clear or rain / autumn or winter','species rumors are generated from the real condition table')
-	check(game.fish_condition_hint('Lantern fish')=='Lantern fish: night / clear or rain / not spring','a missing season reads as "not <season>"')
+	check(game.fish_condition_hint('Night angler')=='Night angler: night / not overcast / not spring','a missing season reads as "not <season>"')
+	# Field-guide reach: no map is dead for a whole season, the beach always has a
+	# daytime bite, and every species has at least one tide it can be caught in.
+	var guide_times := {'night':0.0,'dawn':0.25,'day':0.5,'dusk':0.75}
+	var guide_legendary: Array = []
+	for fish in game.FISH_SPECIES:
+		if fish.rarity=='LEGENDARY': guide_legendary.append(fish.name)
+	for guide_map in ['town','beach','rocky']:
+		for guide_season in game.SEASON_NAMES:
+			var alive := false
+			for guide_weather in game.WEATHER_NAMES:
+				for guide_time in guide_times:
+					for species in game.available_fish(guide_map,guide_times[guide_time],guide_weather,guide_season):
+						if not guide_legendary.has(species): alive = true
+			check(alive,'%s has ordinary fish at some tide in %s' % [guide_map, guide_season])
+	for guide_season in game.SEASON_NAMES:
+		for guide_weather in game.WEATHER_NAMES:
+			check(game.available_fish('beach',0.5,guide_weather,guide_season).size()>0,'beach has a daytime bite in %s %s' % [guide_season, guide_weather])
+	for fish in game.FISH_SPECIES:
+		var conditions: Dictionary = game._fish_conditions(fish.name)
+		check(conditions.times.size()>0 and conditions.weather.size()>0 and conditions.seasons.size()>0,'%s has a reachable tide window' % fish.name)
+	# A pool holding only a legendary must refuse the cast: the legendary comes
+	# from the explicit roll, never from being the last fish left in the water.
+	var koi_state := {'map':game.current_map,'player':game.player,'time':game.time_of_day,'weather':game.weather,'season':game.season,'unlocked':game.hidden_spot_unlocked,'collected':game.hidden_spot_collected,'combo':game.combo}
+	game._reset_fishing(); game.hidden_spot_unlocked=true; game.hidden_spot_collected=true
+	game.current_map='grotto'; game._build_map('grotto'); game.player=Vector2(512,520)
+	game.time_of_day=0.5; game.weather='storm'; game.season='winter'; game.combo=5
+	check(game._species_pool().size()==1 and game._species_pool()[0].name=='Aurora koi' and game._ordinary_pool().is_empty(),'a storm-bound grotto holds only Aurora koi')
+	check(game._pick_species('PERFECT',false,true).is_empty() and game._pick_cast_candidate().is_empty(),'a legendary-only pool yields no ordinary candidate')
+	var koi_shells: int = game.shells; var koi_fish: int = game.fish_count
+	game._try_fish()
+	check(game.fishing_state==game.FishingState.IDLE and game.fish_count==koi_fish and game.shells==koi_shells,'a legendary-only pool refuses the cast')
+	game.current_map=koi_state.map; game._build_map(koi_state.map); game.player=koi_state.player; game.time_of_day=koi_state.time; game.weather=koi_state.weather; game.season=koi_state.season
+	game.hidden_spot_unlocked=koi_state.unlocked; game.hidden_spot_collected=koi_state.collected; game.combo=koi_state.combo; game._reset_fishing()
 	var worst_rumor_width := 0.0
 	for rumor_id in game._all_rumor_ids():
 		var width: float = ThemeDB.fallback_font.get_string_size('[9/9] '+game.rumor_text(str(rumor_id)),HORIZONTAL_ALIGNMENT_LEFT,-1,8).x
@@ -694,7 +727,7 @@ func run():
 	var fever_legendary_chance: float = game._legendary_chance_for_cast()
 	game.bait_index=2
 	var moonseed_legendary_chance: float = game._legendary_chance_for_cast()
-	check(is_equal_approx(no_fever_legendary_chance,0.01) and is_equal_approx(fever_legendary_chance,0.03) and is_equal_approx(moonseed_legendary_chance,0.05) and is_equal_approx(moonseed_legendary_chance-fever_legendary_chance,0.02),'legendary chance uses actual FEVER and bounded Moonseed nudge')
+	check(is_equal_approx(no_fever_legendary_chance,game.LEGENDARY_BASE_CHANCE) and is_equal_approx(fever_legendary_chance,game.LEGENDARY_BASE_CHANCE+game.LEGENDARY_FEVER_BONUS) and is_equal_approx(moonseed_legendary_chance,game.LEGENDARY_CHANCE_CAP) and is_equal_approx(moonseed_legendary_chance-fever_legendary_chance,game.LEGENDARY_MOONSEED_BONUS),'legendary chance uses actual FEVER and bounded Moonseed nudge')
 	check(game._rarity_bonus_scale('COMMON')==0.0 and game._rarity_bonus_scale('RARE')>game._rarity_bonus_scale('UNCOMMON') and game._rarity_bonus_scale('EPIC')>game._rarity_bonus_scale('RARE'),'bait and FEVER scales favour higher rarities')
 	# Force a legendary candidate to verify the reveal path without relying on a
 	# statistical roll.  The result must still come from the cast candidate.

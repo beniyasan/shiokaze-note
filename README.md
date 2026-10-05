@@ -25,7 +25,7 @@ LEGENDARY follows a paced reveal: omen, rising energy, full-screen rainbow light
 
 ## Tide forecast and fish availability
 
-The tide ledger carries a deterministic clock, weather forecast, and four-season cycle. A full in-game day lasts three real minutes; every seventh in-game day advances the season, and each new day receives a repeatable clear/overcast/rain/storm forecast. Fish pools respond to all three conditions: Moonfish prefer autumn/winter dusk and night tides, Storm tuna favor rain or storms after dusk, and Sunrise bream remain available in calmer daylight waters. The field guide's other species follow similarly readable seasonal windows.
+The tide ledger carries a deterministic clock, weather forecast, and four-season cycle. A full in-game day lasts three real minutes; every seventh in-game day advances the season, and each new day receives a repeatable clear/overcast/rain/storm forecast. Fish pools respond to all three conditions: Moonfish prefer autumn/winter dusk and night tides, Storm tuna favor rain or storms after dusk, and Sunrise bream, Sand flatfish and Pearl seabass bite in daylight all year. The field guide's other species follow similarly readable seasonal windows. No map is empty for a whole season, but a restrictive tide (the town pier at night, any storm in town) can still leave a pool with nothing biting; the cast is then refused without charging tackle.
 
 The HUD shows the current season, time period, weather, and clock. Forecast state is saved with the tide ledger; older saves fall back to the day-based forecast.
 
@@ -124,7 +124,8 @@ retain their baseline, while higher rarities receive progressively stronger boos
 
 The Rocky Shore legendary roll happens once, at cast time, when the upcoming catch
 would be the third in the chain or later; timing does not create a second roll. It starts at
-1%, FEVER and Moonseed add 2% each, and it is capped at 5%. PERFECT keeps the
+3%, FEVER adds 3% and Moonseed 2%, and it is capped at 8%. A legendary only ever
+comes from this roll: a pool that holds nothing but a legendary refuses the cast. PERFECT keeps the
 rolled candidate, while GOOD downgrades an EPIC/LEGENDARY candidate to a map-legal
 RARE catch (keeping its lower-quality metadata and rescue-meter effect), except on
 a golden-tide cast whose premium cue guarantees the EPIC/LEGENDARY result. Catches do
