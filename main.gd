@@ -194,6 +194,13 @@ const CLEAN_BEAT_TENSION_RELIEF := 0.06
 const FEVER_THRESHOLD := 3
 const FEVER_DURATION := 30.0
 const FEVER_RARITY_BONUS := 0.5
+# Legendary roll per eligible cast (see _legendary_chance_for_cast). Sized so a
+# player who fishes Storm tuna's rain/storm evenings lands it in a few in-game
+# years rather than tens of hours.
+const LEGENDARY_BASE_CHANCE := 0.03
+const LEGENDARY_FEVER_BONUS := 0.03
+const LEGENDARY_MOONSEED_BONUS := 0.02
+const LEGENDARY_CHANCE_CAP := 0.08
 const PROMOTION_FALSE_CUE_CHANCE := 0.18
 # A false rainbow/purple float is capped both by these absolute chances and by a
 # ratio of the honest one, so lies stay a minority of each cue.
@@ -461,34 +468,36 @@ func _fish_entry(species: String) -> Dictionary:
 
 func _fish_conditions(species: String) -> Dictionary:
 	# The approved roster gets explicit tide windows so every pool has readable
-	# variety while still leaving a broad fallback for ordinary casts.
+	# variety. The windows are tuned so no map is empty for a whole season and
+	# the daytime staples (Sunrise bream, Sand flatfish, Pearl seabass) bite all
+	# year, while night pools stay small enough for their EPIC species to show.
 	var all_times := ["night", "dawn", "day", "dusk"]
 	var all_weather := ["clear", "overcast", "rain", "storm"]
 	var all_seasons := ["spring", "summer", "autumn", "winter"]
 	match species:
 		"Amber anchovy": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
-		"Sunrise bream": return {"times":["dawn", "day"], "weather":["clear", "overcast"], "seasons":["spring", "summer", "autumn"]}
+		"Sunrise bream": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":all_seasons}
 		"Moonfish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
-		"Coral grouper": return {"times":["day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["summer", "autumn"]}
+		"Coral grouper": return {"times":["day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
 		"Jellyfish fish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["spring", "summer", "autumn"]}
 		"Tropical angelfish": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":["summer", "autumn"]}
 		"Shadow flounder": return {"times":["dawn", "night"], "weather":["overcast", "rain"], "seasons":all_seasons}
 		"Starry fish": return {"times":["night"], "weather":["clear", "storm"], "seasons":["autumn", "winter"]}
 		"Reef butterflyfish": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
 		"Crystal fish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
-		"Sand flatfish": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
+		"Sand flatfish": return {"times":["dawn", "day"], "weather":all_weather, "seasons":all_seasons}
 		"Night angler": return {"times":["night"], "weather":["clear", "rain", "storm"], "seasons":["summer", "autumn", "winter"]}
-		"Pearl seabass": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer", "autumn"]}
+		"Pearl seabass": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast"], "seasons":all_seasons}
 		"Fire scorpionfish": return {"times":["dusk", "night"], "weather":["rain", "storm"], "seasons":["summer", "autumn"]}
-		"Seahorse": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer"]}
+		"Seahorse": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
 		"Mint wrasse": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer", "autumn"]}
 		"Jellyfish butterflyfish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["summer", "autumn", "winter"]}
-		"Storm tuna": return {"times":["night"], "weather":["rain", "storm"], "seasons":["summer", "autumn", "winter"]}
+		"Storm tuna": return {"times":["dusk", "night"], "weather":["rain", "storm"], "seasons":all_seasons}
 		"Coral rabbitfish": return {"times":["dawn", "day"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
 		"Twilight salmon": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
 		"Ghost fish": return {"times":["night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
 		"Harvest puffer": return {"times":["day", "dusk"], "weather":["overcast", "rain"], "seasons":["summer", "autumn"]}
-		"Lantern fish": return {"times":["night"], "weather":["clear", "rain"], "seasons":["summer", "autumn", "winter"]}
+		"Lantern fish": return {"times":["night"], "weather":["clear", "rain"], "seasons":all_seasons}
 		"Tidepool blenny": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer"]}
 		# Aurora koi is the grotto's explicit discovery reward; the hidden spot
 		# gates it, while tide conditions should not make the one-off reward vanish.
@@ -973,6 +982,14 @@ func _species_pool() -> Array[Dictionary]:
 		if fish_available(species): pool.append(fish)
 	return pool
 
+# A legendary only ever rides on an ordinary bite (see _pick_cast_candidate), so
+# a cast needs at least one non-legendary species in the water.
+func _ordinary_pool() -> Array[Dictionary]:
+	var pool: Array[Dictionary] = []
+	for fish in _species_pool():
+		if str(fish.get("rarity", "COMMON")) != "LEGENDARY": pool.append(fish)
+	return pool
+
 func _weighted_species_pick(pool: Array[Dictionary], bonus: float = -1.0) -> Dictionary:
 	# Keep species selection rarity-weighted in every path, including the
 	# one-shot rescue floor. A uniform rare_pool roll would make each rare and
@@ -1001,10 +1018,16 @@ func _pick_species(grade: String, apply_rescue := false, exclude_legendary := fa
 	# registering a catch.
 	if pool.is_empty(): return {}
 	var eligible: Array[Dictionary] = []
+	var ordinary: Array[Dictionary] = []
 	for fish in pool:
 		if exclude_legendary and str(fish.get("rarity", "COMMON")) == "LEGENDARY": continue
+		ordinary.append(fish)
 		if grade == "PERFECT" or fish.rarity in ["COMMON","UNCOMMON","RARE"]: eligible.append(fish)
-	if eligible.is_empty(): eligible = pool
+	# A grade can leave nothing eligible (an all-EPIC pool on a GOOD pull), so
+	# fall back to the ordinary pool. Never fall back to the excluded legendary:
+	# a pool holding only a legendary would hand it out on every cast.
+	if eligible.is_empty(): eligible = ordinary
+	if eligible.is_empty(): return {}
 	# Rescue is intentionally a soft odds nudge before the one-shot RARE floor.
 	# It makes an unlucky forecast feel warmer without handing out a catch or
 	# changing the map/time/weather legality of the pool.
@@ -1050,7 +1073,6 @@ func _candidate_share_at_least(min_rank: int) -> float:
 	for fish in pool:
 		if str(fish.get("rarity", "COMMON")) == "LEGENDARY": has_legendary = true
 		else: eligible.append(fish)
-	if eligible.is_empty(): eligible = pool
 	var bonus := _rarity_bonus_total()
 	var total := 0.0
 	var matched := 0.0
@@ -1082,19 +1104,22 @@ func _rarity_bonus_scale(rarity: String) -> float:
 
 func _legendary_chance_for_cast() -> float:
 	# The upcoming bite is eligible for a legendary only on Rocky Shore after
-	# the third chain catch.  FEVER and Moonseed each add a small, bounded nudge;
-	# together they cap the chance at 5% rather than making a legendary routine.
+	# the third chain catch.  FEVER and Moonseed each add a bounded nudge; together
+	# they cap the chance at 8% rather than making a legendary routine.
 	if current_map not in ["rocky", "grotto"] or combo + 1 < FEVER_THRESHOLD: return 0.0
-	var chance := 0.01
-	if fever_active: chance += 0.02
-	if bait_index == 2: chance += 0.02
-	return minf(chance, 0.05)
+	var chance := LEGENDARY_BASE_CHANCE
+	if fever_active: chance += LEGENDARY_FEVER_BONUS
+	if bait_index == 2: chance += LEGENDARY_MOONSEED_BONUS
+	return minf(chance, LEGENDARY_CHANCE_CAP)
 
 func _pick_cast_candidate(apply_rescue := false) -> Dictionary:
 	# Keep the explicit legendary roll as the only way a cast can become
 	# legendary; the ordinary perfect-pool pick excludes legendary entries so its
-	# small base weight cannot bypass the five-percent cap.
+	# small base weight cannot bypass the capped roll.
 	var candidate := _pick_species("PERFECT", apply_rescue, true)
+	# No ordinary bite means no cast at all, so there is nothing for a legendary
+	# to ride on: skip the roll rather than let it fill the empty candidate.
+	if candidate.is_empty(): return candidate
 	var chance := _legendary_chance_for_cast()
 	if chance > 0.0 and rng.randf() < chance:
 		var legendary_pool: Array[Dictionary] = []
@@ -1558,7 +1583,7 @@ func _try_fish():
 		# Restrictive tide windows can leave a map with no legal species. Keep the
 		# cast idle in that state instead of charging tackle or creating an illegal
 		# catch through an empty candidate.
-		if _species_pool().is_empty():
+		if _ordinary_pool().is_empty():
 			toast = "No fish are biting under this tide"; toast_t = 2.5
 			return
 		var cast_cost := tackle_cost()
@@ -1949,7 +1974,7 @@ func _resolve_fishing_timing(position: float):
 	# Defensive compatibility path: a caller may have entered the timing state
 	# before a restrictive tide left the map with no legal species. Do not let an
 	# empty candidate reach the ledger; cancel the cast as a no-op instead.
-	if cast_candidate.is_empty() and _species_pool().is_empty():
+	if cast_candidate.is_empty() and _ordinary_pool().is_empty():
 		_reset_fishing()
 		toast = "No fish are biting under this tide"; toast_t = 2.5
 		return
