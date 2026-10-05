@@ -392,7 +392,7 @@ func run():
 	# The unlocked cove is a real map transition, not only a hidden fishing spot
 	# layered onto Rocky Shore. Its save/load state and local pool remain stable.
 	game.hidden_spot_unlocked=true; game.hidden_spot_collected=true; game.transition_active=false
-	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(690,480); game._check_map_exit()
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(780,460); game._check_map_exit()
 	check(game.transition_target=='grotto','rocky grotto exit is gated and reachable')
 	game._transition_to('grotto',Vector2(510,150)); game._process(0.5)
 	check(game.current_map=='grotto' and game.player==Vector2(510,150),'grotto transition rebuilds the map')

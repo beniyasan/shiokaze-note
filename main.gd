@@ -435,7 +435,10 @@ func fish_available(species: String, map_name: String = "", at_time: float = -1.
 	# hidden pool adds Aurora koi rather than replacing the entire catch table.
 	if map == "grotto" and fish.maps.has("rocky"): map_ok = true
 	if fish.maps.has("hidden"):
-		if map == "rocky" or map == "grotto": map_ok = _at_hidden_fishing_spot()
+		# Forecasts for an explicit grotto map should use that map's rules even
+		# while the player is elsewhere; Rocky still requires its legacy pool.
+		if map == "grotto": map_ok = true
+		elif map == "rocky": map_ok = _at_hidden_fishing_spot()
 		else: map_ok = false
 	if not map_ok: return false
 	var conditions := _fish_conditions(species)
@@ -697,7 +700,9 @@ func _check_map_exit():
 		if player.y < 34 and player.x > 280 and player.x < 560: exit = "town"
 		elif player.x > 798 and player.y > 280 and player.y < 560: exit = "rocky"
 	elif current_map == "rocky":
-		if hidden_spot_unlocked and player.x > 640 and player.y > 480 and player.y < 580: exit = "grotto"
+		# Keep the legacy pool at (690,480) fishable; the grotto gate is farther
+		# east on the same bank so merely approaching the pool cannot transition.
+		if hidden_spot_unlocked and player.x > 760 and player.y > 450 and player.y < 500: exit = "grotto"
 		elif player.x < 34 and player.y > 250 and player.y < 430: exit = "town"
 		elif player.y > 420 and player.x > 280 and player.x < 560: exit = "beach"
 	elif current_map == "grotto":
@@ -2597,7 +2602,7 @@ func _exit_markers() -> Array[Dictionary]:
 				{"pos":Vector2(420,430),"label":"BEACH","dir":Vector2(0,1)}
 			]
 			if hidden_spot_unlocked:
-				rocky_markers.append({"pos":Vector2(690,480),"label":"MOONLIT GROTTO","dir":Vector2(1,0)})
+				rocky_markers.append({"pos":Vector2(780,460),"label":"MOONLIT GROTTO","dir":Vector2(1,0)})
 			return rocky_markers
 		"grotto":
 			return [{"pos":Vector2(40,340),"label":"ROCKY SHORE","dir":Vector2(-1,0)}]
