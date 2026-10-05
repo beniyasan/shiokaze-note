@@ -1117,6 +1117,9 @@ func _pick_cast_candidate(apply_rescue := false) -> Dictionary:
 	# legendary; the ordinary perfect-pool pick excludes legendary entries so its
 	# small base weight cannot bypass the capped roll.
 	var candidate := _pick_species("PERFECT", apply_rescue, true)
+	# No ordinary bite means no cast at all, so there is nothing for a legendary
+	# to ride on: skip the roll rather than let it fill the empty candidate.
+	if candidate.is_empty(): return candidate
 	var chance := _legendary_chance_for_cast()
 	if chance > 0.0 and rng.randf() < chance:
 		var legendary_pool: Array[Dictionary] = []

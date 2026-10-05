@@ -672,7 +672,16 @@ func run():
 	game.current_map='grotto'; game._build_map('grotto'); game.player=Vector2(512,520)
 	game.time_of_day=0.5; game.weather='storm'; game.season='winter'; game.combo=5
 	check(game._species_pool().size()==1 and game._species_pool()[0].name=='Aurora koi' and game._ordinary_pool().is_empty(),'a storm-bound grotto holds only Aurora koi')
-	check(game._pick_species('PERFECT',false,true).is_empty() and game._pick_cast_candidate().is_empty(),'a legendary-only pool yields no ordinary candidate')
+	check(game._pick_species('PERFECT',false,true).is_empty(),'a legendary-only pool yields no ordinary candidate')
+	# The roll is live here (chain of five, FEVER, Moonseed: 8% a cast), so 400
+	# draws would surface a legendary if the empty candidate still reached it.
+	var koi_bait: int = game.bait_index; var koi_fever: bool = game.fever_active
+	game.fever_active=true; game.bait_index=2
+	var koi_leaks := 0
+	for i in range(400):
+		if not game._pick_cast_candidate().is_empty(): koi_leaks += 1
+	check(is_equal_approx(game._legendary_chance_for_cast(),game.LEGENDARY_CHANCE_CAP) and koi_leaks==0,'a legendary-only pool never enters the legendary roll')
+	game.fever_active=koi_fever; game.bait_index=koi_bait
 	var koi_shells: int = game.shells; var koi_fish: int = game.fish_count
 	game._try_fish()
 	check(game.fishing_state==game.FishingState.IDLE and game.fish_count==koi_fish and game.shells==koi_shells,'a legendary-only pool refuses the cast')
