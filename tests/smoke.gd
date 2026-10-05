@@ -20,17 +20,24 @@ func run():
 	check(not game.fish_available('Moonfish','beach',0.50,'clear','autumn'),'moonfish leaves after dusk')
 	check(game.fish_available('Storm tuna','rocky',0.95,'storm','summer'),'storm tuna follows a summer storm night')
 	check(not game.fish_available('Storm tuna','rocky',0.50,'storm','summer'),'storm tuna avoids daylight')
-	# A winter night can empty the condition-filtered town pool. The picker must
-	# still return a town species instead of the beach-only first roster entry.
+	# A winter night can empty the condition-filtered town pool. Empty pools must
+	# not synthesize a map-only species or let a cast register an illegal catch.
 	var pre_empty_town_map: String = game.current_map
 	var pre_empty_town_player: Vector2 = game.player
 	var pre_empty_town_time: float = game.time_of_day
 	var pre_empty_town_weather: String = game.weather
 	var pre_empty_town_season: String = game.season
+	var pre_empty_town_fish_count: int = game.fish_count
+	var pre_empty_town_shells: int = game.shells
 	game.current_map='town'; game._build_map('town'); game.time_of_day=0.95; game.weather='clear'; game.season='winter'
 	check(game._species_pool().is_empty(),'town winter night can have an empty tide pool')
 	var empty_town_pick: Dictionary = game._pick_species('PERFECT')
-	check(not empty_town_pick.is_empty() and empty_town_pick.maps.has('town'),'empty town pool falls back to a legal town species')
+	check(empty_town_pick.is_empty(),'empty town pool does not synthesize an illegal species')
+	game.player=Vector2(502,530); game.fishing_state=game.FishingState.IDLE
+	game._try_fish()
+	check(game.fishing_state==game.FishingState.IDLE and game.shells==pre_empty_town_shells and game.fish_count==pre_empty_town_fish_count,'empty town pool refuses the cast without charging or registering a catch')
+	game.cast_candidate={}; game._finish_cast()
+	check(game.fishing_state==game.FishingState.IDLE and game.fish_count==pre_empty_town_fish_count,'empty candidate compatibility path cancels without registering a catch')
 	game.current_map=pre_empty_town_map; game._build_map(pre_empty_town_map); game.player=pre_empty_town_player
 	game.time_of_day=pre_empty_town_time; game.weather=pre_empty_town_weather; game.season=pre_empty_town_season
 	var forecast_before: Array = game.available_fish('rocky',0.95,'storm','summer')
@@ -428,6 +435,8 @@ func run():
 	game.notebook_open=false
 	game._reset_fishing(); game._break_chain(); game.combo=2
 	game.player=Vector2(497,151)
+	# Use a legal rocky tide for the battle probes; empty pools now refuse casts.
+	game.time_of_day=0.50; game.weather='clear'; game.season='summer'
 	game._try_fish(); game._process_fishing(4.0)
 	check(game.fish_hp_max==12 and game.timing_timer==20.0,'battle starts with stamina and a 20 second limit')
 	var before_battle=game.fish_count

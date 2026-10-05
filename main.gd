@@ -945,18 +945,6 @@ func _species_pool() -> Array[Dictionary]:
 		if fish_available(species): pool.append(fish)
 	return pool
 
-func _map_legal_species_fallback() -> Dictionary:
-	# A tide window can temporarily empty a map's pool. Keep the cast legal by
-	# selecting the first species whose map contract includes the current map;
-	# the grotto shares Rocky Shore's ordinary species. This is deliberately
-	# separate from fish_available(), whose tide checks are what triggered the
-	# empty pool in the first place.
-	for fish in FISH_SPECIES:
-		var maps: Array = fish.get("maps", [])
-		if maps.has(current_map) or (current_map == "grotto" and maps.has("rocky")):
-			return fish
-	return {}
-
 func _weighted_species_pick(pool: Array[Dictionary], bonus: float = -1.0) -> Dictionary:
 	# Keep species selection rarity-weighted in every path, including the
 	# one-shot rescue floor. A uniform rare_pool roll would make each rare and
@@ -979,7 +967,11 @@ func _weighted_species_pick(pool: Array[Dictionary], bonus: float = -1.0) -> Dic
 func _pick_species(grade: String, apply_rescue := false, exclude_legendary := false) -> Dictionary:
 	if apply_rescue: rescue_selection_used = false
 	var pool := _species_pool()
-	if pool.is_empty(): return _map_legal_species_fallback()
+	# A map can have no fish during a restrictive tide. Do not synthesize a
+	# species here: every returned candidate must have passed fish_available().
+	# _try_fish() handles this state by keeping the cast idle without charging or
+	# registering a catch.
+	if pool.is_empty(): return {}
 	var eligible: Array[Dictionary] = []
 	for fish in pool:
 		if exclude_legendary and str(fish.get("rarity", "COMMON")) == "LEGENDARY": continue
@@ -1535,6 +1527,12 @@ func _try_fish():
 		return
 	if fishing_state != FishingState.IDLE: return
 	if _can_fish():
+		# Restrictive tide windows can leave a map with no legal species. Keep the
+		# cast idle in that state instead of charging tackle or creating an illegal
+		# catch through an empty candidate.
+		if _species_pool().is_empty():
+			toast = "No fish are biting under this tide"; toast_t = 2.5
+			return
 		var cast_cost := tackle_cost()
 		if shells < cast_cost:
 			toast = "Need %d shells for %s (you have %d)" % [cast_cost, tackle_summary(), shells]; toast_t = 2.5
@@ -1916,6 +1914,13 @@ func _resolve_fishing_timing(position: float):
 		_play_se("miss")
 		toast = "MISS!  " + (chain_break_text + "  /  " if chain_break_text != "" else "") + "SPACE to cast again"
 		toast_t = result_t
+		return
+	# Defensive compatibility path: a caller may have entered the timing state
+	# before a restrictive tide left the map with no legal species. Do not let an
+	# empty candidate reach the ledger; cancel the cast as a no-op instead.
+	if cast_candidate.is_empty() and _species_pool().is_empty():
+		_reset_fishing()
+		toast = "No fish are biting under this tide"; toast_t = 2.5
 		return
 	combo += 1
 	var fever_started := combo >= FEVER_THRESHOLD and not fever_active
