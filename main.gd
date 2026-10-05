@@ -752,7 +752,7 @@ func _can_fish() -> bool:
 func _fishing_spots() -> Array[Dictionary]:
 	match current_map:
 		"town": return [{"pos":Vector2(502,530),"label":"Old Salt Pier"}]
-	"beach": return [
+		"beach": return [
 			{"pos":Vector2(205,157),"label":"North Tide Pool"},
 			{"pos":Vector2(725,370),"label":"South Tide Pool"}
 		]
