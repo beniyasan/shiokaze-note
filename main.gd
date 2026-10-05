@@ -578,7 +578,8 @@ func _walkable(pos: Vector2) -> bool:
 	# Feet collision: canopy overlap is intentional for top-down depth.
 	var feet := Rect2(pos-Vector2(4,3),Vector2(8,5))
 	for c in [feet.position,feet.position+Vector2(8,0),feet.end,feet.position+Vector2(0,5)]:
-		var on_pier: bool = c.x >= 486 and c.x <= 518 and c.y >= 440 and c.y <= 545
+		# The pier only exists in town; other maps end at their shoreline.
+		var on_pier: bool = current_map == "town" and c.x >= 486 and c.x <= 518 and c.y >= 440 and c.y <= 545
 		if not on_pier and (c.x < 28 or c.x >= 828 or c.y < 28 or c.y >= _shore(c.x)-4): return false
 	for body in solids:
 		if body.intersects(feet): return false
@@ -689,38 +690,55 @@ func _float_screen_pos() -> Vector2:
 	if not is_inside_tree(): return Vector2(240, 160)
 	return get_viewport().get_canvas_transform() * world
 
-func _check_map_exit():
-	if transition_active: return
-	var exit := ""
-	if current_map == "town":
-		# The south road meets the shoreline around y=440; keep the exit on walkable land.
-		if player.y > 438 and player.x > 450 and player.x < 550: exit = "beach"
-		elif player.x > 798 and player.y > 250 and player.y < 430: exit = "rocky"
-	elif current_map == "beach":
-		if player.y < 34 and player.x > 280 and player.x < 560: exit = "town"
-		elif player.x > 798 and player.y > 280 and player.y < 560: exit = "rocky"
-	elif current_map == "rocky":
+# Every map connection lives in this one table: the trigger zone the hero walks
+# into, the spawn in the destination map, and the signpost drawn for it. A zone
+# must stay clear of fishing spots and of the spawns that arrive on its map, so
+# travel never swallows a fishing bank or bounces straight back (see the exit
+# checks in tests/smoke.gd).
+const MAP_EXITS := {
+	"town": [
+		# The south road runs straight onto Old Salt Pier, so the beach gate sits
+		# on the sand just east of it rather than across the road.
+		{"to":"beach","zone":Rect2(528,448,56,32),"spawn":Vector2(400,80),"marker":Vector2(556,440),"label":"BEACH","dir":Vector2(0,1)},
+		{"to":"rocky","zone":Rect2(798,250,62,180),"spawn":Vector2(90,340),"marker":Vector2(800,338),"label":"ROCKY SHORE","dir":Vector2(1,0)}
+	],
+	"beach": [
+		{"to":"town","zone":Rect2(280,0,280,34),"spawn":Vector2(556,430),"marker":Vector2(420,40),"label":"TOWN","dir":Vector2(0,-1)},
+		{"to":"rocky","zone":Rect2(798,280,62,280),"spawn":Vector2(420,440),"marker":Vector2(800,390),"label":"ROCKY SHORE","dir":Vector2(1,0)}
+	],
+	"rocky": [
 		# Keep the legacy pool at (690,480) fishable; the grotto gate is farther
 		# east on the same bank so merely approaching the pool cannot transition.
-		if hidden_spot_unlocked and player.x > 760 and player.y > 450 and player.y < 500: exit = "grotto"
-		elif player.x < 34 and player.y > 250 and player.y < 430: exit = "town"
-		elif player.y > 420 and player.x > 280 and player.x < 560: exit = "beach"
-	elif current_map == "grotto":
+		{"to":"grotto","zone":Rect2(760,450,100,50),"spawn":Vector2(510,150),"marker":Vector2(780,460),"label":"MOONLIT GROTTO","dir":Vector2(1,0),"needs_grotto":true},
+		{"to":"town","zone":Rect2(0,250,34,180),"spawn":Vector2(760,340),"marker":Vector2(40,340),"label":"TOWN","dir":Vector2(-1,0)},
+		# A narrow gate at the water's edge: the rest of the lower bank stays
+		# walkable and fishable.
+		{"to":"beach","zone":Rect2(390,470,60,40),"spawn":Vector2(770,390),"marker":Vector2(420,458),"label":"BEACH","dir":Vector2(0,1)}
+	],
+	"grotto": [
 		# The grotto's return route is the west edge, matching the authored map
 		# workflow and keeping the cave entry above the lagoon as a one-way route.
-		if player.x < 34 and player.y > 250 and player.y < 430: exit = "rocky"
-	if exit != "":
-		var spawn := _entry_spawn(exit)
-		_transition_to(exit, spawn)
+		{"to":"rocky","zone":Rect2(0,250,34,180),"spawn":Vector2(90,340),"marker":Vector2(40,340),"label":"ROCKY SHORE","dir":Vector2(-1,0)}
+	]
+}
+
+func _map_exits(map_name: String = "") -> Array[Dictionary]:
+	var exits: Array[Dictionary] = []
+	for entry in MAP_EXITS.get(current_map if map_name.is_empty() else map_name, []):
+		if bool(entry.get("needs_grotto", false)) and not hidden_spot_unlocked: continue
+		exits.append(entry)
+	return exits
+
+func _check_map_exit():
+	if transition_active: return
+	for entry in _map_exits():
+		if (entry.zone as Rect2).has_point(player):
+			_transition_to(str(entry.to), entry.spawn)
+			return
 
 func _entry_spawn(map_name: String) -> Vector2:
-	if current_map == "town" and map_name == "beach": return Vector2(400,80)
-	if current_map == "town" and map_name == "rocky": return Vector2(90,340)
-	if current_map == "beach" and map_name == "town": return Vector2(500,520)
-	if current_map == "beach" and map_name == "rocky": return Vector2(90,340)
-	if current_map == "rocky" and map_name == "town": return Vector2(760,340)
-	if current_map == "rocky" and map_name == "grotto": return Vector2(510,150)
-	if current_map == "grotto" and map_name == "rocky": return Vector2(90,340)
+	for entry in _map_exits():
+		if str(entry.to) == map_name: return entry.spawn
 	return Vector2(400,80)
 
 func _map_camera_bias() -> Vector2:
@@ -2584,30 +2602,11 @@ func _draw_breakwater(center: Vector2) -> void:
 
 func _exit_markers() -> Array[Dictionary]:
 	# Exit markers are deliberately kept in world space so they remain visible as
-	# the camera follows the player. Their locations mirror _check_map_exit().
-	match current_map:
-		"town":
-			return [
-				{"pos":Vector2(500,441),"label":"BEACH","dir":Vector2(0,1)},
-				{"pos":Vector2(800,338),"label":"ROCKY SHORE","dir":Vector2(1,0)}
-			]
-		"beach":
-			return [
-				{"pos":Vector2(420,40),"label":"TOWN","dir":Vector2(0,-1)},
-				{"pos":Vector2(800,390),"label":"ROCKY SHORE","dir":Vector2(1,0)}
-			]
-		"rocky":
-			var rocky_markers: Array[Dictionary] = [
-				{"pos":Vector2(40,340),"label":"TOWN","dir":Vector2(-1,0)},
-				{"pos":Vector2(420,430),"label":"BEACH","dir":Vector2(0,1)}
-			]
-			if hidden_spot_unlocked:
-				rocky_markers.append({"pos":Vector2(780,460),"label":"MOONLIT GROTTO","dir":Vector2(1,0)})
-			return rocky_markers
-		"grotto":
-			return [{"pos":Vector2(40,340),"label":"ROCKY SHORE","dir":Vector2(-1,0)}]
-		_:
-			return []
+	# the camera follows the player. Their locations come from MAP_EXITS.
+	var markers: Array[Dictionary] = []
+	for entry in _map_exits():
+		markers.append({"pos":entry.marker,"label":entry.label,"dir":entry.dir})
+	return markers
 
 func _draw_exit_markers():
 	for marker in _exit_markers():
