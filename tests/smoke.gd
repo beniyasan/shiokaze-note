@@ -729,7 +729,12 @@ func run():
 	check(not rocky_pool.any(func(f): return f.rarity=='LEGENDARY' and f.maps.has('hidden')),'hidden fish stay out of ordinary rocky pools')
 	game.player=Vector2(690,480)
 	check(game._species_pool().any(func(f): return f.rarity=='LEGENDARY' and f.maps.has('hidden')),'hidden fish require the actual grotto fishing spot')
-	check(game._legendary_chance_for_cast()<=0.05,'rocky legendary chance is capped at five percent')
+	# Pin the chain, FEVER and bait so the cap is actually exercised; the state
+	# left by the earlier randomised casts would otherwise decide this check.
+	game.combo=5; game.fever_active=true; game.bait_index=2
+	check(is_equal_approx(game._legendary_chance_for_cast(),game.LEGENDARY_CHANCE_CAP) and game.LEGENDARY_BASE_CHANCE+game.LEGENDARY_FEVER_BONUS+game.LEGENDARY_MOONSEED_BONUS>=game.LEGENDARY_CHANCE_CAP,'rocky legendary chance is capped')
+	game.combo=1
+	check(game._legendary_chance_for_cast()==0.0,'no legendary roll before the third chain catch')
 	game.combo=2; game.fever_active=false; game.bait_index=1
 	var no_fever_legendary_chance: float = game._legendary_chance_for_cast()
 	game.combo=3; game.fever_active=true; game.bait_index=1
