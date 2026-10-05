@@ -5,6 +5,14 @@ func check(ok: bool, label: String):
 	if not ok: failures += 1
 func _initialize():
 	call_deferred('run')
+# Walks like _process does: one movement step, then the map-exit check.
+func walk_to(game, target: Vector2, frames: int = 900) -> bool:
+	for i in range(frames):
+		if game.player.distance_to(target) < 2.0: return true
+		if game.transition_active: return game.player.distance_to(target) < 12.0
+		game._move_player((target-game.player).normalized(),0.016)
+		game._check_map_exit()
+	return game.player.distance_to(target) < 2.0
 func run():
 	var game = load('res://main.tscn').instantiate()
 	root.add_child(game); game.set_process(false)
@@ -380,8 +388,47 @@ func run():
 	check(game.current_map=='rocky' and game.fish_count==5,'beach to rocky preserves ledger')
 	game._save_game('user://map-test.json'); game.current_map='town'; game._build_map('town'); game._load_game('user://map-test.json')
 	check(game.current_map=='rocky','save restores active map')
-	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,440); game._check_map_exit()
-	check(game._walkable(Vector2(500,440)) and game.transition_target=='beach','town beach exit is reachable')
+	game.current_map='town'; game._build_map('town'); game.player=Vector2(556,452); game._check_map_exit()
+	check(game._walkable(Vector2(556,452)) and game.transition_target=='beach' and game.transition_spawn==Vector2(400,80),'town beach exit is reachable')
+	game.transition_active=false
+	# Walk the real runtime path (move, then exit check): the south road must reach
+	# the pier's fishing spot, and stepping off it must not leave town.
+	game.player=Vector2(500,425)
+	check(walk_to(game,Vector2(502,530)) and not game.transition_active and game._can_fish(),'walking the south road reaches the pier without leaving town')
+	check(walk_to(game,Vector2(500,425)) and not game.transition_active,'walking back off the pier stays in town')
+	check(walk_to(game,Vector2(556,452)) and game.transition_active and game.transition_target=='beach','walking onto the sand east of the pier leaves for the beach')
+	game.transition_active=false
+	# The pier is town geometry; the same rectangle is open water elsewhere.
+	game.current_map='beach'; game._build_map('beach')
+	check(not game._walkable(Vector2(502,530)),'beach has no phantom pier')
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(300,400)
+	check(walk_to(game,Vector2(300,485)) and not game.transition_active and game._can_fish(),'rocky lower bank is walkable and fishable')
+	game.player=Vector2(420,440)
+	check(walk_to(game,Vector2(420,475)) and game.transition_target=='beach' and game.transition_spawn==Vector2(770,390),'rocky beach gate leads to the east side of the beach')
+	game.transition_active=false
+	# Every connection: the trigger can be stood in, and its spawn is walkable,
+	# outside every trigger of the destination (no bounce) and has a way back.
+	var unlocked_before: bool = game.hidden_spot_unlocked; game.hidden_spot_unlocked=true
+	for map_name in game.MAP_EXITS:
+		for entry in game.MAP_EXITS[map_name]:
+			var route := '%s -> %s' % [map_name, entry.to]
+			game.current_map=map_name; game._build_map(map_name)
+			var standable := false
+			for x in range(int(entry.zone.position.x), int(entry.zone.end.x), 4):
+				for y in range(int(entry.zone.position.y), int(entry.zone.end.y), 4):
+					if game._walkable(Vector2(x,y)): standable = true
+			check(standable,'exit trigger is reachable: '+route)
+			for spot in game._fishing_spots():
+				check(not entry.zone.has_point(spot.pos),'exit trigger leaves %s fishable: %s' % [spot.label, route])
+			game.current_map=str(entry.to); game._build_map(game.current_map)
+			var clear: bool = game._walkable(entry.spawn)
+			var way_back := str(entry.to) == 'grotto'
+			for back in game.MAP_EXITS[entry.to]:
+				if back.zone.has_point(entry.spawn): clear = false
+				if str(back.to) == map_name: way_back = true
+			check(clear,'spawn is walkable and outside every trigger: '+route)
+			check(way_back,'destination has a return exit: '+route)
+	game.hidden_spot_unlocked=unlocked_before
 	# Each map exposes named, local fishing landmarks as well as its shoreline.
 	game.current_map='beach'; game._build_map('beach'); game.player=Vector2(205,157)
 	check(game._can_fish() and game._fishing_spots().size()==2,'beach tide pools are fishable')

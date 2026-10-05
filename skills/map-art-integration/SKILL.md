@@ -29,8 +29,9 @@ future integration rather than assuming the dimensions remain unchanged.
   their feet, then draws exit markers and transient effects.
 - `_walkable()` checks a feet rectangle against `solids`, world bounds, and
   `_shore(x)`. `_fishing_spots()` and `_can_fish()` define castable locations.
-- `_check_map_exit()`, `_entry_spawn()`, `_transition_to()`, and
-  `_exit_markers()` together define map connections.
+- The `MAP_EXITS` table defines map connections (trigger zone, destination
+  spawn, signpost); `_check_map_exit()`, `_entry_spawn()`, and
+  `_exit_markers()` only read it, and `_transition_to()` performs the travel.
 - `_save_game()` / `_load_game()` persist map and player position plus shared
   progress. `_map_display_name()`, `_map_hint()`, `_exit_hint()`, and
   `_draw_hud()` own dynamic presentation.
@@ -117,9 +118,9 @@ Done when every visible route, obstacle, and fishing area behaves as drawn.
 
 ## 4. Connect maps and preserve saves
 
-For each connection, update the trigger in `_check_map_exit()`, destination
-spawn in `_entry_spawn()`, marker in `_exit_markers()`, and tests for both
-travel directions. A spawn must be walkable in the destination and outside its
+For each connection, add one `MAP_EXITS` entry per travel direction (trigger
+`zone`, destination `spawn`, `marker`, `label`, `dir`); the smoke suite checks
+every entry for a reachable trigger, a safe spawn, and a return exit. A spawn must be walkable in the destination and outside its
 return trigger, so travel does not bounce immediately back. Verify triggers by
 walking to them; directly calling `_transition_to()` alone misses blocked exits.
 
