@@ -142,11 +142,11 @@ func run():
 	# Over many seeded Rocky casts a rainbow float must be honest more often than not.
 	var saved_combo: int = game.combo
 	var saved_clock := [game.time_of_day, game.weather, game.season]
-	game._reset_fishing(); game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
+	game._reset_fishing(); game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(497,151)
 	game.combo=0; game.fever_active=false; game.rng.seed=31337
 	# The species pool follows the tide, so the lie rate must follow the pool:
 	# check a pool with several EPIC species and the town's single-EPIC pool.
-	var honesty_envs := [['rocky',Vector2(170,590),0.50,'clear','summer'],['rocky',Vector2(170,590),0.95,'clear','autumn'],['town',Vector2(500,530),0.50,'clear','spring'],['town',Vector2(500,530),0.50,'overcast','winter']]
+	var honesty_envs := [['rocky',Vector2(497,151),0.50,'clear','summer'],['rocky',Vector2(497,151),0.95,'clear','autumn'],['town',Vector2(500,530),0.50,'clear','spring'],['town',Vector2(500,530),0.50,'overcast','winter']]
 	for env in honesty_envs:
 		game.current_map=str(env[0]); game._build_map(str(env[0])); game.player=env[1]
 		game.time_of_day=float(env[2]); game.weather=str(env[3]); game.season=str(env[4])
@@ -167,11 +167,11 @@ func run():
 		var purple_rate := float(purple_honest)/float(maxi(1,purple_total))
 		check(rainbow_total>20 and rainbow_rate>=0.6,'a rainbow cue is mostly honest on %s %s/%s (%d/%d)' % [str(env[0]),str(env[3]),str(env[4]),rainbow_honest,rainbow_total])
 		check(purple_total>40 and purple_rate>=0.5,'a purple cue is honest more often than not on %s %s/%s (%d/%d)' % [str(env[0]),str(env[3]),str(env[4]),purple_honest,purple_total])
-	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(497,151)
 	check(game._candidate_share_at_least(0)>0.99 and game._candidate_share_at_least(3)<game._candidate_share_at_least(2),'candidate rank shares are a decreasing probability')
 	# GOOD substitutes come from the whole RARE pool, not always its first species.
 	var substitute_names := {}
-	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(497,151)
 	game.time_of_day=0.95; game.weather='clear'; game.season='autumn'
 	for seed_value in range(1,60):
 		game.rng.seed=seed_value
@@ -225,7 +225,7 @@ func run():
 	# Option 6b: the first two misses make purple-or-higher cues visibly more
 	# likely, while the third miss remains the explicit RARE floor. The shares
 	# use the same deterministic rarity weights as the natural cast roll.
-	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(497,151)
 	game.time_of_day=0.95; game.weather='clear'; game.season='autumn'; game.combo=0; game.fever_active=false
 	game._reset_pity(); var purple_share_0: float = game._candidate_share_at_least(2)
 	game._advance_pity('MISS'); var purple_share_1: float = game._candidate_share_at_least(2)
@@ -383,17 +383,37 @@ func run():
 	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,440); game._check_map_exit()
 	check(game._walkable(Vector2(500,440)) and game.transition_target=='beach','town beach exit is reachable')
 	# Each map exposes named, local fishing landmarks as well as its shoreline.
-	game.current_map='beach'; game._build_map('beach'); game.player=Vector2(300,487)
+	game.current_map='beach'; game._build_map('beach'); game.player=Vector2(205,157)
 	check(game._can_fish() and game._fishing_spots().size()==2,'beach tide pools are fishable')
 	game.player=Vector2(300,300)
 	check(not game._can_fish(),'beach inland cast rejected')
-	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(497,151)
 	check(game._can_fish() and game._fishing_spots().size()==2,'rocky tide pools are fishable')
+	# The unlocked cove is a real map transition, not only a hidden fishing spot
+	# layered onto Rocky Shore. Its save/load state and local pool remain stable.
+	game.hidden_spot_unlocked=true; game.hidden_spot_collected=true; game.transition_active=false
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(780,460); game._check_map_exit()
+	check(game.transition_target=='grotto','rocky grotto exit is gated and reachable')
+	game._transition_to('grotto',Vector2(510,150)); game._process(0.5)
+	check(game.current_map=='grotto' and game.player==Vector2(510,150),'grotto transition rebuilds the map')
+	check(game._walkable(Vector2(32,340)) and not game._walkable(Vector2(512,300)) and game._walkable(Vector2(512,520)),'grotto west route and lagoon collision')
+	var grotto_exit: Dictionary = game._exit_markers()[0]
+	check(grotto_exit.pos==Vector2(40,340) and grotto_exit.dir==Vector2(-1,0),'grotto uses a west-edge return marker')
+	game.player=Vector2(512,520)
+	check(game._can_fish() and game._fishing_spots().size()==1 and game._at_hidden_fishing_spot(),'grotto moonlit pool is fishable')
+	game._save_game('user://grotto-map-test.json'); game.current_map='town'; game._build_map('town'); game._load_game('user://grotto-map-test.json')
+	check(game.current_map=='grotto' and game._fishing_spots().size()==1,'save restores the grotto map')
+	var malformed_grotto_save={"map":"grotto","x":512.0,"y":300.0}
+	var malformed_file=FileAccess.open('user://grotto-invalid-test.json',FileAccess.WRITE); malformed_file.store_string(JSON.stringify(malformed_grotto_save)); malformed_file.close()
+	game.player=Vector2(700,700); game._load_game('user://grotto-invalid-test.json')
+	check(game.current_map=='grotto' and game.player==Vector2(510,150) and game._walkable(game.player),'invalid grotto save falls back to safe spawn')
+	game.player=Vector2(32,340); game.transition_active=false; game._check_map_exit(); game._process(0.5)
+	check(game.current_map=='rocky' and game.player==Vector2(90,340) and game._walkable(game.player),'grotto returns to rocky shore via west edge')
 	# Battle lasts through multiple spaced inputs; a single tap is not a catch.
 	game.transition_active=false
 	game.notebook_open=false
 	game._reset_fishing(); game._break_chain(); game.combo=2
-	game.player=Vector2(170,590)
+	game.player=Vector2(497,151)
 	game._try_fish(); game._process_fishing(4.0)
 	check(game.fish_hp_max==12 and game.timing_timer==20.0,'battle starts with stamina and a 20 second limit')
 	var before_battle=game.fish_count
@@ -442,7 +462,7 @@ func run():
 		var recovered = challenge.accept(challenge.target_center(),challenge.safe_lane())
 		check(recovered.success,'challenge %s can recover at its visible target' % starting_name)
 	# A combo-two battle wires the chain into the live timing state.
-	game._reset_fishing(); game._break_chain(); game.combo=2; game.player=Vector2(170,590)
+	game._reset_fishing(); game._break_chain(); game.combo=2; game.player=Vector2(497,151)
 	game._try_fish(); game._process_fishing(4.0)
 	check(game.fishing_challenge != null and game.fishing_challenge.rounds.size()==4,'bite configures the four-round challenge chain')
 	# Use the real moving gauge at 60fps, rather than injecting perfect positions.
@@ -557,10 +577,10 @@ func run():
 	game.time_of_day=float(rumor_clock[0]); game.weather=str(rumor_clock[1]); game.season=str(rumor_clock[2])
 	game._update_rumor_gate(); game.hidden_spot_unlocked=true
 	game.current_map='rocky'; game._build_map('rocky'); check(game._fishing_spots().size()==3,'hidden grotto adds distinct pool')
-	game.hidden_spot_collected=true; game.player=Vector2(170,590)
+	game.hidden_spot_collected=true; game.player=Vector2(497,151)
 	var rocky_pool: Array = game._species_pool()
 	check(not rocky_pool.any(func(f): return f.rarity=='LEGENDARY' and f.maps.has('hidden')),'hidden fish stay out of ordinary rocky pools')
-	game.player=Vector2(690,520)
+	game.player=Vector2(690,480)
 	check(game._species_pool().any(func(f): return f.rarity=='LEGENDARY' and f.maps.has('hidden')),'hidden fish require the actual grotto fishing spot')
 	check(game._legendary_chance_for_cast()<=0.05,'rocky legendary chance is capped at five percent')
 	game.combo=2; game.fever_active=false; game.bait_index=1
@@ -573,7 +593,7 @@ func run():
 	check(game._rarity_bonus_scale('COMMON')==0.0 and game._rarity_bonus_scale('RARE')>game._rarity_bonus_scale('UNCOMMON') and game._rarity_bonus_scale('EPIC')>game._rarity_bonus_scale('RARE'),'bait and FEVER scales favour higher rarities')
 	# Force a legendary candidate to verify the reveal path without relying on a
 	# statistical roll.  The result must still come from the cast candidate.
-	game._reset_fishing(); game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590); game.combo=2
+	game._reset_fishing(); game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(497,151); game.combo=2
 	game.cast_candidate=game.FISH_SPECIES[4].duplicate(true)
 	game._resolve_fishing_timing(0.5)
 	check(game.last_rarity=='LEGENDARY' and game.last_catch==game.FISH_SPECIES[4].name and game.result_t>6.0,'forced legendary candidate opens the staged reveal')
@@ -628,7 +648,7 @@ func run():
 	# ---- Dopamine FX (EFFECTS_DESIGN.md) ----------------------------------
 	var fx = game.fx
 	game._reset_fishing(); game._break_chain()
-	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(497,151)
 	game.time_of_day=0.95; game.weather='clear'; game.season='autumn'
 	# The premium "golden tide" is the one cue that never lies.
 	var low_premium := 0

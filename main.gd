@@ -63,7 +63,9 @@ var toast := "Follow the path east, then south to the pier"
 var toast_t := 5.0
 var rng := RandomNumberGenerator.new()
 var cam := Camera2D.new()
+const MAP_PRESENTATION_ZOOM := 0.55
 var terrain: Texture2D
+var map_art: Dictionary = {}
 var hero: Texture2D
 var props: Array[Dictionary] = []
 var solids: Array[Rect2] = []
@@ -108,7 +110,7 @@ const FISH_SPECIES: Array[Dictionary] = [
  {"name":"Amber anchovy","rarity":"COMMON","maps":["beach"]}, {"name":"Dune flounder","rarity":"COMMON","maps":["beach"]}, {"name":"Tidepool blenny","rarity":"UNCOMMON","maps":["beach"]}, {"name":"Glass shrimp","rarity":"UNCOMMON","maps":["beach","rocky"]}, {"name":"Copper mackerel","rarity":"RARE","maps":["beach"]},
  {"name":"Saltwater eel","rarity":"UNCOMMON","maps":["town","rocky"]}, {"name":"Lantern squid","rarity":"RARE","maps":["rocky"]}, {"name":"Blackglass bass","rarity":"RARE","maps":["rocky"]}, {"name":"Storm sardine","rarity":"UNCOMMON","maps":["rocky"]}, {"name":"Gullfin","rarity":"COMMON","maps":["town","rocky"]},
  {"name":"Lighthouse ray","rarity":"EPIC","maps":["rocky"]}, {"name":"Tidemark carp","rarity":"UNCOMMON","maps":["town"]}, {"name":"Sea lavender perch","rarity":"RARE","maps":["beach","rocky"]}, {"name":"Pearl puffer","rarity":"EPIC","maps":["beach","rocky"]}, {"name":"Night sailfish","rarity":"EPIC","maps":["rocky"]},
- {"name":"Crown snapper","rarity":"EPIC","maps":["town","rocky"]}, {"name":"Singing herring","rarity":"RARE","maps":["town","beach"]}, {"name":"Aurora koi","rarity":"LEGENDARY","maps":["hidden"]}
+ {"name":"Crown snapper","rarity":"EPIC","maps":["town","rocky"]}, {"name":"Singing herring","rarity":"RARE","maps":["town","beach"]}, {"name":"Aurora koi","rarity":"LEGENDARY","maps":["hidden","grotto"]}
 ]
 var rumor_found := false
 # Rumor ids heard from Fisher Mera / the notice: "grotto" or a species name.
@@ -240,12 +242,15 @@ func _music_call(method: String, args: Array = []) -> void:
 func _ready():
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	terrain = load("res://assets/terrain.png")
+	map_art["beach"] = load("res://assets/maps/amber_beach.png")
+	map_art["rocky"] = load("res://assets/maps/rocky_shore.png")
+	map_art["grotto"] = load("res://assets/maps/moonlit_grotto.png")
 	hero = load("res://assets/hero.png")
 	for asset in ["cottage", "inn", "shop", "tree0", "tree1", "tree2", "barrel", "sign", "rock", "well", "reeds"]:
 		textures[asset] = load("res://assets/" + asset + ".png")
 	_load_fish_art()
 	_build_world()
-	cam.position = player.round()
+	cam.position = player.round() + _map_camera_bias()
 	cam.position_smoothing_enabled = false
 	cam.limit_left = 0; cam.limit_top = 0
 	cam.limit_right = int(WORLD_SIZE.x); cam.limit_bottom = int(WORLD_SIZE.y)
@@ -426,7 +431,15 @@ func fish_available(species: String, map_name: String = "", at_time: float = -1.
 	if fish.is_empty(): return false
 	var map := current_map if map_name.is_empty() else map_name
 	var map_ok: bool = fish.maps.has(map)
-	if fish.maps.has("hidden") and map == "rocky": map_ok = _at_hidden_fishing_spot()
+	# The grotto shares Rocky Shore's ordinary fish and rarity balance. Its
+	# hidden pool adds Aurora koi rather than replacing the entire catch table.
+	if map == "grotto" and fish.maps.has("rocky"): map_ok = true
+	if fish.maps.has("hidden"):
+		# Forecasts for an explicit grotto map should use that map's rules even
+		# while the player is elsewhere; Rocky still requires its legacy pool.
+		if map == "grotto": map_ok = true
+		elif map == "rocky": map_ok = _at_hidden_fishing_spot()
+		else: map_ok = false
 	if not map_ok: return false
 	var conditions := _fish_conditions(species)
 	var forecast_weather := weather if weather_name.is_empty() else _normalize_weather(weather_name)
@@ -455,6 +468,8 @@ func _build_map(map_name: String):
 		_build_beach()
 	elif map_name == "rocky":
 		_build_rocky()
+	elif map_name == "grotto":
+		_build_grotto()
 	else:
 		_build_town()
 
@@ -492,8 +507,8 @@ func _build_beach():
 	# Amber beach: dunes, driftwood and a broad north entrance from town.
 	landmarks = [
 		{"kind":"driftwood","pos":Vector2(146,430),"label":"Driftwood Cove"},
-		{"kind":"pool","pos":Vector2(300,480),"label":"North Tide Pool"},
-		{"kind":"pool","pos":Vector2(620,480),"label":"South Tide Pool"}
+		{"kind":"pool","pos":Vector2(205,157),"label":"North Tide Pool"},
+		{"kind":"pool","pos":Vector2(725,370),"label":"South Tide Pool"}
 	]
 	_add_prop("cottage", Vector2(260,190), Rect2(-25,-29,50,25))
 	_add_prop("barrel", Vector2(322,232), Rect2(-7,-17,14,16))
@@ -510,10 +525,10 @@ func _build_rocky():
 	# Rocky shore: sparse windblown trees and stone shelves.
 	landmarks = [
 		{"kind":"breakwater","pos":Vector2(310,420),"label":"Stone Breakwater"},
-		{"kind":"pool","pos":Vector2(170,585),"label":"Blackglass Pool"},
-		{"kind":"pool","pos":Vector2(520,573),"label":"Gull's Pool"},
+		{"kind":"pool","pos":Vector2(497,151),"label":"Blackglass Pool"},
+		{"kind":"pool","pos":Vector2(614,375),"label":"Gull's Pool"},
 		{"kind":"lighthouse","pos":Vector2(704,154),"label":"Farwatch Lighthouse"},
-		{"kind":"hidden_pool","pos":Vector2(690,520),"label":"Moonlit Grotto"}
+		{"kind":"hidden_pool","pos":Vector2(690,480),"label":"Moonlit Grotto"}
 	]
 	_add_prop("inn", Vector2(585,170), Rect2(-32,-40,64,37))
 	_add_prop("sign", Vector2(120,102), Rect2(-6,-9,12,9))
@@ -527,13 +542,32 @@ func _build_rocky():
 		_add_prop("barrel", Vector2(340+(i%4)*18,420+i*9), Rect2(-7,-17,14,16))
 	props.sort_custom(func(a,b): return a.pos.y < b.pos.y)
 
+func _build_grotto():
+	# Moonlit Grotto is a hidden cove reached from Rocky Shore after the guide
+	# gate. Its static art supplies the cliffs and waterfalls; this landmark keeps
+	# the gameplay fishing spot explicit for saves and the tide ledger.
+	landmarks = [{"kind":"grotto_pool","pos":Vector2(512,520),"label":"Moonlit Grotto"}]
+	# Keep the cavern's central lake out of the walkable path while leaving a
+	# generous ring around it for exploration and the lower fishing edge. Two
+	# stepped rectangles follow the broad lagoon without introducing a new
+	# collision shape dependency.
+	solids.append(Rect2(280,230,460,165))
+	solids.append(Rect2(345,395,330,88))
+
 func _add_prop(kind: String, pos: Vector2, body: Rect2):
 	props.append({"kind":kind,"pos":pos})
-	if body.size != Vector2.ZERO: solids.append(Rect2(pos+body.position,body.size))
+	# Static authored map art already contains visible landmarks; legacy prop
+	# colliders would otherwise become invisible walls at old coordinates.
+	if body.size != Vector2.ZERO and not _using_static_map_art():
+		solids.append(Rect2(pos+body.position,body.size))
 
 func _shore(x: float) -> float:
 	if current_map == "beach": return 500.0
-	if current_map == "rocky": return 620.0 - (int(x/96.0)%3)*12
+	# Rocky Shore artwork places the authored lower bank around y=500. Keep
+	# movement and casts on that bank instead of allowing the hero into the
+	# visibly deep water below it.
+	if current_map == "rocky": return 500.0
+	if current_map == "grotto": return 620.0
 	if x < 240: return 464
 	if x < 416: return 480
 	if x < 608: return 464
@@ -606,7 +640,7 @@ func _process(delta):
 	if Input.is_action_just_pressed("save_game"): _save_game()
 	if InputMap.has_action("fx_toggle") and Input.is_action_just_pressed("fx_toggle"): toggle_reduced_flash()
 	toast_t = maxf(0.0, toast_t-delta)
-	cam.position = player.round()
+	cam.position = player.round() + _map_camera_bias()
 	var base_offset := Vector2.ZERO
 	if shake_t > 0.0:
 		var shake_power := 8.0 if last_rarity == "LEGENDARY" else (4.0 if last_rarity == "RARE" else 2.0)
@@ -618,7 +652,7 @@ func _process(delta):
 		cam.zoom = Vector2.ONE
 	else:
 		cam.offset = base_offset + fx.shake_offset()
-		cam.zoom = Vector2.ONE * float(fx.zoom_factor())
+		cam.zoom = Vector2.ONE * MAP_PRESENTATION_ZOOM * float(fx.zoom_factor())
 	_sync_fx_outputs()
 	queue_redraw(); hud.queue_redraw()
 
@@ -666,8 +700,15 @@ func _check_map_exit():
 		if player.y < 34 and player.x > 280 and player.x < 560: exit = "town"
 		elif player.x > 798 and player.y > 280 and player.y < 560: exit = "rocky"
 	elif current_map == "rocky":
-		if player.x < 34 and player.y > 250 and player.y < 430: exit = "town"
+		# Keep the legacy pool at (690,480) fishable; the grotto gate is farther
+		# east on the same bank so merely approaching the pool cannot transition.
+		if hidden_spot_unlocked and player.x > 760 and player.y > 450 and player.y < 500: exit = "grotto"
+		elif player.x < 34 and player.y > 250 and player.y < 430: exit = "town"
 		elif player.y > 420 and player.x > 280 and player.x < 560: exit = "beach"
+	elif current_map == "grotto":
+		# The grotto's return route is the west edge, matching the authored map
+		# workflow and keeping the cave entry above the lagoon as a one-way route.
+		if player.x < 34 and player.y > 250 and player.y < 430: exit = "rocky"
 	if exit != "":
 		var spawn := _entry_spawn(exit)
 		_transition_to(exit, spawn)
@@ -678,7 +719,20 @@ func _entry_spawn(map_name: String) -> Vector2:
 	if current_map == "beach" and map_name == "town": return Vector2(500,520)
 	if current_map == "beach" and map_name == "rocky": return Vector2(90,340)
 	if current_map == "rocky" and map_name == "town": return Vector2(760,340)
+	if current_map == "rocky" and map_name == "grotto": return Vector2(510,150)
+	if current_map == "grotto" and map_name == "rocky": return Vector2(90,340)
 	return Vector2(400,80)
+
+func _map_camera_bias() -> Vector2:
+	# Shoreline entrances are intentionally at the north/west edge so route
+	# transitions remain readable. Bias the camera a little into each map so the
+	# first frame includes its signature pool/breakwater instead of an empty
+	# approach strip, while the player stays comfortably on-screen.
+	match current_map:
+		"beach": return Vector2(0,110)
+		"rocky": return Vector2(200,70)
+		"grotto": return Vector2.ZERO
+		_ : return Vector2.ZERO
 
 func transition_to_map(map_name: String, spawn: Vector2):
 	_transition_to(map_name, spawn)
@@ -692,19 +746,21 @@ func _transition_to(map_name: String, spawn: Vector2):
 func _can_fish() -> bool:
 	for spot in _fishing_spots():
 		if player.distance_to(spot.pos) <= 24.0: return true
+	if current_map == "grotto": return false
 	return (player.y >= _shore(player.x)-21 and player.x>70 and player.x<810)
 
 func _fishing_spots() -> Array[Dictionary]:
 	match current_map:
 		"town": return [{"pos":Vector2(502,530),"label":"Old Salt Pier"}]
-		"beach": return [
-			{"pos":Vector2(300,487),"label":"North Tide Pool"},
-			{"pos":Vector2(620,487),"label":"South Tide Pool"}
+	"beach": return [
+			{"pos":Vector2(205,157),"label":"North Tide Pool"},
+			{"pos":Vector2(725,370),"label":"South Tide Pool"}
 		]
 		"rocky":
-			var spots: Array[Dictionary] = [{"pos":Vector2(170,590),"label":"Blackglass Pool"},{"pos":Vector2(520,578),"label":"Gull's Pool"}]
-			if hidden_spot_unlocked: spots.append({"pos":Vector2(690,520),"label":"Moonlit Grotto"})
+			var spots: Array[Dictionary] = [{"pos":Vector2(497,151),"label":"Blackglass Pool"},{"pos":Vector2(614,375),"label":"Gull's Pool"}]
+			if hidden_spot_unlocked: spots.append({"pos":Vector2(690,480),"label":"Moonlit Grotto"})
 			return spots
+		"grotto": return [{"pos":Vector2(512,520),"label":"Moonlit Grotto"}]
 		_: return []
 
 # --- Rumors and the collection gate -------------------------------------------
@@ -810,14 +866,18 @@ func _update_rumor_gate() -> void:
 	if rumor_found and not hidden_spot_unlocked and collection_percent() >= float(HIDDEN_SPOT_COLLECTION_PERCENT):
 		hidden_spot_unlocked = true
 		toast = "The guide is %d%% full: a hidden grotto is marked on the rocky shore" % HIDDEN_SPOT_COLLECTION_PERCENT; toast_t = 3.5
-	if hidden_spot_unlocked and current_map == "rocky" and player.distance_to(Vector2(690,520)) < 28.0:
+	if hidden_spot_unlocked and current_map == "rocky" and player.distance_to(Vector2(690,480)) < 28.0:
+		hidden_spot_collected = true
+	if current_map == "grotto" and hidden_spot_unlocked:
 		hidden_spot_collected = true
 
 func _at_hidden_fishing_spot() -> bool:
 	# Aurora koi is tied to the grotto pool itself.  Visiting the grotto unlocks
 	# the pool for the run, but standing at another rocky shoreline must not
 	# silently include hidden fish in its species roll.
-	return current_map == "rocky" and hidden_spot_unlocked and hidden_spot_collected and player.distance_to(Vector2(690,520)) <= 24.0
+	if not hidden_spot_unlocked or not hidden_spot_collected: return false
+	if current_map == "grotto": return player.distance_to(Vector2(512,520)) <= 28.0
+	return current_map == "rocky" and player.distance_to(Vector2(690,480)) <= 24.0
 
 func _species_pool() -> Array[Dictionary]:
 	var pool: Array[Dictionary] = []
@@ -933,7 +993,7 @@ func _legendary_chance_for_cast() -> float:
 	# The upcoming bite is eligible for a legendary only on Rocky Shore after
 	# the third chain catch.  FEVER and Moonseed each add a small, bounded nudge;
 	# together they cap the chance at 5% rather than making a legendary routine.
-	if current_map != "rocky" or combo + 1 < FEVER_THRESHOLD: return 0.0
+	if current_map not in ["rocky", "grotto"] or combo + 1 < FEVER_THRESHOLD: return 0.0
 	var chance := 0.01
 	if fever_active: chance += 0.02
 	if bait_index == 2: chance += 0.02
@@ -2137,7 +2197,7 @@ func _load_game(path: String = SAVE_PATH):
 	if not data is Dictionary: return
 	var loaded_map := str(data.get("map","town"))
 	fx.reduced = bool(data.get("fx_reduced", false))
-	if loaded_map in ["town","beach","rocky"] and loaded_map != current_map:
+	if loaded_map in ["town","beach","rocky","grotto"] and loaded_map != current_map:
 		current_map = loaded_map; _build_map(current_map)
 	day = maxi(1,int(data.get("day",1))); fish_count = maxi(0,int(data.get("fish",0)))
 	shells = maxi(0, int(data.get("shells", 12)))
@@ -2147,7 +2207,14 @@ func _load_game(path: String = SAVE_PATH):
 	weather = _normalize_weather(str(data.get("weather", _weather_for_day(day))))
 	season = _normalize_season(str(data.get("season", _season_for_day(day))))
 	var saved_pos := Vector2(float(data.get("x",368)),float(data.get("y",372)))
-	if _walkable(saved_pos): player = saved_pos
+	if _walkable(saved_pos):
+		player = saved_pos
+	else:
+		# A migrated or malformed save must never leave the hero at the previous
+		# map's position (or inside a lagoon/solid). Use the map's known entry
+		# point, then fall back to the town start if a future map changes shape.
+		var safe_spawn := Vector2(510,150) if current_map == "grotto" else Vector2(400,80)
+		if _walkable(safe_spawn): player = safe_spawn
 	if data.get("catches",{}) is Dictionary: catches = data.get("catches",{})
 	catch_metadata.clear()
 	first_capture_metadata.clear()
@@ -2288,23 +2355,18 @@ func _load_game(path: String = SAVE_PATH):
 
 func _draw():
 	if terrain == null: return
-	draw_texture(terrain,Vector2.ZERO)
+	# Town keeps its authored terrain sheet; shoreline maps get their own layered
+	# pixel backdrops so each transition has a distinct silhouette. These layers
+	# are visual-only: movement and fishing still use _shore() and solids below.
+	_draw_map_background()
 	_draw_map_landmarks()
-	# Fine animated foam and water highlights, snapped to integer pixels.
-	for x in range(32,819,24):
-		var y := _shore(x) + 3 + int(sin(elapsed*1.5+x)*2)
-		draw_line(Vector2(x,y),Vector2(x+12,y),Color("#c4dbc1"))
-	for i in range(28):
-		var x := 50+i*33
-		var y := 558+(i%4)*18
-		var drift := int(sin(elapsed+i)*3)
-		draw_line(Vector2(x+drift,y),Vector2(x+drift+6,y),Color("#64a2a5"))
 	var drawn := false
 	for prop in props:
 		if not drawn and prop.pos.y > player.y:
 			_draw_player(); drawn = true
 		var tex: Texture2D = textures[prop.kind]
-		draw_texture(tex,prop.pos-Vector2(tex.get_width()/2.0,tex.get_height()))
+		if not _using_static_map_art():
+			draw_texture(tex,prop.pos-Vector2(tex.get_width()/2.0,tex.get_height()))
 	if not drawn: _draw_player()
 	_draw_exit_markers()
 	if transition_active:
@@ -2331,6 +2393,195 @@ func _draw():
 			draw_circle(float_pos+Vector2(1,1), 7.0 + sin(elapsed*12.0) * 1.5, Color(float_color, 0.22))
 		draw_circle(float_pos+Vector2(1,1),3.0+sin(elapsed*10)*1.2,float_color)
 
+func _draw_map_background() -> void:
+	match current_map:
+		"beach":
+			var beach_art: Texture2D = map_art.get("beach")
+			if beach_art != null:
+				draw_texture_rect(beach_art,Rect2(Vector2.ZERO,WORLD_SIZE),false)
+			else:
+				_draw_beach_background()
+		"rocky":
+			var rocky_art: Texture2D = map_art.get("rocky")
+			if rocky_art != null:
+				draw_texture_rect(rocky_art,Rect2(Vector2.ZERO,WORLD_SIZE),false)
+			else:
+				_draw_rocky_background()
+		"grotto":
+			var grotto_art: Texture2D = map_art.get("grotto")
+			if grotto_art != null:
+				draw_texture_rect(grotto_art,Rect2(Vector2.ZERO,WORLD_SIZE),false)
+			else:
+				_draw_rocky_background()
+		_:
+			draw_texture(terrain,Vector2.ZERO)
+			# Town's hand-authored sheet already contains the shoreline, but a few
+			# restrained highlights keep it alive beside the newer map backdrops.
+			for x in range(32,819,24):
+				var y := _shore(x) + 3 + int(sin(elapsed*1.5+x)*2)
+				draw_line(Vector2(x,y),Vector2(x+12,y),Color("#c4dbc1"))
+			for i in range(28):
+				var x := 50+i*33
+				var y := 558+(i%4)*18
+				var drift := int(sin(elapsed+i)*3)
+				draw_line(Vector2(x+drift,y),Vector2(x+drift+6,y),Color("#64a2a5"))
+
+func _using_static_map_art() -> bool:
+	return map_art.get(current_map) is Texture2D
+
+func _draw_wave_field(color: Color, spacing: int = 30, length: int = 10) -> void:
+	# Short, integer-snapped wavelets make the ocean feel hand-pixeled without
+	# allocating a texture for each map. The phase is deterministic per row so
+	# screenshots remain stable while the tide still has a little motion.
+	for y in range(18,640,spacing):
+		for x in range(18 + (y % 5) * 17,1020,54):
+			var drift := int(sin(elapsed*1.2 + float(x + y) * 0.04) * 2.0)
+			draw_line(Vector2(x+drift,y),Vector2(x+drift+length,y),color,1.0)
+
+func _draw_beach_background() -> void:
+	# Amber Beach is a broad sandy shelf, with a grassy terrace at the north
+	# entrance and a readable shallow-water band along the fishing edge.
+	draw_rect(Rect2(Vector2.ZERO,WORLD_SIZE),Color("#147f9f"))
+	_draw_wave_field(Color("#3ca7b5"),28,9)
+	_draw_wave_field(Color(0.38,0.78,0.80,0.46),57,6)
+	var island := PackedVector2Array([
+		Vector2(26,26),Vector2(828,26),Vector2(828,104),Vector2(780,104),
+		Vector2(780,206),Vector2(828,206),Vector2(828,342),Vector2(780,342),
+		Vector2(780,470),Vector2(826,470),Vector2(826,500),Vector2(26,500)
+	])
+	draw_colored_polygon(island,Color("#75a94d"))
+	# Sandy apron. The slightly darker lip is the cliff edge between the two
+	# materials, echoing the stepped coastlines in the reference maps.
+	draw_rect(Rect2(26,218,802,282),Color("#e7c57e"))
+	draw_rect(Rect2(26,214,802,7),Color("#aa764e"))
+	draw_line(Vector2(26,221),Vector2(828,221),Color("#f1d18a"),2.0)
+	# A shallow band gives every beach fishing spot a clear water boundary.
+	draw_rect(Rect2(26,500,802,18),Color("#53b4bb"))
+	draw_rect(Rect2(26,518,802,20),Color("#2b9eaf"))
+	for x in range(34,820,22):
+		var drift := int(sin(elapsed*1.5 + x) * 2.0)
+		draw_line(Vector2(x+drift,501),Vector2(x+drift+11,501),Color("#e7f2ce"),2.0)
+		draw_line(Vector2(x+6+drift,514),Vector2(x+14+drift,514),Color("#9ce0d0"),1.0)
+	# A short dune/cliff face gives the north terrace a readable stepped edge
+	# instead of a single flat color break.
+	draw_rect(Rect2(26,221,802,12),Color("#98684c"))
+	for x in range(34,820,18):
+		draw_line(Vector2(x,223),Vector2(x+4,231),Color("#be8758"),2.0)
+	# Dune pixels, beach grass and scattered shells add texture at the scale of
+	# the existing props while keeping the path and collision fully unchanged.
+	for i in range(34):
+		var x := 42 + ((i * 83) % 840)
+		var y := 238 + ((i * 47) % 240)
+		var tuft := Color("#a1b34f") if i % 2 == 0 else Color("#c7ca68")
+		draw_line(Vector2(x,y+7),Vector2(x-3,y-3),tuft,2.0)
+		draw_line(Vector2(x+2,y+7),Vector2(x+5,y-5),tuft,2.0)
+		if i % 5 == 0: draw_circle(Vector2(x+7,y-3),2.0,Color("#f4e2a2"))
+	for i in range(13):
+		var rock_pos := Vector2(48 + ((i * 137) % 820), 285 + ((i * 59) % 188))
+		draw_circle(rock_pos,4.0 + float(i%3),Color("#667d7e"))
+		draw_circle(rock_pos-Vector2(1,1),2.0,Color("#9ba39a"))
+	# Keep the two tide pools readable in the first camera slice as well as at
+	# their gameplay spots lower on the beach. These are decorative previews;
+	# fishing legality still comes from _fishing_spots().
+	_draw_tide_pool(Vector2(220,252),24.0,Color("#63b7c0"),Color("#e7f2ce"))
+	_draw_tide_pool(Vector2(620,390),24.0,Color("#63b7c0"),Color("#e7f2ce"))
+	# A broad driftwood log makes the cove identity legible before the player
+	# reaches the lower landmark label.
+	_draw_driftwood(Vector2(708,290))
+
+func _draw_rocky_background() -> void:
+	# Rocky Shore trades the warm beach palette for cool cliffs and shelves. The
+	# lower edge follows _shore(x), so visual water and walking/fishing rules stay
+	# in lockstep even where the coast steps up and down.
+	draw_rect(Rect2(Vector2.ZERO,WORLD_SIZE),Color("#126f96"))
+	_draw_wave_field(Color("#2b9db6"),25,8)
+	_draw_wave_field(Color(0.46,0.78,0.80,0.42),52,6)
+	var plateau := PackedVector2Array([
+		Vector2(28,28),Vector2(828,28),Vector2(828,105),Vector2(780,105),
+		Vector2(780,212),Vector2(828,212),Vector2(828,350),Vector2(790,350),
+		Vector2(790,420),Vector2(812,420),Vector2(812,594),Vector2(28,594)
+	])
+	draw_colored_polygon(plateau,Color("#4f7c57"))
+	# Extend the visual shelf to the exact stepped shoreline used by collision
+	# and fishing. This closes the former 2–26px blue seam before the foam.
+	for x in range(28,828,8):
+		var coast_y := _shore(float(x))
+		if coast_y > 594.0:
+			draw_rect(Rect2(x,594,8,coast_y - 594.0),Color("#4f7c57"))
+	# Slate shelves beneath the grass. Drawing stepped strips rather than one
+	# flat border gives the map its cliff-like silhouette at small viewport scale.
+	for y in [212,260,318,382,446,510,570]:
+		var shelf_width: int = 760 - (y % 3) * 18
+		draw_rect(Rect2(28,y,shelf_width,12),Color("#394f5d"))
+		draw_rect(Rect2(28,y+12,shelf_width,16),Color("#344553"))
+		draw_line(Vector2(30,y),Vector2(778 - (y % 3) * 18,y),Color("#7e8e8b"),2.0)
+		for x in range(42,28+shelf_width,24):
+			draw_line(Vector2(x,y+14),Vector2(x-2,y+26),Color("#536675"),2.0)
+	_draw_breakwater(Vector2(500,360))
+	for i in range(28):
+		var x := 44 + ((i * 97) % 730)
+		var y := 84 + ((i * 53) % 485)
+		var size := 4.0 + float(i % 4) * 2.0
+		var rock := Color("#526472") if i % 2 == 0 else Color("#445563")
+		draw_colored_polygon(PackedVector2Array([
+			Vector2(x-size,y+size),Vector2(x-2,y-size),Vector2(x+size,y-size*0.6),
+			Vector2(x+size*1.2,y+size),Vector2(x,y+size*1.35)
+		]),rock)
+		draw_line(Vector2(x-2,y-size+1),Vector2(x+size-1,y-size*0.2),Color("#87918d"),1.0)
+	# Cool grass tufts break up shelves and make paths readable behind props.
+	for i in range(22):
+		var x := 42 + ((i * 113) % 740)
+		var y := 72 + ((i * 71) % 480)
+		draw_line(Vector2(x,y+7),Vector2(x-3,y-4),Color("#8ead64"),2.0)
+		draw_line(Vector2(x+2,y+7),Vector2(x+6,y-2),Color("#a5bd71"),2.0)
+	# Variable coast foam tracks the collision shoreline for a satisfying edge.
+	for x in range(32,819,20):
+		var y := _shore(x) + int(sin(elapsed*1.4 + x) * 2.0)
+		draw_line(Vector2(x,y),Vector2(x+9,y),Color("#d4f3dc"),2.0)
+		if x % 40 == 0: draw_line(Vector2(x+4,y+5),Vector2(x+11,y+5),Color("#74d2d4"),1.0)
+	# A few offshore stacks sell the rocky map even when the camera is centered on
+	# the playable shelf. They are visual-only and intentionally outside solids.
+	for i in range(9):
+		var p := Vector2(820 + (i%3)*52, 118 + (i/3)*120)
+		draw_circle(p,9.0 + float(i%3)*2.0,Color("#3d5262"))
+		draw_circle(p-Vector2(2,3),4.0,Color("#778786"))
+		draw_arc(p,11.0,0,TAU,12,Color("#a9e3dc"),2.0)
+
+func _draw_tide_pool(center: Vector2, radius: float, water: Color, foam: Color) -> void:
+	# Pools are intentionally larger than the collision marker: at the 0.67 map
+	# presentation zoom a 16px circle became easy to miss, while this still leaves
+	# the existing fishing spot and walkable bank untouched.
+	draw_circle(center + Vector2(2,3), radius + 5.0, Color("#7e6a59"))
+	draw_circle(center, radius, water)
+	draw_circle(center - Vector2(4,4), radius * 0.72, water.lightened(0.16))
+	draw_arc(center, radius + 2.0, 0, TAU, 24, foam, 2.0)
+	for i in range(5):
+		var q := center + Vector2(-radius * 0.55 + i * radius * 0.25, sin(float(i) * 2.1) * radius * 0.34)
+		draw_line(q, q + Vector2(0, -7 - (i % 2) * 3), Color("#2c8c82"), 2.0)
+		draw_circle(q + Vector2(-2,-8), 2.0, Color("#74c49d"))
+	for i in range(4):
+		var stone := center + Vector2(-radius * 0.8 + i * radius * 0.5, radius * 0.55 + sin(float(i)) * 2.0)
+		draw_circle(stone, 3.0 + float(i % 2), Color("#5e7177"))
+		draw_circle(stone - Vector2(1,1), 1.5, Color("#9ca49a"))
+
+func _draw_driftwood(center: Vector2) -> void:
+	# Thick, knotted driftwood keeps the beach landmark legible at camera zoom.
+	draw_line(center + Vector2(-39,11), center + Vector2(41,-11), Color("#6d5140"), 10.0)
+	draw_line(center + Vector2(-37,8), center + Vector2(39,-14), Color("#a8784e"), 6.0)
+	draw_circle(center + Vector2(-39,11), 5.0, Color("#533f37"))
+	draw_circle(center + Vector2(41,-11), 4.0, Color("#c39360"))
+	draw_line(center + Vector2(-12,4), center + Vector2(-25,-12), Color("#986d49"), 4.0)
+	draw_line(center + Vector2(10,-2), center + Vector2(23,-18), Color("#986d49"), 3.0)
+
+func _draw_breakwater(center: Vector2) -> void:
+	# A broad stone finger reads as a breakwater even in the camera's local slice.
+	for i in range(9):
+		var q := center + Vector2(i * 21 - 84, sin(float(i) * 1.7) * 5.0)
+		draw_circle(q + Vector2(1,3), 13.0, Color("#304955"))
+		draw_circle(q, 11.0, Color("#526b76"))
+		draw_circle(q - Vector2(3,3), 5.0, Color("#80918c"))
+		draw_arc(q, 14.0, 0, TAU, 12, Color("#b7e8dc"), 2.0)
+
 func _exit_markers() -> Array[Dictionary]:
 	# Exit markers are deliberately kept in world space so they remain visible as
 	# the camera follows the player. Their locations mirror _check_map_exit().
@@ -2346,10 +2597,15 @@ func _exit_markers() -> Array[Dictionary]:
 				{"pos":Vector2(800,390),"label":"ROCKY SHORE","dir":Vector2(1,0)}
 			]
 		"rocky":
-			return [
+			var rocky_markers: Array[Dictionary] = [
 				{"pos":Vector2(40,340),"label":"TOWN","dir":Vector2(-1,0)},
 				{"pos":Vector2(420,430),"label":"BEACH","dir":Vector2(0,1)}
 			]
+			if hidden_spot_unlocked:
+				rocky_markers.append({"pos":Vector2(780,460),"label":"MOONLIT GROTTO","dir":Vector2(1,0)})
+			return rocky_markers
+		"grotto":
+			return [{"pos":Vector2(40,340),"label":"ROCKY SHORE","dir":Vector2(-1,0)}]
 		_:
 			return []
 
@@ -2371,6 +2627,14 @@ func _draw_exit_markers():
 		draw_string(ThemeDB.fallback_font, p + Vector2(-24,-10), str(marker.label), HORIZONTAL_ALIGNMENT_CENTER, 48, 8, Color("#3f4038"))
 
 func _draw_map_landmarks():
+	if _using_static_map_art():
+		_draw_static_map_labels()
+		if current_map == "rocky" and hidden_spot_unlocked:
+			# Moonlit Grotto is a gameplay unlock layered onto the Rocky Shore art.
+			_draw_tide_pool(Vector2(690,480),24.0,Color("#4d5fa0"),Color("#d9d2ff"))
+			draw_string(ThemeDB.fallback_font,Vector2(638,563),"Moonlit Grotto",HORIZONTAL_ALIGNMENT_CENTER,104,10,Color("#e4dcff"))
+		_draw_fishing_markers()
+		return
 	# Small, readable primitives make each shoreline recognizable without new art.
 	if current_map == "rocky":
 		# Wind-cut shelves and cairns point toward the future lighthouse route.
@@ -2426,9 +2690,59 @@ func _draw_map_landmarks():
 		if rumor_key != "" and _next_unheard_rumor(rumor_key) != "":
 			# A bobbing "!" says there is a new rumor to hear.
 			draw_string(ThemeDB.fallback_font, p + Vector2(-4,-22 + sin(elapsed * 3.0) * 1.5), "!", HORIZONTAL_ALIGNMENT_CENTER, 8, 13, Color("#ffe08a"))
-		# Landmark names are intentionally small, like hand-painted map notes.
-		draw_string(ThemeDB.fallback_font, p + Vector2(-34,27), str(landmark.label), HORIZONTAL_ALIGNMENT_CENTER, 68, 8, Color("#3f514d"))
+		if current_map == "town":
+			# Keep town's existing handwritten labels and rumor/NPC presentation.
+			draw_string(ThemeDB.fallback_font, p + Vector2(-34,27), str(landmark.label), HORIZONTAL_ALIGNMENT_CENTER, 68, 8, Color("#3f514d"))
+		else:
+			# Shoreline landmarks use little wooden field signs, echoing the reference
+			# maps while remaining a purely decorative draw pass. Lighthouse labels
+			# sit below the tower so the sign never masks its beacon silhouette.
+			var label := str(landmark.label)
+			var sign_width := maxf(52.0, float(label.length() * 5 + 14))
+			var sign_y := p.y + 30.0 if kind == "lighthouse" else (p.y - 40.0 if p.y > 120.0 else p.y + 24.0)
+			var sign_rect := Rect2(Vector2(p.x - sign_width * 0.5, sign_y),Vector2(sign_width,18))
+			draw_line(Vector2(p.x - sign_width * 0.25, sign_y + 18),Vector2(p.x - sign_width * 0.25, sign_y + 25),Color("#654839"),2.0)
+			draw_line(Vector2(p.x + sign_width * 0.25, sign_y + 18),Vector2(p.x + sign_width * 0.25, sign_y + 25),Color("#654839"),2.0)
+			draw_rect(sign_rect,Color("#c58a52"))
+			draw_rect(sign_rect.grow(-2),Color("#7a543e"),false,1.0)
+			draw_string(ThemeDB.fallback_font, Vector2(sign_rect.position.x + 4, sign_rect.position.y + 12), label, HORIZONTAL_ALIGNMENT_CENTER, sign_width - 8, 8, Color("#2b3031"))
 	# Fishing markers sit just inland of each water feature and pulse gently.
+	for spot in _fishing_spots():
+		var p: Vector2 = spot.pos
+		var pulse := 1.0 + sin(elapsed*3.0 + p.x)*0.15
+		draw_circle(p,5.0*pulse,Color(0.91,0.81,0.47,0.85))
+		draw_arc(p,9.0*pulse,0,TAU,12,Color("#f3e2a2"),1.0)
+
+func _draw_static_map_labels() -> void:
+	# The generated background boards are intentionally blank so text stays
+	# dynamic and localized. These coordinates match the 1024x640 map art.
+	var labels: Array[Dictionary] = []
+	if current_map == "beach":
+		labels = [
+			{"pos":Vector2(205,157),"text":"North Tide Pool"},
+			{"pos":Vector2(873,285),"text":"Driftwood Cove"},
+			{"pos":Vector2(725,370),"text":"South Tide Pool"}
+		]
+	elif current_map == "rocky":
+		labels = [
+			{"pos":Vector2(497,151),"text":"Blackglass Pool"},
+			{"pos":Vector2(773,248),"text":"Stone Breakwater"},
+			{"pos":Vector2(614,375),"text":"Gull's Pool"},
+			{"pos":Vector2(953,112),"text":"Farwatch Lighthouse"}
+		]
+	else:
+		labels = [{"pos":Vector2(292,176),"text":"Moonlit Grotto"}]
+	for entry in labels:
+		var p := _map_art_point(entry.pos)
+		var text := str(entry.text)
+		draw_string(ThemeDB.fallback_font,p,text,HORIZONTAL_ALIGNMENT_CENTER,100.0 * WORLD_SIZE.x / 1024.0,10,Color("#2b3031"))
+
+func _map_art_point(point: Vector2) -> Vector2:
+	# Generated maps are authored at 1024x640. Keep labels locked to the same
+	# landmarks if a compact world width is used by an export or test harness.
+	return Vector2(point.x * WORLD_SIZE.x / 1024.0, point.y * WORLD_SIZE.y / 640.0)
+
+func _draw_fishing_markers() -> void:
 	for spot in _fishing_spots():
 		var p: Vector2 = spot.pos
 		var pulse := 1.0 + sin(elapsed*3.0 + p.x)*0.15
@@ -2453,7 +2767,9 @@ func _exit_arrow(direction: Vector2) -> String:
 
 func _draw_player():
 	var frame := int(walk_time*9)%4 if walking else 0
-	# Native 96×128 atlas rendered at 48×64 (2× nearest reduction).
+	# Native 96×128 atlas rendered at 48×64 in world pixels. The presentation
+	# camera zoom keeps the on-screen fisherman close to the reference-map scale
+	# while retaining a crisp native atlas and the existing feet anchor.
 	# Feet land at local y=126 → world player.y+1, matching the 8×5 collider.
 	# The approved turnaround draws right profile on row 2 and left profile on row 3;
 	# runtime face indices keep the historical left=2/right=3 convention.
@@ -2940,6 +3256,7 @@ func _map_display_name() -> String:
 		"town": return "TOWN HARBOR"
 		"beach": return "AMBER BEACH"
 		"rocky": return "ROCKY SHORE"
+		"grotto": return "MOONLIT GROTTO"
 		_: return current_map.to_upper()
 
 func _map_hint() -> String:
@@ -2947,4 +3264,5 @@ func _map_hint() -> String:
 		"town": return "WASD / arrows: walk     SPACE: cast at Old Salt Pier"
 		"beach": return "WASD / arrows: walk     SPACE: cast in the tide pools"
 		"rocky": return "WASD / arrows: walk     SPACE: cast at the stone pools"
+		"grotto": return "WASD / arrows: walk     SPACE: cast at the moonlit pool"
 		_: return "WASD / arrows: walk     SPACE: cast"
