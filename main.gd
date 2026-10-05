@@ -455,6 +455,8 @@ func _build_map(map_name: String):
 		_build_beach()
 	elif map_name == "rocky":
 		_build_rocky()
+	elif map_name == "grotto":
+		_build_grotto()
 	else:
 		_build_town()
 
@@ -527,6 +529,12 @@ func _build_rocky():
 		_add_prop("barrel", Vector2(340+(i%4)*18,420+i*9), Rect2(-7,-17,14,16))
 	props.sort_custom(func(a,b): return a.pos.y < b.pos.y)
 
+func _build_grotto():
+	# Moonlit Grotto is a quiet cavern map. Keep the west return lane open while
+	# the central lagoon remains a real collision body instead of painted water.
+	landmarks = [{"kind":"lagoon","pos":Vector2(512,336),"label":"Moonlit Lagoon"}]
+	solids.append(Rect2(224,244,576,184))
+
 func _add_prop(kind: String, pos: Vector2, body: Rect2):
 	props.append({"kind":kind,"pos":pos})
 	if body.size != Vector2.ZERO: solids.append(Rect2(pos+body.position,body.size))
@@ -534,6 +542,7 @@ func _add_prop(kind: String, pos: Vector2, body: Rect2):
 func _shore(x: float) -> float:
 	if current_map == "beach": return 500.0
 	if current_map == "rocky": return 620.0 - (int(x/96.0)%3)*12
+	if current_map == "grotto": return 620.0
 	if x < 240: return 464
 	if x < 416: return 480
 	if x < 608: return 464
@@ -668,6 +677,8 @@ func _check_map_exit():
 	elif current_map == "rocky":
 		if player.x < 34 and player.y > 250 and player.y < 430: exit = "town"
 		elif player.y > 420 and player.x > 280 and player.x < 560: exit = "beach"
+	elif current_map == "grotto":
+		if player.x < 34 and player.y > 250 and player.y < 430: exit = "rocky"
 	if exit != "":
 		var spawn := _entry_spawn(exit)
 		_transition_to(exit, spawn)
@@ -677,6 +688,7 @@ func _entry_spawn(map_name: String) -> Vector2:
 	if current_map == "town" and map_name == "rocky": return Vector2(90,340)
 	if current_map == "beach" and map_name == "town": return Vector2(500,520)
 	if current_map == "beach" and map_name == "rocky": return Vector2(90,340)
+	if current_map == "grotto" and map_name == "rocky": return Vector2(90,340)
 	if current_map == "rocky" and map_name == "town": return Vector2(760,340)
 	return Vector2(400,80)
 
@@ -2137,7 +2149,7 @@ func _load_game(path: String = SAVE_PATH):
 	if not data is Dictionary: return
 	var loaded_map := str(data.get("map","town"))
 	fx.reduced = bool(data.get("fx_reduced", false))
-	if loaded_map in ["town","beach","rocky"] and loaded_map != current_map:
+	if loaded_map in ["town","beach","rocky","grotto"] and loaded_map != current_map:
 		current_map = loaded_map; _build_map(current_map)
 	day = maxi(1,int(data.get("day",1))); fish_count = maxi(0,int(data.get("fish",0)))
 	shells = maxi(0, int(data.get("shells", 12)))
@@ -2350,6 +2362,10 @@ func _exit_markers() -> Array[Dictionary]:
 				{"pos":Vector2(40,340),"label":"TOWN","dir":Vector2(-1,0)},
 				{"pos":Vector2(420,430),"label":"BEACH","dir":Vector2(0,1)}
 			]
+		"grotto":
+			return [
+				{"pos":Vector2(40,340),"label":"ROCKY SHORE","dir":Vector2(-1,0)}
+			]
 		_:
 			return []
 
@@ -2398,6 +2414,12 @@ func _draw_map_landmarks():
 		elif kind == "pool":
 			draw_circle(p,16.0,Color("#4f9291")); draw_circle(p-Vector2(3,3),11.0,Color("#80b9a7"))
 			draw_arc(p,16.0,0,TAU,16,Color("#d0d3a4"),2.0)
+		elif kind == "lagoon":
+			var lagoon_rect := Rect2(p-Vector2(288,92),Vector2(576,184))
+			draw_rect(lagoon_rect,Color("#2d426c"))
+			draw_rect(lagoon_rect.grow(-3),Color("#8065b4"),false,3.0)
+			for x in range(int(lagoon_rect.position.x)+20,int(lagoon_rect.end.x)-20,44):
+				draw_line(Vector2(x,p.y-18),Vector2(x+18,p.y-18),Color("#b9a8e4"),2.0)
 		elif kind == "hidden_pool":
 			draw_circle(p,19.0,Color("#2d426c")); draw_circle(p-Vector2(3,3),13.0,Color("#8065b4"))
 			draw_arc(p,19.0,0,TAU,20,Color("#e1c6ff"),2.0)
@@ -2940,6 +2962,7 @@ func _map_display_name() -> String:
 		"town": return "TOWN HARBOR"
 		"beach": return "AMBER BEACH"
 		"rocky": return "ROCKY SHORE"
+		"grotto": return "MOONLIT GROTTO"
 		_: return current_map.to_upper()
 
 func _map_hint() -> String:
@@ -2947,4 +2970,5 @@ func _map_hint() -> String:
 		"town": return "WASD / arrows: walk     SPACE: cast at Old Salt Pier"
 		"beach": return "WASD / arrows: walk     SPACE: cast in the tide pools"
 		"rocky": return "WASD / arrows: walk     SPACE: cast at the stone pools"
+		"grotto": return "WASD / arrows: walk     SPACE: cast at the moonlit lagoon"
 		_: return "WASD / arrows: walk     SPACE: cast"

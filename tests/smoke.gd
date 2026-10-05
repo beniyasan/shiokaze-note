@@ -382,6 +382,17 @@ func run():
 	check(game.current_map=='rocky','save restores active map')
 	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,440); game._check_map_exit()
 	check(game._walkable(Vector2(500,440)) and game.transition_target=='beach','town beach exit is reachable')
+	# The grotto's return lane stays clear of the lagoon and mirrors the west-edge
+	# transition contract used by the map integration.
+	game.transition_active=false; game.current_map='grotto'; game._build_map('grotto')
+	check(game._walkable(Vector2(32,340)),'grotto west edge is walkable')
+	check(not game._walkable(Vector2(512,336)),'grotto lagoon collision blocks movement')
+	var grotto_markers: Array = game._exit_markers()
+	check(grotto_markers.size()==1 and grotto_markers[0].pos==Vector2(40,340) and grotto_markers[0].dir==Vector2(-1,0) and grotto_markers[0].label=='ROCKY SHORE','grotto marker points west to rocky shore')
+	game.player=Vector2(32,340); game._check_map_exit()
+	check(game.transition_target=='rocky' and game.transition_spawn==Vector2(90,340),'grotto west exit targets rocky shore spawn')
+	game._process(0.5)
+	check(game.current_map=='rocky' and game.player==Vector2(90,340),'grotto transition lands at rocky shore spawn')
 	# Each map exposes named, local fishing landmarks as well as its shoreline.
 	game.current_map='beach'; game._build_map('beach'); game.player=Vector2(300,487)
 	check(game._can_fish() and game._fishing_spots().size()==2,'beach tide pools are fishable')
