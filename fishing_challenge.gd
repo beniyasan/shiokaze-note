@@ -1,5 +1,7 @@
 # A deterministic, forgiving chain of short fishing mini-games.
 # It owns the round rules; main.gd owns presentation, line tension, and audio.
+# Beats are a bonus on top of the tug-of-war gauge: main.gd only offers a pull
+# that already landed, rewards a clean beat, and never punishes a missed one.
 class_name FishingChallenge
 extends RefCounted
 
@@ -15,6 +17,10 @@ var action_progress := 0
 var action_goal := 1
 var phase_t := 0.0
 var grace_t := 0.85
+# The direction main.gd is already asking the player to hold to counter the fish
+# (-1 left, +1 right, 0 unset). When set, the slalom lane follows it, so the two
+# on-screen prompts can never ask for opposite directions.
+var counter_lane := 0.0
 var done := false
 var last_success := false
 var last_event := ""
@@ -34,14 +40,14 @@ func configure(fish_strength: int, combo_count: int, seed: int = 1) -> void:
 		var game_type: int = order[(i + offset) % order.size()]
 		var actions := 1
 		if strength >= 2 and (game_type == Game.SLALOM or game_type == Game.FINISH): actions = 2
-		# A combo-two catch deliberately takes six clean beats, preserving a
-		# satisfying tug rhythm without making the first fish exhausting.
+		# The finishing round is the longest, so the chain ends on a rhythm.
 		if strength >= 3 and game_type == Game.FINISH: actions = 3
 		rounds.append({"type": game_type, "actions": actions})
-	# The normal combo-two battle has 1+2+1+2 = 6 accepted pulls.
+	# A full chain has 1+1+1+2 = 5 beats: the number of PERFECT pulls that land a
+	# fish, so a clean fight clears the chain on its final pull.
 	if strength == 3 and rounds.size() == 4:
 		rounds[0].actions = 1
-		rounds[1].actions = 2
+		rounds[1].actions = 1
 		rounds[2].actions = 1
 		rounds[3].actions = 2
 	round_index = 0
@@ -104,16 +110,19 @@ func target_width() -> float:
 		_: return 0.40
 
 func safe_lane() -> float:
-	# Slalom's lane shifts left/right. Holding the opposite direction counters
-	# the fish; a centred stick is always a valid beginner lane.
-	var lane := 0.0
-	if phase_t > 0.9: lane = -1.0 if int(phase_t * 1.9) % 2 == 0 else 1.0
-	return lane
+	# Slalom's lane is the side the player holds to counter the fish; a centred
+	# stick is always a valid beginner lane. Standalone (no counter direction
+	# supplied) the lane shifts left/right on its own.
+	if phase_t <= 0.9: return 0.0
+	if absf(counter_lane) > 0.5: return signf(counter_lane)
+	return -1.0 if int(phase_t * 1.9) % 2 == 0 else 1.0
 
-func tick(delta: float, counter_axis: float = 0.0) -> void:
+func tick(delta: float, counter_axis: float = 0.0, can_act: bool = true) -> void:
 	if done: return
 	phase_t += maxf(0.0, delta)
-	grace_t = maxf(0.0, grace_t - maxf(0.0, delta))
+	# Grace is reading time for a new round, so it only runs while the player
+	# can actually pull; otherwise a pull cooldown would always outlast it.
+	if can_act: grace_t = maxf(0.0, grace_t - maxf(0.0, delta))
 	# Countering the slalom direction gives a little breathing room. This is
 	# feedback only; the line tension model in main.gd remains authoritative.
 	if current_game() == Game.SLALOM and absf(counter_axis) > 0.25:
@@ -134,7 +143,7 @@ func accept(position: float, counter_axis: float = 0.0) -> Dictionary:
 	if grace_t > 0.0: valid = true
 	last_success = valid
 	if not valid:
-		last_event = "The line jolts — recover and try the next beat"
+		last_event = "Outside the bonus zone  /  the pull still counts"
 		return {"success": false, "complete": false, "round_complete": false, "event": last_event}
 	action_progress += 1
 	last_event = "CLEAN %s  %s" % [current_game_name(), progress_text()]

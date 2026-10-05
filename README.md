@@ -15,6 +15,9 @@ Space starts a cast at the shore or pier. After the bite, the fish battle is a s
 - Follow the moving gauge and press Space in the teal/gold zone for repeated pulls
 - Hold the opposite WASD/arrow direction shown on screen to counter the fish's escape direction
 - Fish stamina, line tension, escape pressure, pull cooldown and the battle timer are all visible
+- The teal/gold gauge alone decides a pull. The outlined challenge zone is a bonus: a pull inside it also eases the line, and a GOOD pull outside it still counts
+- A pull is ready again after about one second; fish stamina is the same at every chain length, and a longer chain only adds bonus rounds
+- The slalom round asks for the same direction as the counter prompt
 - Clean pulls ramp the procedural SE and screen effects; failed pulls strain the line and can snap it
 - A three-catch perfect combo unlocks Rainbow Kingfish (LEGENDARY)
 
