@@ -1,0 +1,985 @@
+{
+  "warning_ja": "承認画像の魚種は元ZIPの魚種と一致しません。同名なのは3種のみです。見た目だけから別の既存魚種に割り当てる処理はしていません。",
+  "naming_rule": "The approved sheet determines species IDs. Similar-looking species are not treated as equivalents.",
+  "matching_ids": [
+    "amber_anchovy",
+    "aurora_koi",
+    "tidepool_blenny"
+  ],
+  "original_ids_not_in_approved_sheet": [
+    "abyssal_angler",
+    "blackglass_bass",
+    "copper_mackerel",
+    "coral_bream",
+    "crown_snapper",
+    "dune_flounder",
+    "glass_shrimp",
+    "gullfin",
+    "lantern_squid",
+    "lighthouse_ray",
+    "moonfin_trout",
+    "night_sailfish",
+    "old_boot",
+    "pearl_puffer",
+    "rainbow_kingfish",
+    "saltwater_eel",
+    "sand_goby",
+    "sea_lavender_perch",
+    "silver_sprat",
+    "singing_herring",
+    "storm_sardine",
+    "tidemark_carp"
+  ],
+  "approved_fish": [
+    {
+      "sheet_number": 1,
+      "fish_id": "amber_anchovy",
+      "label_ja": "アンバーイワシ",
+      "encyclopedia": "encyclopedia_fish_art/amber_anchovy_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/amber_anchovy.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        12,
+        35,
+        200,
+        165
+      ],
+      "art_source_size": [
+        188,
+        130
+      ],
+      "pixel_source_rect": [
+        204,
+        79,
+        298,
+        153
+      ],
+      "pixel_source_size": [
+        94,
+        74
+      ],
+      "matching_original_id": "amber_anchovy",
+      "same_filename_in_original": true,
+      "needs_new_game_reference": false
+    },
+    {
+      "sheet_number": 2,
+      "fish_id": "sunrise_bream",
+      "label_ja": "サンライズタイ",
+      "encyclopedia": "encyclopedia_fish_art/sunrise_bream_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/sunrise_bream.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        320,
+        35,
+        508,
+        165
+      ],
+      "art_source_size": [
+        188,
+        130
+      ],
+      "pixel_source_rect": [
+        512,
+        79,
+        606,
+        153
+      ],
+      "pixel_source_size": [
+        94,
+        74
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 3,
+      "fish_id": "moonfish",
+      "label_ja": "ムーンフィッシュ",
+      "encyclopedia": "encyclopedia_fish_art/moonfish_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/moonfish.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        628,
+        35,
+        816,
+        165
+      ],
+      "art_source_size": [
+        188,
+        130
+      ],
+      "pixel_source_rect": [
+        820,
+        79,
+        914,
+        153
+      ],
+      "pixel_source_size": [
+        94,
+        74
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 4,
+      "fish_id": "aurora_koi",
+      "label_ja": "オーロラコイ",
+      "encyclopedia": "encyclopedia_fish_art/aurora_koi_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/aurora_koi.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        936,
+        35,
+        1124,
+        165
+      ],
+      "art_source_size": [
+        188,
+        130
+      ],
+      "pixel_source_rect": [
+        1128,
+        79,
+        1222,
+        153
+      ],
+      "pixel_source_size": [
+        94,
+        74
+      ],
+      "matching_original_id": "aurora_koi",
+      "same_filename_in_original": true,
+      "needs_new_game_reference": false
+    },
+    {
+      "sheet_number": 5,
+      "fish_id": "coral_grouper",
+      "label_ja": "コーラルグルーパー",
+      "encyclopedia": "encyclopedia_fish_art/coral_grouper_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/coral_grouper.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        1244,
+        35,
+        1432,
+        165
+      ],
+      "art_source_size": [
+        188,
+        130
+      ],
+      "pixel_source_rect": [
+        1436,
+        79,
+        1530,
+        153
+      ],
+      "pixel_source_size": [
+        94,
+        74
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 6,
+      "fish_id": "jellyfish_fish",
+      "label_ja": "ミズクラゲウオ",
+      "encyclopedia": "encyclopedia_fish_art/jellyfish_fish_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/jellyfish_fish.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        12,
+        243,
+        200,
+        370
+      ],
+      "art_source_size": [
+        188,
+        127
+      ],
+      "pixel_source_rect": [
+        204,
+        285,
+        298,
+        365
+      ],
+      "pixel_source_size": [
+        94,
+        80
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 7,
+      "fish_id": "tropical_angelfish",
+      "label_ja": "トロピカルエンゼル",
+      "encyclopedia": "encyclopedia_fish_art/tropical_angelfish_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/tropical_angelfish.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        320,
+        243,
+        508,
+        370
+      ],
+      "art_source_size": [
+        188,
+        127
+      ],
+      "pixel_source_rect": [
+        512,
+        285,
+        606,
+        365
+      ],
+      "pixel_source_size": [
+        94,
+        80
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 8,
+      "fish_id": "shadow_flounder",
+      "label_ja": "シャドウカレイ",
+      "encyclopedia": "encyclopedia_fish_art/shadow_flounder_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/shadow_flounder.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        628,
+        243,
+        816,
+        370
+      ],
+      "art_source_size": [
+        188,
+        127
+      ],
+      "pixel_source_rect": [
+        820,
+        285,
+        914,
+        365
+      ],
+      "pixel_source_size": [
+        94,
+        80
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 9,
+      "fish_id": "starry_fish",
+      "label_ja": "スターリーフィッシュ",
+      "encyclopedia": "encyclopedia_fish_art/starry_fish_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/starry_fish.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        936,
+        243,
+        1124,
+        370
+      ],
+      "art_source_size": [
+        188,
+        127
+      ],
+      "pixel_source_rect": [
+        1128,
+        285,
+        1222,
+        365
+      ],
+      "pixel_source_size": [
+        94,
+        80
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 10,
+      "fish_id": "reef_butterflyfish",
+      "label_ja": "リーフバタフライ",
+      "encyclopedia": "encyclopedia_fish_art/reef_butterflyfish_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/reef_butterflyfish.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        1244,
+        243,
+        1432,
+        370
+      ],
+      "art_source_size": [
+        188,
+        127
+      ],
+      "pixel_source_rect": [
+        1436,
+        285,
+        1530,
+        365
+      ],
+      "pixel_source_size": [
+        94,
+        80
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 11,
+      "fish_id": "crystal_fish",
+      "label_ja": "クリスタルフィッシュ",
+      "encyclopedia": "encyclopedia_fish_art/crystal_fish_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/crystal_fish.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        12,
+        447,
+        200,
+        579
+      ],
+      "art_source_size": [
+        188,
+        132
+      ],
+      "pixel_source_rect": [
+        204,
+        495,
+        298,
+        574
+      ],
+      "pixel_source_size": [
+        94,
+        79
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 12,
+      "fish_id": "sand_flatfish",
+      "label_ja": "サンドフラット",
+      "encyclopedia": "encyclopedia_fish_art/sand_flatfish_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/sand_flatfish.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        320,
+        447,
+        508,
+        579
+      ],
+      "art_source_size": [
+        188,
+        132
+      ],
+      "pixel_source_rect": [
+        512,
+        495,
+        606,
+        574
+      ],
+      "pixel_source_size": [
+        94,
+        79
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 13,
+      "fish_id": "night_angler",
+      "label_ja": "ナイトアンコウ",
+      "encyclopedia": "encyclopedia_fish_art/night_angler_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/night_angler.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        628,
+        447,
+        816,
+        579
+      ],
+      "art_source_size": [
+        188,
+        132
+      ],
+      "pixel_source_rect": [
+        820,
+        495,
+        914,
+        574
+      ],
+      "pixel_source_size": [
+        94,
+        79
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 14,
+      "fish_id": "pearl_seabass",
+      "label_ja": "パールスズキ",
+      "encyclopedia": "encyclopedia_fish_art/pearl_seabass_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/pearl_seabass.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        936,
+        447,
+        1124,
+        579
+      ],
+      "art_source_size": [
+        188,
+        132
+      ],
+      "pixel_source_rect": [
+        1128,
+        495,
+        1222,
+        574
+      ],
+      "pixel_source_size": [
+        94,
+        79
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 15,
+      "fish_id": "fire_scorpionfish",
+      "label_ja": "ファイアカサゴ",
+      "encyclopedia": "encyclopedia_fish_art/fire_scorpionfish_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/fire_scorpionfish.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        1244,
+        447,
+        1432,
+        579
+      ],
+      "art_source_size": [
+        188,
+        132
+      ],
+      "pixel_source_rect": [
+        1436,
+        495,
+        1530,
+        574
+      ],
+      "pixel_source_size": [
+        94,
+        79
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 16,
+      "fish_id": "seahorse",
+      "label_ja": "シーホース",
+      "encyclopedia": "encyclopedia_fish_art/seahorse_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/seahorse.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        12,
+        653,
+        200,
+        790
+      ],
+      "art_source_size": [
+        188,
+        137
+      ],
+      "pixel_source_rect": [
+        204,
+        689,
+        298,
+        782
+      ],
+      "pixel_source_size": [
+        94,
+        93
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 17,
+      "fish_id": "mint_wrasse",
+      "label_ja": "ミントベラ",
+      "encyclopedia": "encyclopedia_fish_art/mint_wrasse_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/mint_wrasse.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        320,
+        653,
+        508,
+        790
+      ],
+      "art_source_size": [
+        188,
+        137
+      ],
+      "pixel_source_rect": [
+        512,
+        689,
+        606,
+        782
+      ],
+      "pixel_source_size": [
+        94,
+        93
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 18,
+      "fish_id": "jellyfish_butterflyfish",
+      "label_ja": "クラゲチョウチョウウオ",
+      "encyclopedia": "encyclopedia_fish_art/jellyfish_butterflyfish_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/jellyfish_butterflyfish.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        628,
+        653,
+        816,
+        790
+      ],
+      "art_source_size": [
+        188,
+        137
+      ],
+      "pixel_source_rect": [
+        820,
+        689,
+        914,
+        782
+      ],
+      "pixel_source_size": [
+        94,
+        93
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 19,
+      "fish_id": "storm_tuna",
+      "label_ja": "ストームマグロ",
+      "encyclopedia": "encyclopedia_fish_art/storm_tuna_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/storm_tuna.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        936,
+        653,
+        1124,
+        790
+      ],
+      "art_source_size": [
+        188,
+        137
+      ],
+      "pixel_source_rect": [
+        1128,
+        689,
+        1222,
+        782
+      ],
+      "pixel_source_size": [
+        94,
+        93
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 20,
+      "fish_id": "coral_rabbitfish",
+      "label_ja": "サンゴアイゴ",
+      "encyclopedia": "encyclopedia_fish_art/coral_rabbitfish_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/coral_rabbitfish.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        1244,
+        653,
+        1432,
+        790
+      ],
+      "art_source_size": [
+        188,
+        137
+      ],
+      "pixel_source_rect": [
+        1436,
+        689,
+        1530,
+        782
+      ],
+      "pixel_source_size": [
+        94,
+        93
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 21,
+      "fish_id": "twilight_salmon",
+      "label_ja": "トワイライトサーモン",
+      "encyclopedia": "encyclopedia_fish_art/twilight_salmon_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/twilight_salmon.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        12,
+        858,
+        200,
+        983
+      ],
+      "art_source_size": [
+        188,
+        125
+      ],
+      "pixel_source_rect": [
+        204,
+        901,
+        298,
+        980
+      ],
+      "pixel_source_size": [
+        94,
+        79
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 22,
+      "fish_id": "ghost_fish",
+      "label_ja": "ゴーストフィッシュ",
+      "encyclopedia": "encyclopedia_fish_art/ghost_fish_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/ghost_fish.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        320,
+        858,
+        508,
+        983
+      ],
+      "art_source_size": [
+        188,
+        125
+      ],
+      "pixel_source_rect": [
+        512,
+        901,
+        606,
+        980
+      ],
+      "pixel_source_size": [
+        94,
+        79
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 23,
+      "fish_id": "harvest_puffer",
+      "label_ja": "ハーベストフグ",
+      "encyclopedia": "encyclopedia_fish_art/harvest_puffer_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/harvest_puffer.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        628,
+        858,
+        816,
+        983
+      ],
+      "art_source_size": [
+        188,
+        125
+      ],
+      "pixel_source_rect": [
+        820,
+        901,
+        914,
+        980
+      ],
+      "pixel_source_size": [
+        94,
+        79
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 24,
+      "fish_id": "lantern_fish",
+      "label_ja": "ランタンフィッシュ",
+      "encyclopedia": "encyclopedia_fish_art/lantern_fish_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/lantern_fish.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        936,
+        858,
+        1124,
+        983
+      ],
+      "art_source_size": [
+        188,
+        125
+      ],
+      "pixel_source_rect": [
+        1128,
+        901,
+        1222,
+        980
+      ],
+      "pixel_source_size": [
+        94,
+        79
+      ],
+      "matching_original_id": null,
+      "same_filename_in_original": false,
+      "needs_new_game_reference": true
+    },
+    {
+      "sheet_number": 25,
+      "fish_id": "tidepool_blenny",
+      "label_ja": "タイドプールギンポ",
+      "encyclopedia": "encyclopedia_fish_art/tidepool_blenny_v2.png",
+      "pixel_portrait": "fish_pixel_portraits/tidepool_blenny.png",
+      "art_canvas_size": [
+        768,
+        512
+      ],
+      "pixel_canvas_size": [
+        96,
+        64
+      ],
+      "art_source_rect": [
+        1244,
+        858,
+        1432,
+        983
+      ],
+      "art_source_size": [
+        188,
+        125
+      ],
+      "pixel_source_rect": [
+        1436,
+        901,
+        1530,
+        980
+      ],
+      "pixel_source_size": [
+        94,
+        79
+      ],
+      "matching_original_id": "tidepool_blenny",
+      "same_filename_in_original": true,
+      "needs_new_game_reference": false
+    }
+  ]
+}

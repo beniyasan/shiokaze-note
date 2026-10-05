@@ -104,13 +104,36 @@ var last_catch_weight_kg := 0.0
 var last_catch_variant := "Standard"
 var last_catch_mystery := false
 var last_rescue_used := false
-# Expanded coastal field guide: five original entries plus eighteen approved species.
+# Approved 25-fish field guide. The attached bundle is the complete active
+# roster; legacy species from the earlier prototype are intentionally absent.
+# Aurora koi remains the hidden grotto legendary, while Storm tuna replaces the
+# old open-water legendary slot.
 const FISH_SPECIES: Array[Dictionary] = [
- {"name":"Silver sprat","rarity":"COMMON","maps":["town","beach"]}, {"name":"Sand goby","rarity":"COMMON","maps":["town","beach"]}, {"name":"Moonfin trout","rarity":"RARE","maps":["beach","rocky"]}, {"name":"Old boot","rarity":"COMMON","maps":["town"]}, {"name":"Rainbow Kingfish","rarity":"LEGENDARY","maps":["rocky"]},
- {"name":"Amber anchovy","rarity":"COMMON","maps":["beach"]}, {"name":"Dune flounder","rarity":"COMMON","maps":["beach"]}, {"name":"Tidepool blenny","rarity":"UNCOMMON","maps":["beach"]}, {"name":"Glass shrimp","rarity":"UNCOMMON","maps":["beach","rocky"]}, {"name":"Copper mackerel","rarity":"RARE","maps":["beach"]},
- {"name":"Saltwater eel","rarity":"UNCOMMON","maps":["town","rocky"]}, {"name":"Lantern squid","rarity":"RARE","maps":["rocky"]}, {"name":"Blackglass bass","rarity":"RARE","maps":["rocky"]}, {"name":"Storm sardine","rarity":"UNCOMMON","maps":["rocky"]}, {"name":"Gullfin","rarity":"COMMON","maps":["town","rocky"]},
- {"name":"Lighthouse ray","rarity":"EPIC","maps":["rocky"]}, {"name":"Tidemark carp","rarity":"UNCOMMON","maps":["town"]}, {"name":"Sea lavender perch","rarity":"RARE","maps":["beach","rocky"]}, {"name":"Pearl puffer","rarity":"EPIC","maps":["beach","rocky"]}, {"name":"Night sailfish","rarity":"EPIC","maps":["rocky"]},
- {"name":"Crown snapper","rarity":"EPIC","maps":["town","rocky"]}, {"name":"Singing herring","rarity":"RARE","maps":["town","beach"]}, {"name":"Aurora koi","rarity":"LEGENDARY","maps":["hidden","grotto"]}
+ {"id":"amber_anchovy","name":"Amber anchovy","label":"アンバーイワシ","art":"amber_anchovy","rarity":"COMMON","maps":["beach"]},
+ {"id":"sunrise_bream","name":"Sunrise bream","label":"サンライズタイ","art":"sunrise_bream","rarity":"COMMON","maps":["town","beach"]},
+ {"id":"moonfish","name":"Moonfish","label":"ムーンフィッシュ","art":"moonfish","rarity":"RARE","maps":["beach"]},
+ {"id":"aurora_koi","name":"Aurora koi","label":"オーロラコイ","art":"aurora_koi","rarity":"LEGENDARY","maps":["hidden","grotto"]},
+ {"id":"coral_grouper","name":"Coral grouper","label":"コーラルグルーパー","art":"coral_grouper","rarity":"RARE","maps":["rocky"]},
+ {"id":"jellyfish_fish","name":"Jellyfish fish","label":"ミズクラゲウオ","art":"jellyfish_fish","rarity":"UNCOMMON","maps":["beach"]},
+ {"id":"tropical_angelfish","name":"Tropical angelfish","label":"トロピカルエンゼル","art":"tropical_angelfish","rarity":"UNCOMMON","maps":["beach"]},
+ {"id":"shadow_flounder","name":"Shadow flounder","label":"シャドウカレイ","art":"shadow_flounder","rarity":"COMMON","maps":["beach","rocky"]},
+ {"id":"starry_fish","name":"Starry fish","label":"スターリーフィッシュ","art":"starry_fish","rarity":"EPIC","maps":["rocky"]},
+ {"id":"reef_butterflyfish","name":"Reef butterflyfish","label":"リーフバタフライ","art":"reef_butterflyfish","rarity":"RARE","maps":["beach"]},
+ {"id":"crystal_fish","name":"Crystal fish","label":"クリスタルフィッシュ","art":"crystal_fish","rarity":"EPIC","maps":["rocky","grotto"]},
+ {"id":"sand_flatfish","name":"Sand flatfish","label":"サンドフラット","art":"sand_flatfish","rarity":"COMMON","maps":["beach"]},
+ {"id":"night_angler","name":"Night angler","label":"ナイトアンコウ","art":"night_angler","rarity":"RARE","maps":["rocky"]},
+ {"id":"pearl_seabass","name":"Pearl seabass","label":"パールスズキ","art":"pearl_seabass","rarity":"RARE","maps":["town","beach"]},
+ {"id":"fire_scorpionfish","name":"Fire scorpionfish","label":"ファイアカサゴ","art":"fire_scorpionfish","rarity":"EPIC","maps":["rocky"]},
+ {"id":"seahorse","name":"Seahorse","label":"シーホース","art":"seahorse","rarity":"UNCOMMON","maps":["town","beach"]},
+ {"id":"mint_wrasse","name":"Mint wrasse","label":"ミントベラ","art":"mint_wrasse","rarity":"UNCOMMON","maps":["beach"]},
+ {"id":"jellyfish_butterflyfish","name":"Jellyfish butterflyfish","label":"クラゲチョウチョウウオ","art":"jellyfish_butterflyfish","rarity":"RARE","maps":["beach"]},
+ {"id":"storm_tuna","name":"Storm tuna","label":"ストームマグロ","art":"storm_tuna","rarity":"LEGENDARY","maps":["rocky"]},
+ {"id":"coral_rabbitfish","name":"Coral rabbitfish","label":"サンゴアイゴ","art":"coral_rabbitfish","rarity":"COMMON","maps":["beach"]},
+ {"id":"twilight_salmon","name":"Twilight salmon","label":"トワイライトサーモン","art":"twilight_salmon","rarity":"EPIC","maps":["rocky"]},
+ {"id":"ghost_fish","name":"Ghost fish","label":"ゴーストフィッシュ","art":"ghost_fish","rarity":"EPIC","maps":["rocky","grotto"]},
+ {"id":"harvest_puffer","name":"Harvest puffer","label":"ハーベストフグ","art":"harvest_puffer","rarity":"UNCOMMON","maps":["town","beach"]},
+ {"id":"lantern_fish","name":"Lantern fish","label":"ランタンフィッシュ","art":"lantern_fish","rarity":"RARE","maps":["rocky"]},
+ {"id":"tidepool_blenny","name":"Tidepool blenny","label":"タイドプールギンポ","art":"tidepool_blenny","rarity":"UNCOMMON","maps":["beach"]}
 ]
 var rumor_found := false
 # Rumor ids heard from Fisher Mera / the notice: "grotto" or a species name.
@@ -388,42 +411,62 @@ func _advance_world_clock(delta: float) -> void:
 		weather = _weather_for_day(day)
 
 func _fish_entry(species: String) -> Dictionary:
+	var query := species.strip_edges()
 	for fish in FISH_SPECIES:
-		if str(fish.get("name", "")) == species: return fish
+		if str(fish.get("name", "")) == query or str(fish.get("id", "")) == query or str(fish.get("label", "")) == query:
+			return fish
 	return {}
 
+func _fish_id(species: String) -> String:
+	return str(_fish_entry(species).get("id", ""))
+
+func _fish_label(species: String) -> String:
+	var fish := _fish_entry(species)
+	return str(fish.get("label", fish.get("name", species)))
+
+func fish_id(species: String) -> String:
+	return _fish_id(species)
+
+func fish_label(species: String) -> String:
+	return _fish_label(species)
+
+func _canonical_species_name(species: String) -> String:
+	return str(_fish_entry(species).get("name", ""))
+
 func _fish_conditions(species: String) -> Dictionary:
-	# Unlisted species retain their old map-only availability. The named
-	# schedules add readable ecological variety without breaking old saves.
+	# The approved roster gets explicit tide windows so every pool has readable
+	# variety while still leaving a broad fallback for ordinary casts.
 	var all_times := ["night", "dawn", "day", "dusk"]
 	var all_weather := ["clear", "overcast", "rain", "storm"]
 	var all_seasons := ["spring", "summer", "autumn", "winter"]
-	match species:
-		"Silver sprat": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
-		"Sand goby": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
-		"Moonfin trout": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
-		"Old boot": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":all_seasons}
-		"Amber anchovy": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
-		"Dune flounder": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
-		"Tidepool blenny": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer"]}
-		"Copper mackerel": return {"times":["day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["summer", "autumn"]}
-		# Saltwater eel remains the town's broad fallback; the newer Storm sardine
-		# carries the weather-specific eel-like niche.
-		"Saltwater eel": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
-		"Lantern squid": return {"times":["night"], "weather":["clear", "rain"], "seasons":["summer", "autumn", "winter"]}
-		"Storm sardine": return {"times":["dusk", "night"], "weather":["rain", "storm"], "seasons":["summer", "autumn"]}
-		"Lighthouse ray": return {"times":["dawn", "day"], "weather":["clear", "overcast"], "seasons":["summer", "autumn"]}
-		"Tidemark carp": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer"]}
-		"Sea lavender perch": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
-		"Pearl puffer": return {"times":["day", "dusk"], "weather":["overcast", "rain"], "seasons":["summer", "autumn"]}
-		"Night sailfish": return {"times":["night"], "weather":["clear", "storm"], "seasons":["autumn", "winter"]}
-		"Crown snapper": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
-		# Singing herring keeps a broad town fallback so old map-only rescue and
-		# fever rolls always retain a rare option in daylight.
-		"Singing herring": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
+	match _fish_id(species):
+		"amber_anchovy": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
+		"sunrise_bream": return {"times":["dawn", "day"], "weather":["clear", "overcast"], "seasons":["spring", "summer", "autumn"]}
+		"moonfish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
+		"coral_grouper": return {"times":["day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["summer", "autumn"]}
+		"jellyfish_fish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["spring", "summer", "autumn"]}
+		"tropical_angelfish": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":["summer", "autumn"]}
+		"shadow_flounder": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
+		"starry_fish": return {"times":["night"], "weather":["clear", "storm"], "seasons":["autumn", "winter"]}
+		"reef_butterflyfish": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
+		"crystal_fish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
+		"sand_flatfish": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
+		"night_angler": return {"times":["night"], "weather":["clear", "rain", "storm"], "seasons":["summer", "autumn", "winter"]}
+		"pearl_seabass": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast"], "seasons":all_seasons}
+		"fire_scorpionfish": return {"times":["dusk", "night"], "weather":["rain", "storm"], "seasons":["summer", "autumn"]}
+		"seahorse": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
+		"mint_wrasse": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer", "autumn"]}
+		"jellyfish_butterflyfish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["summer", "autumn", "winter"]}
+		"storm_tuna": return {"times":["night"], "weather":["rain", "storm"], "seasons":["summer", "autumn", "winter"]}
+		"coral_rabbitfish": return {"times":["dawn", "day"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
+		"twilight_salmon": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
+		"ghost_fish": return {"times":["night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
+		"harvest_puffer": return {"times":["day", "dusk"], "weather":["overcast", "rain"], "seasons":["summer", "autumn"]}
+		"lantern_fish": return {"times":["night"], "weather":["clear", "rain"], "seasons":["summer", "autumn", "winter"]}
+		"tidepool_blenny": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer"]}
 		# Aurora koi is the grotto's explicit discovery reward; the hidden spot
 		# gates it, while tide conditions should not make the one-off reward vanish.
-		"Aurora koi": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
+		"aurora_koi": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
 		_: return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
 
 func fish_available(species: String, map_name: String = "", at_time: float = -1.0, weather_name: String = "", season_name: String = "") -> bool:
@@ -455,6 +498,18 @@ func available_fish(map_name: String = "", at_time: float = -1.0, weather_name: 
 
 func fish_availability(map_name: String = "", at_time: float = -1.0, weather_name: String = "", season_name: String = "") -> Array:
 	return available_fish(map_name, at_time, weather_name, season_name)
+
+func available_fish_ids(map_name: String = "", at_time: float = -1.0, weather_name: String = "", season_name: String = "") -> Array:
+	var ids: Array = []
+	for species in available_fish(map_name, at_time, weather_name, season_name):
+		ids.append(_fish_id(str(species)))
+	return ids
+
+func available_fish_labels(map_name: String = "", at_time: float = -1.0, weather_name: String = "", season_name: String = "") -> Array:
+	var labels: Array = []
+	for species in available_fish(map_name, at_time, weather_name, season_name):
+		labels.append(_fish_label(str(species)))
+	return labels
 
 func _available_fish(map_name: String = "", at_time: float = -1.0, weather_name: String = "", season_name: String = "") -> Array:
 	return available_fish(map_name, at_time, weather_name, season_name)
@@ -772,8 +827,8 @@ const HIDDEN_SPOT_COLLECTION_PERCENT := 25
 const RUMOR_TALK_RADIUS := 34.0
 const TIME_NAMES := ["dawn", "day", "dusk", "night"]
 const RUMOR_SOURCES := {
-	"mera": {"label":"Fisher Mera", "pos":Vector2(424,381), "rumors":["grotto", "Moonfin trout", "Lantern squid", "Night sailfish", "Storm sardine"]},
-	"notice": {"label":"Weathered notice", "pos":Vector2(468,381), "rumors":["grotto", "Lighthouse ray", "Pearl puffer", "Sea lavender perch", "Copper mackerel"]}
+	"mera": {"label":"Fisher Mera", "pos":Vector2(424,381), "rumors":["grotto", "Moonfish", "Night angler", "Storm tuna", "Ghost fish"]},
+	"notice": {"label":"Weathered notice", "pos":Vector2(468,381), "rumors":["grotto", "Fire scorpionfish", "Crystal fish", "Twilight salmon", "Lantern fish"]}
 }
 
 func collection_discovered_count() -> int:
@@ -872,7 +927,7 @@ func _update_rumor_gate() -> void:
 		hidden_spot_collected = true
 
 func _at_hidden_fishing_spot() -> bool:
-	# Aurora koi is tied to the grotto pool itself.  Visiting the grotto unlocks
+	# Aurora koi is tied to the grotto pool itself. Visiting the grotto unlocks
 	# the pool for the run, but standing at another rocky shoreline must not
 	# silently include hidden fish in its species roll.
 	if not hidden_spot_unlocked or not hidden_spot_collected: return false
@@ -908,7 +963,10 @@ func _weighted_species_pick(pool: Array[Dictionary], bonus: float = -1.0) -> Dic
 func _pick_species(grade: String, apply_rescue := false, exclude_legendary := false) -> Dictionary:
 	if apply_rescue: rescue_selection_used = false
 	var pool := _species_pool()
-	if pool.is_empty(): return FISH_SPECIES[0]
+	# A forecast can legitimately close every species in a pool. Keep the
+	# condition contract honest instead of silently falling back to an unrelated
+	# fish from another map or tide.
+	if pool.is_empty(): return {}
 	var eligible: Array[Dictionary] = []
 	for fish in pool:
 		if exclude_legendary and str(fish.get("rarity", "COMMON")) == "LEGENDARY": continue
@@ -1004,21 +1062,22 @@ func _pick_cast_candidate(apply_rescue := false) -> Dictionary:
 	# legendary; the ordinary perfect-pool pick excludes legendary entries so its
 	# small base weight cannot bypass the five-percent cap.
 	var candidate := _pick_species("PERFECT", apply_rescue, true)
+	if candidate.is_empty(): return {}
 	var chance := _legendary_chance_for_cast()
 	if chance > 0.0 and rng.randf() < chance:
 		var legendary_pool: Array[Dictionary] = []
 		for fish in _species_pool():
 			if str(fish.get("rarity", "COMMON")) == "LEGENDARY": legendary_pool.append(fish)
 		if not legendary_pool.is_empty():
-			# Preserve the existing grotto reward split: Aurora koi is a 35%
-			# hidden-spot reward, while Rainbow Kingfish remains the usual result.
+			# Preserve the grotto reward split: Aurora koi is a 35%
+			# hidden-spot reward, while Storm tuna remains the usual result.
 			if _at_hidden_fishing_spot() and rng.randf() < 0.35:
 				for fish in legendary_pool:
 					if str(fish.get("name", "")) == "Aurora koi":
 						candidate = fish
 						return candidate
 			for fish in legendary_pool:
-				if str(fish.get("name", "")) == "Rainbow Kingfish":
+				if str(fish.get("name", "")) == "Storm tuna":
 					candidate = fish
 					return candidate
 			candidate = legendary_pool[0]
@@ -1176,8 +1235,12 @@ func _capture_metadata(fish: Dictionary, grade: String) -> Dictionary:
 	var size_cm := snappedf(rng.randf_range(size_range.x, size_range.y), 0.1)
 	var weight_kg := snappedf(rng.randf_range(weight_range.x, weight_range.y), 0.01)
 	var fish_name := str(fish.get("name", "Unknown catch"))
+	var fish_id := str(fish.get("id", _fish_id(fish_name)))
+	var fish_label := str(fish.get("label", _fish_label(fish_name)))
 	return {
 		"species": fish_name,
+		"species_id": fish_id,
+		"label": fish_label,
 		"rarity": rarity,
 		"original_rarity": str(fish.get("original_rarity", rarity)),
 		"downgraded_from_species": str(fish.get("downgraded_from_species", "")),
@@ -1464,6 +1527,9 @@ func _try_fish():
 		return
 	if fishing_state != FishingState.IDLE: return
 	if _can_fish():
+		if _species_pool().is_empty():
+			toast = "No fish are biting in these tide conditions"; toast_t = 2.5
+			return
 		var cast_cost := tackle_cost()
 		if shells < cast_cost:
 			toast = "Need %d shells for %s (you have %d)" % [cast_cost, tackle_summary(), shells]; toast_t = 2.5
@@ -2172,7 +2238,16 @@ func _save_game(path: String = SAVE_PATH):
 
 func _normalize_catch_metadata(raw: Dictionary, species: String, first_capture := true) -> Dictionary:
 	var metadata := raw.duplicate(true)
-	metadata["species"] = str(metadata.get("species", species))
+	var canonical_species := _canonical_species_name(species)
+	if canonical_species.is_empty(): canonical_species = _canonical_species_name(str(metadata.get("species", "")))
+	if not canonical_species.is_empty():
+		metadata["species"] = canonical_species
+		metadata["species_id"] = _fish_id(canonical_species)
+		metadata["label"] = _fish_label(canonical_species)
+	else:
+		metadata["species"] = str(metadata.get("species", species))
+		metadata["species_id"] = str(metadata.get("species_id", ""))
+		metadata["label"] = str(metadata.get("label", metadata["species"]))
 	metadata["rarity"] = str(metadata.get("rarity", "COMMON"))
 	metadata["original_rarity"] = str(metadata.get("original_rarity", metadata["rarity"]))
 	metadata["downgraded_from_species"] = str(metadata.get("downgraded_from_species", ""))
@@ -2215,7 +2290,13 @@ func _load_game(path: String = SAVE_PATH):
 		# point, then fall back to the town start if a future map changes shape.
 		var safe_spawn := Vector2(510,150) if current_map == "grotto" else Vector2(400,80)
 		if _walkable(safe_spawn): player = safe_spawn
-	if data.get("catches",{}) is Dictionary: catches = data.get("catches",{})
+	catches = {}
+	var saved_catches = data.get("catches", {})
+	if saved_catches is Dictionary:
+		for species in saved_catches:
+			var canonical_species := _canonical_species_name(str(species))
+			if canonical_species.is_empty(): continue
+			catches[canonical_species] = int(catches.get(canonical_species, 0)) + maxi(0, int(saved_catches[species]))
 	catch_metadata.clear()
 	first_capture_metadata.clear()
 	catch_latest.clear()
@@ -2227,21 +2308,27 @@ func _load_game(path: String = SAVE_PATH):
 	if saved_metadata is Dictionary:
 		for species in saved_metadata:
 			if saved_metadata[species] is Dictionary:
-				var metadata := _normalize_catch_metadata(saved_metadata[species], str(species), true)
-				catch_metadata[str(species)] = metadata
-				first_capture_metadata[str(species)] = metadata.duplicate(true)
+				var canonical_species := _canonical_species_name(str(species))
+				if canonical_species.is_empty(): continue
+				var metadata := _normalize_catch_metadata(saved_metadata[species], canonical_species, true)
+				catch_metadata[canonical_species] = metadata
+				first_capture_metadata[canonical_species] = metadata.duplicate(true)
 	var saved_first = data.get("first_capture_metadata", {})
 	if saved_first is Dictionary:
 		for species in saved_first:
 			if saved_first[species] is Dictionary:
-				var first := _normalize_catch_metadata(saved_first[species], str(species), true)
-				first_capture_metadata[str(species)] = first
-				if not catch_metadata.has(str(species)): catch_metadata[str(species)] = first.duplicate(true)
+				var canonical_species := _canonical_species_name(str(species))
+				if canonical_species.is_empty(): continue
+				var first := _normalize_catch_metadata(saved_first[species], canonical_species, true)
+				first_capture_metadata[canonical_species] = first
+				if not catch_metadata.has(canonical_species): catch_metadata[canonical_species] = first.duplicate(true)
 	var saved_latest = data.get("catch_latest", {})
 	if saved_latest is Dictionary:
 		for species in saved_latest:
 			if saved_latest[species] is Dictionary:
-				catch_latest[str(species)] = _normalize_catch_metadata(saved_latest[species], str(species), false)
+				var canonical_species := _canonical_species_name(str(species))
+				if canonical_species.is_empty(): continue
+				catch_latest[canonical_species] = _normalize_catch_metadata(saved_latest[species], canonical_species, false)
 	for species in catch_metadata:
 		if not catch_latest.has(species): catch_latest[species] = catch_metadata[species].duplicate(true)
 	var saved_records = data.get("best_records", {})
@@ -2249,7 +2336,9 @@ func _load_game(path: String = SAVE_PATH):
 	if saved_records is Dictionary:
 		for species in saved_records:
 			if saved_records[species] is Dictionary:
-				best_records[str(species)] = saved_records[species].duplicate(true)
+				var canonical_species := _canonical_species_name(str(species))
+				if canonical_species.is_empty(): continue
+				best_records[canonical_species] = saved_records[species].duplicate(true)
 	# Version 8 saves did not have best_records. Reconstruct them from every
 	# durable measurement we do have so the first post-migration repeat cannot
 	# become a false crown just because the new ledger field is absent.
@@ -2294,35 +2383,37 @@ func _load_game(path: String = SAVE_PATH):
 	var saved_pending_state := str(data.get("pending_catch_state", ""))
 	if saved_pending is Dictionary and saved_pending_state == "pending" and not saved_pending.is_empty():
 		var pending_copy: Dictionary = saved_pending.duplicate(true)
-		var pending_species := str(pending_copy.get("species", ""))
+		var pending_species := _canonical_species_name(str(pending_copy.get("species", "")))
 		var pending_meta_raw = pending_copy.get("metadata", {})
 		if pending_species != "" and pending_meta_raw is Dictionary:
 			pending_copy["species"] = pending_species
 			var pending_first_capture := bool(pending_meta_raw.get("first_capture", false))
-			pending_copy["metadata"] = _normalize_catch_metadata(pending_meta_raw, pending_species, pending_first_capture)
-			pending_copy["sell_value"] = maxi(1, int(pending_copy.get("sell_value", _catch_sell_value(pending_copy["metadata"]))))
-			pending_copy["ledger_counted"] = bool(pending_copy.get("ledger_counted", true))
-			pending_copy["decision"] = "pending"
-			pending_catch = pending_copy
-			pending_catch_state = "pending"
-			last_catch_decision = ""
-			last_catch = pending_species
-			last_catch_metadata = pending_copy["metadata"].duplicate(true)
-			last_rarity = str(last_catch_metadata.get("rarity", "COMMON"))
-			last_grade = str(last_catch_metadata.get("grade", "GOOD"))
-			last_catch_size_cm = float(last_catch_metadata.get("size_cm", 0.0))
-			last_catch_weight_kg = float(last_catch_metadata.get("weight_kg", 0.0))
-			last_catch_variant = str(last_catch_metadata.get("variant", "Standard"))
-			last_catch_mystery = bool(last_catch_metadata.get("mystery", false))
-			fishing_state = FishingState.RESULT
-			reveal_shortened = bool(data.get("reveal_shortened", not bool(last_catch_metadata.get("first_capture", false))))
-			reveal_stage = clampi(int(data.get("reveal_stage", 4)), 0, 4)
-			reveal_t = maxf(0.0, float(data.get("reveal_t", 2.0 if not reveal_shortened else 1.24)))
-			legendary_t = clampf(float(data.get("legendary_t", 6.0 if last_rarity == "LEGENDARY" else 0.0)), 0.0, 6.0)
-			legendary_stage = clampi(int(data.get("legendary_stage", 3 if last_rarity == "LEGENDARY" and legendary_t >= 3.75 else 0)), 0, 3)
-			result_t = 999.0
-			toast = "Catch restored / choose REGISTER or SELL"
-			toast_t = 4.0
+			var pending_metadata := _normalize_catch_metadata(pending_meta_raw, pending_species, pending_first_capture)
+			if not pending_metadata.is_empty():
+				pending_copy["metadata"] = pending_metadata
+				pending_copy["sell_value"] = maxi(1, int(pending_copy.get("sell_value", _catch_sell_value(pending_copy["metadata"]))))
+				pending_copy["ledger_counted"] = bool(pending_copy.get("ledger_counted", true))
+				pending_copy["decision"] = "pending"
+				pending_catch = pending_copy
+				pending_catch_state = "pending"
+				last_catch_decision = ""
+				last_catch = pending_species
+				last_catch_metadata = pending_copy["metadata"].duplicate(true)
+				last_rarity = str(last_catch_metadata.get("rarity", "COMMON"))
+				last_grade = str(last_catch_metadata.get("grade", "GOOD"))
+				last_catch_size_cm = float(last_catch_metadata.get("size_cm", 0.0))
+				last_catch_weight_kg = float(last_catch_metadata.get("weight_kg", 0.0))
+				last_catch_variant = str(last_catch_metadata.get("variant", "Standard"))
+				last_catch_mystery = bool(last_catch_metadata.get("mystery", false))
+				fishing_state = FishingState.RESULT
+				reveal_shortened = bool(data.get("reveal_shortened", not bool(last_catch_metadata.get("first_capture", false))))
+				reveal_stage = clampi(int(data.get("reveal_stage", 4)), 0, 4)
+				reveal_t = maxf(0.0, float(data.get("reveal_t", 2.0 if not reveal_shortened else 1.24)))
+				legendary_t = clampf(float(data.get("legendary_t", 6.0 if last_rarity == "LEGENDARY" else 0.0)), 0.0, 6.0)
+				legendary_stage = clampi(int(data.get("legendary_stage", 3 if last_rarity == "LEGENDARY" and legendary_t >= 3.75 else 0)), 0, 3)
+				result_t = 999.0
+				toast = "Catch restored / choose REGISTER or SELL"
+				toast_t = 4.0
 	rumor_found = bool(data.get("rumor_found", false))
 	heard_rumors = []
 	var known_rumors := _all_rumor_ids()
