@@ -504,8 +504,8 @@ func _build_beach():
 	# Amber beach: dunes, driftwood and a broad north entrance from town.
 	landmarks = [
 		{"kind":"driftwood","pos":Vector2(146,430),"label":"Driftwood Cove"},
-		{"kind":"pool","pos":Vector2(300,480),"label":"North Tide Pool"},
-		{"kind":"pool","pos":Vector2(620,480),"label":"South Tide Pool"}
+		{"kind":"pool","pos":Vector2(205,157),"label":"North Tide Pool"},
+		{"kind":"pool","pos":Vector2(725,370),"label":"South Tide Pool"}
 	]
 	_add_prop("cottage", Vector2(260,190), Rect2(-25,-29,50,25))
 	_add_prop("barrel", Vector2(322,232), Rect2(-7,-17,14,16))
@@ -525,7 +525,7 @@ func _build_rocky():
 		{"kind":"pool","pos":Vector2(497,151),"label":"Blackglass Pool"},
 		{"kind":"pool","pos":Vector2(614,375),"label":"Gull's Pool"},
 		{"kind":"lighthouse","pos":Vector2(704,154),"label":"Farwatch Lighthouse"},
-		{"kind":"hidden_pool","pos":Vector2(690,520),"label":"Moonlit Grotto"}
+		{"kind":"hidden_pool","pos":Vector2(690,480),"label":"Moonlit Grotto"}
 	]
 	_add_prop("inn", Vector2(585,170), Rect2(-32,-40,64,37))
 	_add_prop("sign", Vector2(120,102), Rect2(-6,-9,12,9))
@@ -553,7 +553,10 @@ func _build_grotto():
 
 func _add_prop(kind: String, pos: Vector2, body: Rect2):
 	props.append({"kind":kind,"pos":pos})
-	if body.size != Vector2.ZERO: solids.append(Rect2(pos+body.position,body.size))
+	# Static authored map art already contains visible landmarks; legacy prop
+	# colliders would otherwise become invisible walls at old coordinates.
+	if body.size != Vector2.ZERO and not _using_static_map_art():
+		solids.append(Rect2(pos+body.position,body.size))
 
 func _shore(x: float) -> float:
 	if current_map == "beach": return 500.0
@@ -744,13 +747,13 @@ func _can_fish() -> bool:
 func _fishing_spots() -> Array[Dictionary]:
 	match current_map:
 		"town": return [{"pos":Vector2(502,530),"label":"Old Salt Pier"}]
-		"beach": return [
-			{"pos":Vector2(300,487),"label":"North Tide Pool"},
-			{"pos":Vector2(620,487),"label":"South Tide Pool"}
+	"beach": return [
+			{"pos":Vector2(205,157),"label":"North Tide Pool"},
+			{"pos":Vector2(725,370),"label":"South Tide Pool"}
 		]
 		"rocky":
 			var spots: Array[Dictionary] = [{"pos":Vector2(497,151),"label":"Blackglass Pool"},{"pos":Vector2(614,375),"label":"Gull's Pool"}]
-			if hidden_spot_unlocked: spots.append({"pos":Vector2(690,520),"label":"Moonlit Grotto"})
+			if hidden_spot_unlocked: spots.append({"pos":Vector2(690,480),"label":"Moonlit Grotto"})
 			return spots
 		"grotto": return [{"pos":Vector2(512,520),"label":"Moonlit Grotto"}]
 		_: return []
@@ -858,7 +861,7 @@ func _update_rumor_gate() -> void:
 	if rumor_found and not hidden_spot_unlocked and collection_percent() >= float(HIDDEN_SPOT_COLLECTION_PERCENT):
 		hidden_spot_unlocked = true
 		toast = "The guide is %d%% full: a hidden grotto is marked on the rocky shore" % HIDDEN_SPOT_COLLECTION_PERCENT; toast_t = 3.5
-	if hidden_spot_unlocked and current_map == "rocky" and player.distance_to(Vector2(690,520)) < 28.0:
+	if hidden_spot_unlocked and current_map == "rocky" and player.distance_to(Vector2(690,480)) < 28.0:
 		hidden_spot_collected = true
 	if current_map == "grotto" and hidden_spot_unlocked:
 		hidden_spot_collected = true
@@ -869,7 +872,7 @@ func _at_hidden_fishing_spot() -> bool:
 	# silently include hidden fish in its species roll.
 	if not hidden_spot_unlocked or not hidden_spot_collected: return false
 	if current_map == "grotto": return player.distance_to(Vector2(512,520)) <= 28.0
-	return current_map == "rocky" and player.distance_to(Vector2(690,520)) <= 24.0
+	return current_map == "rocky" and player.distance_to(Vector2(690,480)) <= 24.0
 
 func _species_pool() -> Array[Dictionary]:
 	var pool: Array[Dictionary] = []
@@ -2594,7 +2597,7 @@ func _exit_markers() -> Array[Dictionary]:
 				{"pos":Vector2(420,430),"label":"BEACH","dir":Vector2(0,1)}
 			]
 			if hidden_spot_unlocked:
-				rocky_markers.append({"pos":Vector2(690,520),"label":"MOONLIT GROTTO","dir":Vector2(1,0)})
+				rocky_markers.append({"pos":Vector2(690,480),"label":"MOONLIT GROTTO","dir":Vector2(1,0)})
 			return rocky_markers
 		"grotto":
 			return [{"pos":Vector2(40,340),"label":"ROCKY SHORE","dir":Vector2(-1,0)}]
@@ -2623,7 +2626,7 @@ func _draw_map_landmarks():
 		_draw_static_map_labels()
 		if current_map == "rocky" and hidden_spot_unlocked:
 			# Moonlit Grotto is a gameplay unlock layered onto the Rocky Shore art.
-			_draw_tide_pool(Vector2(690,520),24.0,Color("#4d5fa0"),Color("#d9d2ff"))
+			_draw_tide_pool(Vector2(690,480),24.0,Color("#4d5fa0"),Color("#d9d2ff"))
 			draw_string(ThemeDB.fallback_font,Vector2(638,563),"Moonlit Grotto",HORIZONTAL_ALIGNMENT_CENTER,104,10,Color("#e4dcff"))
 		_draw_fishing_markers()
 		return

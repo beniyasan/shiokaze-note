@@ -383,7 +383,7 @@ func run():
 	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,440); game._check_map_exit()
 	check(game._walkable(Vector2(500,440)) and game.transition_target=='beach','town beach exit is reachable')
 	# Each map exposes named, local fishing landmarks as well as its shoreline.
-	game.current_map='beach'; game._build_map('beach'); game.player=Vector2(300,487)
+	game.current_map='beach'; game._build_map('beach'); game.player=Vector2(205,157)
 	check(game._can_fish() and game._fishing_spots().size()==2,'beach tide pools are fishable')
 	game.player=Vector2(300,300)
 	check(not game._can_fish(),'beach inland cast rejected')
@@ -392,7 +392,7 @@ func run():
 	# The unlocked cove is a real map transition, not only a hidden fishing spot
 	# layered onto Rocky Shore. Its save/load state and local pool remain stable.
 	game.hidden_spot_unlocked=true; game.hidden_spot_collected=true; game.transition_active=false
-	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(690,520); game._check_map_exit()
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(690,480); game._check_map_exit()
 	check(game.transition_target=='grotto','rocky grotto exit is gated and reachable')
 	game._transition_to('grotto',Vector2(510,150)); game._process(0.5)
 	check(game.current_map=='grotto' and game.player==Vector2(510,150),'grotto transition rebuilds the map')
@@ -580,7 +580,7 @@ func run():
 	game.hidden_spot_collected=true; game.player=Vector2(497,151)
 	var rocky_pool: Array = game._species_pool()
 	check(not rocky_pool.any(func(f): return f.rarity=='LEGENDARY' and f.maps.has('hidden')),'hidden fish stay out of ordinary rocky pools')
-	game.player=Vector2(690,520)
+	game.player=Vector2(690,480)
 	check(game._species_pool().any(func(f): return f.rarity=='LEGENDARY' and f.maps.has('hidden')),'hidden fish require the actual grotto fishing spot')
 	check(game._legendary_chance_for_cast()<=0.05,'rocky legendary chance is capped at five percent')
 	game.combo=2; game.fever_active=false; game.bait_index=1
