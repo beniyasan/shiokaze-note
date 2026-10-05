@@ -5,6 +5,14 @@ func check(ok: bool, label: String):
 	if not ok: failures += 1
 func _initialize():
 	call_deferred('run')
+# Walks like _process does: one movement step, then the map-exit check.
+func walk_to(game, target: Vector2, frames: int = 900) -> bool:
+	for i in range(frames):
+		if game.player.distance_to(target) < 2.0: return true
+		if game.transition_active: return game.player.distance_to(target) < 12.0
+		game._move_player((target-game.player).normalized(),0.016)
+		game._check_map_exit()
+	return game.player.distance_to(target) < 2.0
 func run():
 	var game = load('res://main.tscn').instantiate()
 	root.add_child(game); game.set_process(false)
@@ -380,8 +388,47 @@ func run():
 	check(game.current_map=='rocky' and game.fish_count==5,'beach to rocky preserves ledger')
 	game._save_game('user://map-test.json'); game.current_map='town'; game._build_map('town'); game._load_game('user://map-test.json')
 	check(game.current_map=='rocky','save restores active map')
-	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,440); game._check_map_exit()
-	check(game._walkable(Vector2(500,440)) and game.transition_target=='beach','town beach exit is reachable')
+	game.current_map='town'; game._build_map('town'); game.player=Vector2(556,452); game._check_map_exit()
+	check(game._walkable(Vector2(556,452)) and game.transition_target=='beach' and game.transition_spawn==Vector2(400,80),'town beach exit is reachable')
+	game.transition_active=false
+	# Walk the real runtime path (move, then exit check): the south road must reach
+	# the pier's fishing spot, and stepping off it must not leave town.
+	game.player=Vector2(500,425)
+	check(walk_to(game,Vector2(502,530)) and not game.transition_active and game._can_fish(),'walking the south road reaches the pier without leaving town')
+	check(walk_to(game,Vector2(500,425)) and not game.transition_active,'walking back off the pier stays in town')
+	check(walk_to(game,Vector2(556,452)) and game.transition_active and game.transition_target=='beach','walking onto the sand east of the pier leaves for the beach')
+	game.transition_active=false
+	# The pier is town geometry; the same rectangle is open water elsewhere.
+	game.current_map='beach'; game._build_map('beach')
+	check(not game._walkable(Vector2(502,530)),'beach has no phantom pier')
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(300,400)
+	check(walk_to(game,Vector2(300,485)) and not game.transition_active and game._can_fish(),'rocky lower bank is walkable and fishable')
+	game.player=Vector2(420,440)
+	check(walk_to(game,Vector2(420,475)) and game.transition_target=='beach' and game.transition_spawn==Vector2(770,390),'rocky beach gate leads to the east side of the beach')
+	game.transition_active=false
+	# Every connection: the trigger can be stood in, and its spawn is walkable,
+	# outside every trigger of the destination (no bounce) and has a way back.
+	var unlocked_before: bool = game.hidden_spot_unlocked; game.hidden_spot_unlocked=true
+	for map_name in game.MAP_EXITS:
+		for entry in game.MAP_EXITS[map_name]:
+			var route := '%s -> %s' % [map_name, entry.to]
+			game.current_map=map_name; game._build_map(map_name)
+			var standable := false
+			for x in range(int(entry.zone.position.x), int(entry.zone.end.x), 4):
+				for y in range(int(entry.zone.position.y), int(entry.zone.end.y), 4):
+					if game._walkable(Vector2(x,y)): standable = true
+			check(standable,'exit trigger is reachable: '+route)
+			for spot in game._fishing_spots():
+				check(not entry.zone.has_point(spot.pos),'exit trigger leaves %s fishable: %s' % [spot.label, route])
+			game.current_map=str(entry.to); game._build_map(game.current_map)
+			var clear: bool = game._walkable(entry.spawn)
+			var way_back := str(entry.to) == 'grotto'
+			for back in game.MAP_EXITS[entry.to]:
+				if back.zone.has_point(entry.spawn): clear = false
+				if str(back.to) == map_name: way_back = true
+			check(clear,'spawn is walkable and outside every trigger: '+route)
+			check(way_back,'destination has a return exit: '+route)
+	game.hidden_spot_unlocked=unlocked_before
 	# Each map exposes named, local fishing landmarks as well as its shoreline.
 	game.current_map='beach'; game._build_map('beach'); game.player=Vector2(205,157)
 	check(game._can_fish() and game._fishing_spots().size()==2,'beach tide pools are fishable')
@@ -415,20 +462,24 @@ func run():
 	game._reset_fishing(); game._break_chain(); game.combo=2
 	game.player=Vector2(497,151)
 	game._try_fish(); game._process_fishing(4.0)
-	check(game.fish_hp_max==12 and game.timing_timer==20.0,'battle starts with stamina and a 20 second limit')
+	check(game.fish_hp_max==game.FISH_STAMINA and game.timing_timer==20.0,'battle starts with stamina and a 20 second limit')
+	var chain_stamina: int = game.fish_hp_max
+	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(4.0)
+	check(game.fish_hp_max==chain_stamina,'a longer chain does not raise fish stamina')
+	game._reset_fishing(); game._break_chain(); game.combo=2; game._try_fish(); game._process_fishing(4.0)
 	var before_battle=game.fish_count
 	game._handle_fishing_strike(0.5)
 	check(game.fish_count==before_battle and game.battle_hits==0,'initial tug cooldown rejects instant catch')
-	game._process_fishing(1.1)
+	game._process_fishing(game.FIRST_PULL_DELAY+0.05)
 	game._handle_fishing_strike(0.5)
-	check(game.fishing_state==game.FishingState.TIMING and game.fish_hp==10,'first perfect pull wears fish down but does not finish')
+	check(game.fishing_state==game.FishingState.TIMING and game.fish_hp==game.FISH_STAMINA-2,'first perfect pull wears fish down but does not finish')
 	game._handle_fishing_strike(0.5)
 	check(game.battle_hits==1,'rapid repeated inputs cannot skip battle')
-	for i in range(5):
-		game._process_fishing(1.85)
+	for i in range(4):
+		game._process_fishing(game.PULL_COOLDOWN+0.05)
 		game._handle_fishing_strike(0.5)
-	check(game.fishing_state==game.FishingState.RESULT and game.last_rarity != '', 'six perfect pulls resolve a catch without guaranteed legendary')
-	check(game.battle_elapsed>=9.0 and game.fish_count==before_battle+1,'legendary battle lasts at least nine seconds and counts once')
+	check(game.fishing_state==game.FishingState.RESULT and game.last_rarity != '' and game.battle_hits==5, 'five perfect pulls resolve a catch without guaranteed legendary')
+	check(game.battle_elapsed>=4.0 and game.battle_elapsed<8.0 and game.fish_count==before_battle+1,'battle takes several spaced pulls, not a long wait, and counts once')
 	if game.last_rarity == 'LEGENDARY':
 		check(game.legendary_t==0.0 and game.result_t>6.0,'legendary starts its six second staged celebration')
 		game._process_fishing(1.0); check(game.legendary_stage==1,'legendary advances to rising energy')
@@ -440,6 +491,33 @@ func run():
 	game._process_fishing(1.1)
 	game._handle_fishing_strike(0.0)
 	check(game.fishing_state==game.FishingState.TIMING and game.battle_tension>0.4,'bad pull strains the line without instant failure')
+	# The gauge alone decides a pull; the challenge zone is only a bonus.
+	for seed in range(4):
+		game._reset_fishing(); game._break_chain(); game.combo=2; game._try_fish(); game._process_fishing(4.0)
+		game.fishing_challenge.configure(3,2,seed)
+		var style: String = game.fishing_challenge.current_game_name()
+		while game.pull_cooldown>0.0: game._process_fishing(1.0/60.0)
+		check(game.fishing_challenge.grace_t>0.8,'%s grace is still open when the first pull becomes available' % style)
+		game.battle_direction=1.0; game.direction_timer=9.0
+		for frame in range(120): game._process_fishing(1.0/60.0)
+		check(game.fishing_challenge.grace_t==0.0,'%s grace runs out while a pull is available' % style)
+		if style=='TIDE SLALOM':
+			check(game.fishing_challenge.safe_lane()==-1.0 and game._challenge_prompt().contains('LEFT'),'slalom lane matches the HOLD LEFT counter prompt')
+			game.battle_direction=-1.0; game._process_fishing(0.01)
+			check(game.fishing_challenge.safe_lane()==1.0 and game._challenge_prompt().contains('RIGHT'),'slalom lane follows the fish when it turns')
+		var tension_before: float = game.battle_tension; var escape_before: float = game.battle_escape
+		game._handle_fishing_strike(0.79 if game.fishing_challenge.target_center()<0.53 else 0.27)
+		check(game.battle_hits==1 and game.fish_hp==game.FISH_STAMINA-1 and game.fishing_challenge.round_index==0 and game.fishing_challenge.action_progress==0,'%s: a GOOD pull outside the bonus zone still counts' % style)
+		check(is_equal_approx(game.battle_tension,tension_before+game.GOOD_PULL_TENSION) and game.battle_escape<=escape_before,'%s: a GOOD pull outside the bonus zone is not punished' % style)
+		game.pull_cooldown=0.0; tension_before=game.battle_tension
+		var beat_at: float = game.fishing_challenge.target_center()
+		var beat_tension: float = game.PERFECT_PULL_TENSION if beat_at>=0.42 and beat_at<=0.62 else game.GOOD_PULL_TENSION
+		game._handle_fishing_strike(beat_at,game.fishing_challenge.safe_lane())
+		check(is_equal_approx(game.battle_tension,tension_before+beat_tension-game.CLEAN_BEAT_TENSION_RELIEF),'%s: a clean beat eases the line' % style)
+		game.pull_cooldown=0.0; game.battle_tension=0.2
+		var beats_before: int = game.fishing_challenge.action_progress; var round_before: int = game.fishing_challenge.round_index
+		game._handle_fishing_strike(0.1,game.fishing_challenge.safe_lane())
+		check(game.fishing_challenge.action_progress==beats_before and game.fishing_challenge.round_index==round_before and game.battle_tension>0.5,'%s: a pull off the gauge strains the line and earns no beat' % style)
 	game.battle_tension=0.9; game.pull_cooldown=0.0; game._handle_fishing_strike(0.0)
 	check(game.last_grade=='MISS' and game.combo==0,'repeated bad pulls can snap the line and reset combo')
 	game._reset_fishing()
