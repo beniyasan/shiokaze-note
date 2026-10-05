@@ -14,12 +14,12 @@ func run():
 	check(game._walkable(Vector2(502,530)),'pier is walkable')
 	# Tide forecast gates species by map, time, weather, and season.
 	check(game._time_period(0.50)=='day' and game._time_period(0.25)=='dawn' and game._time_period(0.95)=='night','clock resolves fishing periods')
-	check(game.fish_available('Silver sprat','town',0.50,'clear','spring'),'daytime sprat are available in spring')
-	check(not game.fish_available('Silver sprat','town',0.50,'clear','winter'),'sprat leave in winter')
-	check(game.fish_available('Moonfin trout','beach',0.75,'clear','autumn'),'moonfin follows an autumn dusk tide')
-	check(not game.fish_available('Moonfin trout','beach',0.50,'clear','autumn'),'moonfin leaves after dusk')
-	check(game.fish_available('Storm sardine','rocky',0.95,'storm','summer'),'storm sardine follows a summer storm night')
-	check(not game.fish_available('Storm sardine','rocky',0.50,'storm','summer'),'storm sardine avoids daylight')
+	check(game.fish_available('Sunrise bream','town',0.50,'clear','spring'),'daytime bream are available in spring')
+	check(not game.fish_available('Sunrise bream','town',0.50,'clear','winter'),'bream leave in winter')
+	check(game.fish_available('Moonfish','beach',0.75,'clear','autumn'),'moonfish follows an autumn dusk tide')
+	check(not game.fish_available('Moonfish','beach',0.50,'clear','autumn'),'moonfish leaves after dusk')
+	check(game.fish_available('Storm tuna','rocky',0.95,'storm','summer'),'storm tuna follows a summer storm night')
+	check(not game.fish_available('Storm tuna','rocky',0.50,'storm','summer'),'storm tuna avoids daylight')
 	var forecast_before: Array = game.available_fish('rocky',0.95,'storm','summer')
 	check(forecast_before == game.fish_availability('rocky',0.95,'storm','summer'),'forecast aliases stay deterministic')
 	var old_day: int = game.day; var old_time: float = game.time_of_day; var old_weather: String = game.weather; var old_season: String = game.season
@@ -79,7 +79,7 @@ func run():
 	var sold_confirmation: String = game.toast
 	game.result_toast_pending='stale reveal toast'; game._process_fishing(0.0)
 	check(game.toast==sold_confirmation and game.result_toast_pending=='','stale reveal toast stays cleared after selling')
-	game._reset_fishing(); game.cast_candidate={'name':'Silver sprat','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
+	game._reset_fishing(); game.cast_candidate={'name':'Sunrise bream','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
 	game.reveal_stage=4; game.reveal_t=2.0; game.result_toast_pending='stale reveal toast'
 	game.register_pending_catch(); game._process_fishing(0.0)
 	check(game.toast.begins_with('REGISTERED') and game.result_toast_pending=='','registering is confirmed instead of being overwritten by the reveal toast')
@@ -97,7 +97,7 @@ func run():
 	# The cast keeps a PERFECT-pool candidate, while the mini-game grade still
 	# changes quality: ordinary GOOD downgrades a high-rarity candidate to RARE,
 	# whereas PERFECT adopts the candidate unchanged.
-	var high_candidate: Dictionary = game.FISH_SPECIES[15].duplicate(true)
+	var high_candidate: Dictionary = game._fish_entry('Twilight salmon').duplicate(true)
 	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game._resolve_fishing_timing(0.34)
 	check(game.last_catch!=str(high_candidate.name) and game.last_rarity=='RARE' and game.last_catch_metadata.get('original_rarity','')=='EPIC' and game.last_catch_metadata.get('downgraded_from_species','')==str(high_candidate.name) and game.result_t<=2.0,'GOOD timing swaps EPIC candidate for a map-legal RARE without legendary reveal')
 	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game._resolve_fishing_timing(0.5)
@@ -106,7 +106,7 @@ func run():
 	# downgrade either premium rarity, including the full Legendary reveal path.
 	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game.fx_premium=true; game._resolve_fishing_timing(0.34)
 	check(game.last_catch==str(high_candidate.name) and game.last_rarity=='EPIC' and game.last_catch_metadata.get('original_rarity','')=='EPIC' and game.last_catch_metadata.get('downgraded_from_species','')=='','premium EPIC keeps its rarity on GOOD timing')
-	var premium_legendary: Dictionary = game.FISH_SPECIES[4].duplicate(true)
+	var premium_legendary: Dictionary = game._fish_entry('Storm tuna').duplicate(true)
 	game._reset_fishing(); game.cast_candidate=premium_legendary.duplicate(true); game.fx_premium=true; game._resolve_fishing_timing(0.34)
 	check(game.last_catch==str(premium_legendary.name) and game.last_rarity=='LEGENDARY' and game.result_t>6.0 and game.result_toast_pending.begins_with('BIG CATCH!!'),'premium LEGENDARY keeps its rarity and reveal on GOOD timing')
 	check(game._promotion_max_stage('COMMON')==1 and game._promotion_max_stage('UNCOMMON')==1 and game._promotion_max_stage('RARE')==2 and game._promotion_max_stage('EPIC')==3 and game._promotion_max_stage('LEGENDARY')==3,'promotion stage cap follows candidate rank')
@@ -114,7 +114,7 @@ func run():
 	check(game._visible_promotion_stage()==2,'reversal visibly steps the float back one stage')
 	game._reset_fishing(); game.cast_candidate=high_candidate.duplicate(true); game.promotion_cue_rank=3; game._resolve_fishing_timing(0.34)
 	check(game.promotion_result_label.begins_with('惜しい') and game.last_rarity=='RARE','honest high preview to GOOD low result is labelled near miss')
-	game._reset_fishing(); game.cast_candidate=game.FISH_SPECIES[2].duplicate(true); game.promotion_cue_rank=0; game._resolve_fishing_timing(0.5)
+	game._reset_fishing(); game.cast_candidate=game._fish_entry('Moonfish').duplicate(true); game.promotion_cue_rank=0; game._resolve_fishing_timing(0.5)
 	check(game.promotion_result_label=='逆転!' and game.last_rarity=='RARE','low preview to PERFECT high result is labelled reversal')
 	# Promotion lies are configured once per cast, so a seeded cast reproduces
 	# both its misleading cue and its reversal window exactly.
@@ -146,7 +146,7 @@ func run():
 	game.combo=0; game.fever_active=false; game.rng.seed=31337
 	# The species pool follows the tide, so the lie rate must follow the pool:
 	# check a pool with several EPIC species and the town's single-EPIC pool.
-	var honesty_envs := [['rocky',Vector2(497,151),0.50,'clear','summer'],['rocky',Vector2(497,151),0.95,'clear','autumn'],['town',Vector2(500,530),0.50,'clear','spring'],['town',Vector2(500,530),0.50,'overcast','winter']]
+	var honesty_envs := [['rocky',Vector2(497,151),0.95,'clear','autumn'],['rocky',Vector2(497,151),0.95,'rain','summer'],['rocky',Vector2(497,151),0.95,'storm','winter']]
 	for env in honesty_envs:
 		game.current_map=str(env[0]); game._build_map(str(env[0])); game.player=env[1]
 		game.time_of_day=float(env[2]); game.weather=str(env[3]); game.season=str(env[4])
@@ -168,6 +168,7 @@ func run():
 		check(rainbow_total>20 and rainbow_rate>=0.6,'a rainbow cue is mostly honest on %s %s/%s (%d/%d)' % [str(env[0]),str(env[3]),str(env[4]),rainbow_honest,rainbow_total])
 		check(purple_total>40 and purple_rate>=0.5,'a purple cue is honest more often than not on %s %s/%s (%d/%d)' % [str(env[0]),str(env[3]),str(env[4]),purple_honest,purple_total])
 	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(497,151)
+	game.time_of_day=0.95; game.weather='clear'; game.season='autumn'
 	check(game._candidate_share_at_least(0)>0.99 and game._candidate_share_at_least(3)<game._candidate_share_at_least(2),'candidate rank shares are a decreasing probability')
 	# GOOD substitutes come from the whole RARE pool, not always its first species.
 	var substitute_names := {}
@@ -175,7 +176,7 @@ func run():
 	game.time_of_day=0.95; game.weather='clear'; game.season='autumn'
 	for seed_value in range(1,60):
 		game.rng.seed=seed_value
-		substitute_names[str(game._pick_good_substitute(game.FISH_SPECIES[15]).get('name',''))]=true
+		substitute_names[str(game._pick_good_substitute(game._fish_entry('Twilight salmon')).get('name',''))]=true
 	check(substitute_names.size()>1,'GOOD substitutes vary across the RARE pool')
 	game._reset_fishing(); game.combo=saved_combo
 	game.time_of_day=float(saved_clock[0]); game.weather=str(saved_clock[1]); game.season=str(saved_clock[2])
@@ -226,7 +227,7 @@ func run():
 	# likely, while the third miss remains the explicit RARE floor. The shares
 	# use the same deterministic rarity weights as the natural cast roll.
 	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(497,151)
-	game.time_of_day=0.95; game.weather='clear'; game.season='autumn'; game.combo=0; game.fever_active=false
+	game.time_of_day=0.95; game.weather='rain'; game.season='summer'; game.combo=0; game.fever_active=false
 	game._reset_pity(); var purple_share_0: float = game._candidate_share_at_least(2)
 	game._advance_pity('MISS'); var purple_share_1: float = game._candidate_share_at_least(2)
 	game._advance_pity('MISS'); var purple_share_2: float = game._candidate_share_at_least(2)
@@ -246,11 +247,11 @@ func run():
 	var rescued_rare := 0
 	var rescued_epic := 0
 	for i in range(6000):
-		var rescued_weighted: Dictionary = game._apply_rescue_floor({'name':'Silver sprat','rarity':'COMMON'}, rescue_eligible, 'PERFECT')
+		var rescued_weighted: Dictionary = game._apply_rescue_floor({'name':'Sunrise bream','rarity':'COMMON'}, rescue_eligible, 'PERFECT')
 		if str(rescued_weighted.get('rarity','COMMON')) == 'RARE': rescued_rare += 1
 		elif str(rescued_weighted.get('rarity','COMMON')) == 'EPIC': rescued_epic += 1
 	check(natural_common>0 and natural_rare>0 and rescued_rare>0 and rescued_epic>0 and rescued_rare>rescued_epic*3 and rescued_rare>natural_rare,'rescue raises the floor while preserving rarity weights (%d natural common, %d/%d rare)' % [natural_common,natural_rare,rescued_rare])
-	check(game._rarity_rank(str(game._apply_rescue_floor({'name':'Silver sprat','rarity':'COMMON'}, rescue_eligible, 'PERFECT').get('rarity','COMMON')))>=game._rarity_rank('RARE'),'weighted rescue never drops below RARE')
+	check(game._rarity_rank(str(game._apply_rescue_floor({'name':'Sunrise bream','rarity':'COMMON'}, rescue_eligible, 'PERFECT').get('rarity','COMMON')))>=game._rarity_rank('RARE'),'weighted rescue never drops below RARE')
 	game.fishing_state=game.FishingState.RESULT; game.last_grade='PERFECT'; game.last_rarity='RARE'
 	check(game._result_reveal_hud_reserved(),'result reveal reserves rarity rows from CHAIN/RESCUE HUD')
 	game.last_grade='MISS'; game.last_rarity=''
@@ -260,8 +261,8 @@ func run():
 	game.time_of_day=float(pre_6b_state[2]); game.weather=str(pre_6b_state[3]); game.season=str(pre_6b_state[4])
 	game._reset_pity()
 	game.pity_meter=2; game.low_grade_streak=2; game.rescue_ready=false
-	game._save_game('user://pity-test.json')
-	game._reset_pity(); game._load_game('user://pity-test.json')
+	game._save_game('res://.smoke-pity-test.json')
+	game._reset_pity(); game._load_game('res://.smoke-pity-test.json')
 	check(game.pity_meter==2 and game.low_grade_streak==2 and not game.rescue_ready,'save restores pity meter without arming early')
 	game.pity_meter=game.PITY_THRESHOLD; game.rescue_ready=true
 	game._reset_fishing()
@@ -300,9 +301,9 @@ func run():
 	var pending_rarity := str(first_meta.get('rarity','COMMON'))
 	check(pending_register_value==game.REGISTER_BASE_REWARD+int(game.REGISTER_FIRST_BONUS[pending_rarity])+game.REGISTER_CROWN_BONUS,'registering a first-capture crown pays the base reward plus both bonuses')
 	check(pending_register_value>1 and game._register_value({'rarity':'COMMON','first_capture':false,'crown':false})==game.REGISTER_BASE_REWARD,'a plain repeat registers for the base reward only')
-	game._save_game('user://pending-catch.json')
+	game._save_game('res://.smoke-pending-catch.json')
 	game._reset_fishing()
-	game._load_game('user://pending-catch.json')
+	game._load_game('res://.smoke-pending-catch.json')
 	check(game.catch_choice_pending() and game.pending_catch_sell_value()==pending_value,'save restores pending catch choice without rerolling value')
 	check(bool(game.pending_catch.get('metadata',{}).get('first_capture',false)) and not game.reveal_shortened,'pending first-capture metadata survives save/load')
 	check(game.shells==pending_shells and int(game.catches.get(first_species,0))==pending_count,'pending choice does not duplicate currency or inventory')
@@ -343,24 +344,24 @@ func run():
 	check(is_equal_approx(float(game.best_records[first_species].get('size_cm',0.0)),registered_size),'registering a record specimen takes the crown')
 	# A save written after a sold record must not resurrect it from catch_latest.
 	game.best_records[first_species]={'species':first_species,'size_cm':0.1,'weight_kg':0.01,'day':1,'map':'town','spot':'test'}
-	game._save_game('user://sold-crown.json'); game._load_game('user://sold-crown.json')
+	game._save_game('res://.smoke-sold-crown.json'); game._load_game('res://.smoke-sold-crown.json')
 	check(is_equal_approx(float(game.best_records[first_species].get('size_cm',0.0)),0.1),'loading does not rebuild crowns from sold specimens')
 	# Selling the final copy keeps the field-guide name visible because durable
 	# discovery metadata is distinct from transient inventory ownership.
-	game._reset_fishing(); game.catches.erase('Old boot'); game.cast_candidate={'name':'Old boot','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
+	game._reset_fishing(); game.catches.erase('Sunrise bream'); game.cast_candidate={'name':'Sunrise bream','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
 	game.sell_pending_catch()
-	check(int(game.catches.get('Old boot',0))==0 and game.species_discovered('Old boot') and game._ledger_marker('Old boot',0)!='?','selling last copy keeps ledger discovery visible')
-	# Whether Old boot was a repeat depends on earlier casts, so use a species that
+	check(int(game.catches.get('Sunrise bream',0))==0 and game.species_discovered('Sunrise bream') and game._ledger_marker('Sunrise bream',0)!='?','selling last copy keeps ledger discovery visible')
+	# Whether the bream was a repeat depends on earlier casts, so use a species that
 	# is certainly already in the ledger to check the shortened reveal.
 	game._reset_fishing(); game.cast_candidate={'name':first_species,'rarity':first_rarity}; game._resolve_fishing_timing(0.5)
 	check(game.reveal_shortened and (game.last_rarity == 'LEGENDARY' or game._reveal_stage_at(1.12,game.last_rarity)==4),'shortened reveal reaches face before standard timing')
 	game.sell_pending_catch()
 	game.weather='rain'; game.season='autumn'; game.time_of_day=0.74
 	var saved_fish=game.fish_count
-	game._save_game('user://smoke-test.json')
+	game._save_game('res://.smoke-smoke-test.json')
 	game.player=Vector2(368,372); game.fish_count=999; game.catches={}; game.weather='clear'; game.season='spring'; game.time_of_day=0.35
 	game.catch_metadata={}; game.first_capture_metadata={}; game.catch_latest={}
-	game._load_game('user://smoke-test.json')
+	game._load_game('res://.smoke-smoke-test.json')
 	check(game.fish_count==saved_fish and game.catches.size()>=1,'save restores ledger and count')
 	check(game.weather=='rain' and game.season=='autumn' and is_equal_approx(game.time_of_day,0.74),'save restores tide forecast')
 	game.weather='clear'; game.season='spring'; game.time_of_day=0.35
@@ -369,16 +370,16 @@ func run():
 	game.player=Vector2(368,372); game.cast_timer=0; game._try_fish()
 	check(game.cast_timer==0,'inland cast rejected')
 	# Old v2 saves may place the hero in the sea: keep a safe spawn.
-	var f=FileAccess.open('user://legacy-test.json',FileAccess.WRITE)
+	var f=FileAccess.open('res://.smoke-legacy-test.json',FileAccess.WRITE)
 	f.store_string('{"fish":5,"x":950,"y":600}'); f.close()
-	game._load_game('user://legacy-test.json')
+	game._load_game('res://.smoke-legacy-test.json')
 	check(game._walkable(game.player) and game.fish_count==5,'legacy unsafe position handled')
 	# Map transitions fade, rebuild props, and preserve shared progress.
 	game.current_map='town'; game._build_map('town'); game._transition_to('beach',Vector2(400,80)); game._process(0.5)
 	check(game.current_map=='beach' and game.player==Vector2(400,80),'town to beach transition')
 	game._transition_to('rocky',Vector2(90,340)); game._process(0.5)
 	check(game.current_map=='rocky' and game.fish_count==5,'beach to rocky preserves ledger')
-	game._save_game('user://map-test.json'); game.current_map='town'; game._build_map('town'); game._load_game('user://map-test.json')
+	game._save_game('res://.smoke-map-test.json'); game.current_map='town'; game._build_map('town'); game._load_game('res://.smoke-map-test.json')
 	check(game.current_map=='rocky','save restores active map')
 	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,440); game._check_map_exit()
 	check(game._walkable(Vector2(500,440)) and game.transition_target=='beach','town beach exit is reachable')
@@ -401,11 +402,11 @@ func run():
 	check(grotto_exit.pos==Vector2(40,340) and grotto_exit.dir==Vector2(-1,0),'grotto uses a west-edge return marker')
 	game.player=Vector2(512,520)
 	check(game._can_fish() and game._fishing_spots().size()==1 and game._at_hidden_fishing_spot(),'grotto moonlit pool is fishable')
-	game._save_game('user://grotto-map-test.json'); game.current_map='town'; game._build_map('town'); game._load_game('user://grotto-map-test.json')
+	game._save_game('res://.smoke-grotto-map-test.json'); game.current_map='town'; game._build_map('town'); game._load_game('res://.smoke-grotto-map-test.json')
 	check(game.current_map=='grotto' and game._fishing_spots().size()==1,'save restores the grotto map')
 	var malformed_grotto_save={"map":"grotto","x":512.0,"y":300.0}
-	var malformed_file=FileAccess.open('user://grotto-invalid-test.json',FileAccess.WRITE); malformed_file.store_string(JSON.stringify(malformed_grotto_save)); malformed_file.close()
-	game.player=Vector2(700,700); game._load_game('user://grotto-invalid-test.json')
+	var malformed_file=FileAccess.open('res://.smoke-grotto-invalid-test.json',FileAccess.WRITE); malformed_file.store_string(JSON.stringify(malformed_grotto_save)); malformed_file.close()
+	game.player=Vector2(700,700); game._load_game('res://.smoke-grotto-invalid-test.json')
 	check(game.current_map=='grotto' and game.player==Vector2(510,150) and game._walkable(game.player),'invalid grotto save falls back to safe spawn')
 	game.player=Vector2(32,340); game.transition_active=false; game._check_map_exit(); game._process(0.5)
 	check(game.current_map=='rocky' and game.player==Vector2(90,340) and game._walkable(game.player),'grotto returns to rocky shore via west edge')
@@ -479,10 +480,14 @@ func run():
 			if game.pull_cooldown<=0.0 and game.gauge>=0.42 and game.gauge<=0.62 and absf(game.gauge-target)<=half_width:
 				game._handle_fishing_strike(game.gauge)
 		check(game.fishing_challenge.done and game.fishing_state==game.FishingState.RESULT,'moving gauge completes rotated chain %d within time limit' % seed)
-	check(game.FISH_SPECIES.size()==23,'expanded field guide has 23 species')
+	check(game.FISH_SPECIES.size()==25,'approved field guide has 25 species')
+	check(game.fish_asset_manifest.get('approved_fish',[]).size()==25 and game.fish_asset_by_id.size()==25,'fish_name_mapping.json loads all approved species')
+	var mapped_ids: Array[String] = []
+	for field_fish in game.FISH_SPECIES: mapped_ids.append(str(field_fish.get('id','')))
+	check(mapped_ids.size()==25 and not mapped_ids.has('') and game.fish_asset_by_id.keys().size()==mapped_ids.size(),'each active species has an explicit approved asset id')
 	check(game.FISH_SPECIES.any(func(f): return f.rarity=='EPIC') and game.FISH_SPECIES.any(func(f): return f.rarity=='LEGENDARY'),'field guide includes epic and legendary')
-	check(game.fish_cards.has('Silver sprat') and game.fish_cards.has('Sand goby') and game.fish_cards.has('Moonfin trout') and game.fish_cards['Silver sprat'].get_width()>500,'encyclopedia loads generated fish card art')
-	check(game.fish_cards.has('Rainbow Kingfish') and game.fish_portraits.has('Rainbow Kingfish'),'legendary art assets are available for discovered entries')
+	check(game.fish_cards.has('Amber anchovy') and game.fish_cards.has('Sunrise bream') and game.fish_cards.has('Moonfish') and game.fish_cards['Amber anchovy'].get_width()>500,'encyclopedia loads approved fish card art')
+	check(game.fish_cards.has('Storm tuna') and game.fish_portraits.has('Storm tuna'),'legendary art assets are available for discovered entries')
 	var missing_card_art: Array[String] = []
 	var missing_portrait_art: Array[String] = []
 	for field_fish in game.FISH_SPECIES:
@@ -490,11 +495,11 @@ func run():
 		if not game.fish_cards.has(field_name): missing_card_art.append(field_name)
 		if not game.fish_portraits.has(field_name): missing_portrait_art.append(field_name)
 	check(missing_card_art.is_empty() and missing_portrait_art.is_empty(),'expanded field guide has card and reveal art for every species')
-	var expanded_fish_names := ['Amber anchovy','Dune flounder','Tidepool blenny','Glass shrimp','Copper mackerel','Saltwater eel','Lantern squid','Blackglass bass','Storm sardine','Gullfin','Lighthouse ray','Tidemark carp','Sea lavender perch','Pearl puffer','Night sailfish','Crown snapper','Singing herring']
+	var expanded_fish_names := ['Amber anchovy','Sunrise bream','Moonfish','Aurora koi','Coral grouper','Jellyfish fish','Tropical angelfish','Shadow flounder','Starry fish','Reef butterflyfish','Crystal fish','Sand flatfish','Night angler','Pearl seabass','Fire scorpionfish','Seahorse','Mint wrasse','Jellyfish butterflyfish','Storm tuna','Coral rabbitfish','Twilight salmon','Ghost fish','Harvest puffer','Lantern fish','Tidepool blenny']
 	var missing_expanded_art: Array[String] = []
 	for expanded_name in expanded_fish_names:
 		if not game.fish_cards.has(expanded_name) or not game.fish_portraits.has(expanded_name): missing_expanded_art.append(expanded_name)
-	check(expanded_fish_names.size()==17 and missing_expanded_art.is_empty(),'all 17 remaining fish have matching card and reveal art')
+	check(expanded_fish_names.size()==25 and missing_expanded_art.is_empty(),'all approved fish have matching card and reveal art')
 	check(game._reveal_art_source('Amber anchovy')=='card','catch reveal prefers the matching encyclopedia card art')
 	check(game._draw_reveal_fish(Vector2(240,137),1.0,Color.WHITE,true,1.0,'Amber anchovy'),'catch reveal uses the matching species illustration')
 	# Art stems intentionally preserve punctuation and repeated internal spaces;
@@ -502,7 +507,7 @@ func run():
 	check(game._fish_art_stem('  Kelp Runner  ')=='kelp_runner','art stem trims edges and replaces literal spaces')
 	check(game._fish_art_stem("Angler-Fish")=='angler-fish','art stem preserves punctuation')
 	check(game._fish_art_stem("Angler's  Fish")=="angler's__fish",'art stem preserves repeated spaces')
-	var legendary_ledger_name := 'Rainbow Kingfish'
+	var legendary_ledger_name := 'Storm tuna'
 	game.catches.erase(legendary_ledger_name); game.catch_metadata.erase(legendary_ledger_name); game.first_capture_metadata.erase(legendary_ledger_name); game.catch_latest.erase(legendary_ledger_name)
 	check(game.ledger_display_name(legendary_ledger_name,0)=='???','uncaught legendary encyclopedia card stays hidden as ???')
 	check(not game._fish_art_visible(legendary_ledger_name,0),'uncaught legendary illustration stays masked')
@@ -525,21 +530,21 @@ func run():
 	check(game.rumor_source_near()=='mera','Fisher Mera can be talked to')
 	check(game.talk_to_rumor_source() and game.rumor_found and game.heard_rumors==['grotto'],'fisher NPC tells the grotto rumor first')
 	check(game.toast.contains('Fisher Mera') and game.toast.contains('grotto'),'a heard rumor is shown in the toast bar')
-	check(game.talk_to_rumor_source() and game.heard_rumors.size()==2 and game.heard_rumors[1]=='Moonfin trout','Mera tells a different rumor each time she is asked')
+	check(game.talk_to_rumor_source() and game.heard_rumors.size()==2 and game.heard_rumors[1]=='Moonfish','Mera tells a different rumor each time she is asked')
 	game.player=Vector2(468,381)
 	check(game.rumor_source_near()=='notice','the weathered notice can be read')
 	game.rumor_found=false; game.heard_rumors=[]
 	check(game.talk_to_rumor_source() and game.rumor_found,'weathered notice reveals the grotto rumor')
-	check(game.talk_to_rumor_source() and game.heard_rumors==['grotto','Lighthouse ray'],'notice moves on to a species rumor')
+	check(game.talk_to_rumor_source() and game.heard_rumors==['grotto','Fire scorpionfish'],'notice moves on to a species rumor')
 	game.player=Vector2(300,250)
 	check(game.rumor_source_near()=='' and not game.talk_to_rumor_source(),'no rumor is available away from the plaza')
 	game.player=Vector2(424,381)
 	for i in range(8): game.talk_to_rumor_source()
 	var heard_after_all: int = game.heard_rumors.size()
-	check(game.heard_rumors.has('Night sailfish') and game.talk_to_rumor_source() and game.heard_rumors.size()==heard_after_all and game.toast.contains('nothing new'),'an exhausted source says it has nothing new')
+	check(game.heard_rumors.has('Night angler') and game.talk_to_rumor_source() and game.heard_rumors.size()==heard_after_all and game.toast.contains('nothing new'),'an exhausted source says it has nothing new')
 	# Rumors become a readable hint, and the ledger shows what is biting right now.
-	check(game.fish_condition_hint('Moonfin trout')=='Moonfin trout: dusk or night / clear or rain / autumn or winter','species rumors are generated from the real condition table')
-	check(game.fish_condition_hint('Lantern squid')=='Lantern squid: night / clear or rain / not spring','a missing season reads as "not <season>"')
+	check(game.fish_condition_hint('Moonfish')=='Moonfish: dusk or night / clear or rain / autumn or winter','species rumors are generated from the real condition table')
+	check(game.fish_condition_hint('Lantern fish')=='Lantern fish: night / clear or rain / not spring','a missing season reads as "not <season>"')
 	var worst_rumor_width := 0.0
 	for rumor_id in game._all_rumor_ids():
 		var width: float = ThemeDB.fallback_font.get_string_size('[9/9] '+game.rumor_text(str(rumor_id)),HORIZONTAL_ALIGNMENT_LEFT,-1,8).x
@@ -547,28 +552,28 @@ func run():
 	check(worst_rumor_width<=318.0,'every rumor fits the ledger line (%.0fpx)' % worst_rumor_width)
 	game.heard_rumors=['grotto']; game.rumor_page=0
 	game.page_rumor(1); check(game.rumor_page==0,'a single rumor does not page away')
-	game.heard_rumors=['grotto','Moonfin trout','Lantern squid']; game.page_rumor(-1)
+	game.heard_rumors=['grotto','Moonfish','Lantern fish']; game.page_rumor(-1)
 	check(game.rumor_page==2,'rumor paging wraps backwards')
 	game.page_rumor(1); check(game.rumor_page==0,'rumor paging wraps forwards')
 	game.heard_rumors=['grotto']; game.current_map='beach'; game.time_of_day=0.75; game.weather='clear'; game.season='autumn'
-	check(not game.species_known('Moonfin trout') and not game.species_biting_now('Moonfin trout') and game.ledger_display_name('Moonfin trout',0).begins_with('????'),'an unheard, uncaught species stays unknown in the ledger')
-	game.heard_rumors=['grotto','Moonfin trout']
-	check(game.species_known('Moonfin trout') and game.species_biting_now('Moonfin trout') and game.ledger_display_name('Moonfin trout',0).begins_with('Moonfin trout'),'a rumor names the species and marks it as biting now')
+	check(not game.species_known('Moonfish') and not game.species_biting_now('Moonfish') and game.ledger_display_name('Moonfish',0).begins_with('????'),'an unheard, uncaught species stays unknown in the ledger')
+	game.heard_rumors=['grotto','Moonfish']
+	check(game.species_known('Moonfish') and game.species_biting_now('Moonfish') and game.ledger_display_name('Moonfish',0).begins_with('Moonfish'),'a rumor names the species and marks it as biting now')
 	game.season='spring'
-	check(game.species_known('Moonfin trout') and not game.species_biting_now('Moonfin trout'),'the biting-now dot follows the season')
-	game._save_game('user://rumor-test.json'); game.heard_rumors=[]; game.rumor_found=false; game._load_game('user://rumor-test.json')
-	check(game.heard_rumors==['grotto','Moonfin trout'],'heard rumors survive save and load')
-	var legacy_rumor_file=FileAccess.open('user://legacy-rumor.json',FileAccess.WRITE)
+	check(game.species_known('Moonfish') and not game.species_biting_now('Moonfish'),'the biting-now dot follows the season')
+	game._save_game('res://.smoke-rumor-test.json'); game.heard_rumors=[]; game.rumor_found=false; game._load_game('res://.smoke-rumor-test.json')
+	check(game.heard_rumors==['grotto','Moonfish'],'heard rumors survive save and load')
+	var legacy_rumor_file=FileAccess.open('res://.smoke-legacy-rumor.json',FileAccess.WRITE)
 	legacy_rumor_file.store_string('{"version":12,"fish":5,"rumor_found":true,"x":368,"y":372}'); legacy_rumor_file.close()
-	game._load_game('user://legacy-rumor.json')
+	game._load_game('res://.smoke-legacy-rumor.json')
 	check(game.rumor_found and game.heard_rumors==['grotto'],'a pre-rumor-list save keeps its grotto rumor')
 	game.heard_rumors=[]; game.rumor_found=false; game.current_map='town'; game._build_map('town')
 	game.catches.clear(); game.catch_metadata.clear(); game.first_capture_metadata.clear(); game.catch_latest.clear()
 	game.rumor_found=true; game.hidden_spot_unlocked=false; game.fish_count=99
-	for species in ['Silver sprat','Sand goby','Old boot','Saltwater eel','Gullfin']: game.catch_metadata[species]={'species':species}
+	for species in ['Sunrise bream','Amber anchovy','Coral rabbitfish','Seahorse','Harvest puffer','Tidepool blenny']: game.catch_metadata[species]={'species':species}
 	game._update_rumor_gate()
-	check(game.collection_discovered_count()==5 and game.collection_percent()<float(game.HIDDEN_SPOT_COLLECTION_PERCENT) and not game.hidden_spot_unlocked,'a few fish no longer open the grotto')
-	game.catch_metadata['Tidemark carp']={'species':'Tidemark carp'}; game._update_rumor_gate()
+	check(game.collection_discovered_count()==6 and game.collection_percent()<float(game.HIDDEN_SPOT_COLLECTION_PERCENT) and not game.hidden_spot_unlocked,'a few fish no longer open the grotto')
+	game.catch_metadata['Mint wrasse']={'species':'Mint wrasse'}; game._update_rumor_gate()
 	check(game.collection_percent()>=float(game.HIDDEN_SPOT_COLLECTION_PERCENT) and game.hidden_spot_unlocked,'collection gate unlocks hidden spot at a quarter of the guide')
 	game.hidden_spot_unlocked=false; game.rumor_found=false; game._update_rumor_gate()
 	check(not game.hidden_spot_unlocked,'the guide percentage alone does not open the grotto without the rumor')
@@ -593,20 +598,21 @@ func run():
 	check(game._rarity_bonus_scale('COMMON')==0.0 and game._rarity_bonus_scale('RARE')>game._rarity_bonus_scale('UNCOMMON') and game._rarity_bonus_scale('EPIC')>game._rarity_bonus_scale('RARE'),'bait and FEVER scales favour higher rarities')
 	# Force a legendary candidate to verify the reveal path without relying on a
 	# statistical roll.  The result must still come from the cast candidate.
-	game._reset_fishing(); game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(497,151); game.combo=2
-	game.cast_candidate=game.FISH_SPECIES[4].duplicate(true)
+	game._reset_fishing(); game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(497,151); game.time_of_day=0.95; game.weather='rain'; game.season='summer'; game.combo=2
+	game.cast_candidate=game._fish_entry('Storm tuna').duplicate(true)
 	game._resolve_fishing_timing(0.5)
-	check(game.last_rarity=='LEGENDARY' and game.last_catch==game.FISH_SPECIES[4].name and game.result_t>6.0,'forced legendary candidate opens the staged reveal')
+	check(game.last_rarity=='LEGENDARY' and game.last_catch==game._fish_entry('Storm tuna').name and game.result_t>6.0,'forced legendary candidate opens the staged reveal')
 	check(not game.catch_reveal_complete() and game.toast=='' and game.result_toast_pending.contains('BIG CATCH'),'legendary omen does not announce the catch in the toast bar')
 	game._process_fishing(2.1)
 	check(game.catch_reveal_complete() and game.toast.contains('BIG CATCH'),'legendary toast and prompt wait for the name reveal')
-	var rainbow_count_before: int = int(game.catches.get('Rainbow Kingfish',0))
-	game._reset_fishing(); game.cast_candidate=game.FISH_SPECIES[4].duplicate(true); game._resolve_fishing_timing(0.34)
-	check(game.last_rarity=='RARE' and game.last_catch!='Rainbow Kingfish' and int(game.catches.get('Rainbow Kingfish',0))==rainbow_count_before,'GOOD legendary candidate becomes a RARE catch without ledgering Legendary species')
+	var storm_tuna_count_before: int = int(game.catches.get('Storm tuna',0))
+	game._reset_fishing(); game.cast_candidate=game._fish_entry('Storm tuna').duplicate(true); game._resolve_fishing_timing(0.34)
+	check(game.last_rarity=='RARE' and game.last_catch!='Storm tuna' and int(game.catches.get('Storm tuna',0))==storm_tuna_count_before,'GOOD legendary candidate becomes a RARE catch without ledgering Legendary species')
 	# Fever is earned through three catches, survives result dismissal, and
 	# expires independently of the fish's battle timer.
 	game._reset_fishing(); game._break_chain()
 	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530)
+	game.time_of_day=0.5; game.weather='clear'; game.season='spring'
 	game.bait_index=0
 	for i in range(3):
 		game._resolve_fishing_timing(0.34)
@@ -631,10 +637,10 @@ func run():
 	game._process_fishing(1.0)
 	check(is_equal_approx(game.fever_t,remaining-1.0),'fever countdown advances while idle')
 	game.bait_index=1; game.rod_index=2
-	game._save_game('user://fever-test.json')
+	game._save_game('res://.smoke-fever-test.json')
 	var saved_fever=game.fever_t
 	game._break_chain(); game.bait_index=0; game.rod_index=0
-	game._load_game('user://fever-test.json')
+	game._load_game('res://.smoke-fever-test.json')
 	check(game.combo==3 and game.fever_active and is_equal_approx(game.fever_t,saved_fever),'save restores combo and remaining fever')
 	check(game.bait_index==1 and game.rod_index==2 and game.catches.size()>0,'fever save preserves loadout and ledger')
 	game._process_fishing(game.FEVER_DURATION+0.1)
@@ -643,7 +649,7 @@ func run():
 	game._reset_fishing(); game.combo=2; game._resolve_fishing_timing(0.34)
 	game._reset_fishing(); game._resolve_fishing_timing(-1.0)
 	check(not game.fever_active and game.combo==0 and game.fever_t==0.0,'miss ends fever and resets chain')
-	game._load_game('user://legacy-test.json')
+	game._load_game('res://.smoke-legacy-test.json')
 	check(not game.fever_active and game.combo==0,'legacy saves default to no fever')
 	# ---- Dopamine FX (EFFECTS_DESIGN.md) ----------------------------------
 	var fx = game.fx
@@ -741,7 +747,7 @@ func run():
 	check(fx.flash_alpha<=fx.FLASH_ALPHA_CAP_REDUCED and fx.chroma()==0.0,'reduced mode caps flashes and disables chromatic aberration')
 	fx.chroma_pulse(1.0,0.5)
 	check(fx.chroma()==0.0,'reduced mode ignores chroma pulses')
-	game._save_game('user://fx-test.json'); fx.reduced=false; game._load_game('user://fx-test.json')
+	game._save_game('res://.smoke-fx-test.json'); fx.reduced=false; game._load_game('res://.smoke-fx-test.json')
 	check(fx.reduced,'reduced flash setting survives save/load')
 	fx.reduced=false
 	# HUD-drawn soft tints (reveal wash, LEGENDARY glow, FEVER wash) are not
@@ -810,13 +816,13 @@ func run():
 	game._reset_fishing(); game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530)
 	game.time_of_day=0.5; game.weather='clear'; game.season='spring'
 	game.shells=100; game._try_fish()
-	game.cast_candidate={'name':'Silver sprat','rarity':'COMMON'}; game.promotion_target_rarity='COMMON'
+	game.cast_candidate={'name':'Sunrise bream','rarity':'COMMON'}; game.promotion_target_rarity='COMMON'
 	game.promotion_cue_rank=0; game.promotion_false_cue=false; game.fx_premium=false; game.promotion_reversal_armed=false
 	game._process_fishing(game.bite_delay*0.5); game._process_fishing(game.bite_delay)
 	check(game.fishing_state==game.FishingState.TIMING and game.reveal_glow_start==0,'gold float on a common catch starts the summon light at blue')
 	# FEVER is announced when the catch is settled, not over the reveal.
 	game._reset_fishing(); game._break_chain(); game.combo=2; fx.counters.clear()
-	game.cast_candidate={'name':'Silver sprat','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
+	game.cast_candidate={'name':'Sunrise bream','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
 	check(game.fever_active and int(fx.counters.get('fever',0))==0,'FEVER banner waits while the card is revealed')
 	game.reveal_t=2.0; game.reveal_stage=4
 	game.register_pending_catch()
@@ -825,7 +831,7 @@ func run():
 	# FEVER's clock starts when it is announced. A catch left unsettled must not
 	# burn FEVER down (and lose its banner) before the player chooses.
 	game.combo=2; fx.counters.clear()
-	game.cast_candidate={'name':'Silver sprat','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
+	game.cast_candidate={'name':'Sunrise bream','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
 	game.reveal_t=2.0; game.reveal_stage=4
 	var held_fever_t: float = game.fever_t
 	for i in range(40): game._process_fishing(1.0)
@@ -837,7 +843,7 @@ func run():
 	# The pending announcement belongs to this session's landing: a stale flag
 	# must not freeze a loaded game's FEVER clock.
 	game._reset_fishing(); game.fever_announce_pending=true
-	game._load_game('user://fever-test.json')
+	game._load_game('res://.smoke-fever-test.json')
 	check(not game.fever_announce_pending,'loading a save drops a stale FEVER announcement')
 	game._break_chain(); game._reset_fishing()
 	game.fever_announce_pending=true; game.combo=3; game.fever_active=true; game.fever_t=10.0
@@ -847,11 +853,11 @@ func run():
 	# Saved while the FEVER-starting catch awaits its choice: the banner request
 	# and the held clock come back together with the catch.
 	game._break_chain(); game.combo=2; fx.counters.clear()
-	game.cast_candidate={'name':'Silver sprat','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
+	game.cast_candidate={'name':'Sunrise bream','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
 	game.reveal_t=2.0; game.reveal_stage=4
-	game._save_game('user://fever-pending-test.json')
+	game._save_game('res://.smoke-fever-pending-test.json')
 	game._break_chain(); game._reset_fishing()
-	game._load_game('user://fever-pending-test.json')
+	game._load_game('res://.smoke-fever-pending-test.json')
 	check(game.fever_active and game.catch_choice_pending() and game.fever_announce_pending,'save/load keeps the FEVER banner pending with its held catch')
 	var loaded_fever_t: float = game.fever_t
 	for i in range(40): game._process_fishing(1.0)
@@ -860,16 +866,16 @@ func run():
 	game.register_pending_catch()
 	check(int(fx.counters.get('fever',0))==1,'the restored banner plays once the held catch is settled')
 	# A save made after settling carries no banner request.
-	game._save_game('user://fever-settled-test.json')
+	game._save_game('res://.smoke-fever-settled-test.json')
 	game._break_chain(); game._reset_fishing()
-	game._load_game('user://fever-settled-test.json')
+	game._load_game('res://.smoke-fever-settled-test.json')
 	check(not game.fever_announce_pending,'a settled FEVER is not announced again after loading')
 	game._break_chain(); game._reset_fishing()
 	# FEVER's whole presentation (flash, chime, music, frame, banner) and its
 	# clock start together when the catch is settled, not at landing.
 	game.music.set_fever(false); game.fever_flash_t=0.0; fx.fever_target=0.0
 	game.combo=2; fx.counters.clear()
-	game.cast_candidate={'name':'Silver sprat','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
+	game.cast_candidate={'name':'Sunrise bream','rarity':'COMMON'}; game._resolve_fishing_timing(0.5)
 	game.reveal_t=2.0; game.reveal_stage=4
 	game._sync_fx_outputs()
 	check(game.fever_active and game.fever_flash_t==0.0 and not game.music.get_snapshot().fever and fx.fever_target==0.0,'FEVER flash, music and frame wait for the catch to be settled')
@@ -880,9 +886,9 @@ func run():
 	# A held FEVER restored from a save keeps its music quiet until it is settled.
 	game.combo=2; game._resolve_fishing_timing(0.5)
 	game.reveal_t=2.0; game.reveal_stage=4
-	game._save_game('user://fever-pending-music.json')
+	game._save_game('res://.smoke-fever-pending-music.json')
 	game._break_chain(); game._reset_fishing()
-	game._load_game('user://fever-pending-music.json')
+	game._load_game('res://.smoke-fever-pending-music.json')
 	check(game.fever_announce_pending and not game.music.get_snapshot().fever,'a loaded held FEVER keeps the music quiet until it is settled')
 	game.register_pending_catch()
 	check(game.music.get_snapshot().fever,'registering the restored catch starts the FEVER music')

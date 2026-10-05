@@ -5,6 +5,7 @@ const MusicDirectorScript = preload("res://audio/music_director.gd")
 const FxDirectorScript = preload("res://fx/fx_director.gd")
 const FxCanvasScript = preload("res://fx/fx_canvas.gd")
 const PostFxShader = preload("res://fx/post_fx.gdshader")
+const FISH_NAME_MAPPING_PATH := "res://fish_name_mapping.json"
 
 # Original v2 world dimensions retained; viewport now shows a walkable slice.
 const TILE := 16
@@ -76,6 +77,8 @@ var textures: Dictionary = {}
 # never blocks play.
 var fish_portraits: Dictionary = {}
 var fish_cards: Dictionary = {}
+var fish_asset_manifest: Dictionary = {}
+var fish_asset_by_id: Dictionary = {}
 var face := 0
 var walk_time := 0.0
 var walking := false
@@ -104,13 +107,36 @@ var last_catch_weight_kg := 0.0
 var last_catch_variant := "Standard"
 var last_catch_mystery := false
 var last_rescue_used := false
-# Expanded coastal field guide: five original entries plus eighteen approved species.
+# Approved 25-fish field guide. The attached bundle is the complete active
+# roster; legacy species from the earlier prototype are intentionally absent.
+# Aurora koi remains the hidden grotto legendary, while Storm tuna replaces the
+# old open-water legendary slot.
 const FISH_SPECIES: Array[Dictionary] = [
- {"name":"Silver sprat","rarity":"COMMON","maps":["town","beach"]}, {"name":"Sand goby","rarity":"COMMON","maps":["town","beach"]}, {"name":"Moonfin trout","rarity":"RARE","maps":["beach","rocky"]}, {"name":"Old boot","rarity":"COMMON","maps":["town"]}, {"name":"Rainbow Kingfish","rarity":"LEGENDARY","maps":["rocky"]},
- {"name":"Amber anchovy","rarity":"COMMON","maps":["beach"]}, {"name":"Dune flounder","rarity":"COMMON","maps":["beach"]}, {"name":"Tidepool blenny","rarity":"UNCOMMON","maps":["beach"]}, {"name":"Glass shrimp","rarity":"UNCOMMON","maps":["beach","rocky"]}, {"name":"Copper mackerel","rarity":"RARE","maps":["beach"]},
- {"name":"Saltwater eel","rarity":"UNCOMMON","maps":["town","rocky"]}, {"name":"Lantern squid","rarity":"RARE","maps":["rocky"]}, {"name":"Blackglass bass","rarity":"RARE","maps":["rocky"]}, {"name":"Storm sardine","rarity":"UNCOMMON","maps":["rocky"]}, {"name":"Gullfin","rarity":"COMMON","maps":["town","rocky"]},
- {"name":"Lighthouse ray","rarity":"EPIC","maps":["rocky"]}, {"name":"Tidemark carp","rarity":"UNCOMMON","maps":["town"]}, {"name":"Sea lavender perch","rarity":"RARE","maps":["beach","rocky"]}, {"name":"Pearl puffer","rarity":"EPIC","maps":["beach","rocky"]}, {"name":"Night sailfish","rarity":"EPIC","maps":["rocky"]},
- {"name":"Crown snapper","rarity":"EPIC","maps":["town","rocky"]}, {"name":"Singing herring","rarity":"RARE","maps":["town","beach"]}, {"name":"Aurora koi","rarity":"LEGENDARY","maps":["hidden","grotto"]}
+ {"id":"amber_anchovy","name":"Amber anchovy","rarity":"COMMON","maps":["beach"]},
+ {"id":"sunrise_bream","name":"Sunrise bream","rarity":"COMMON","maps":["town","beach"]},
+ {"id":"moonfish","name":"Moonfish","rarity":"RARE","maps":["beach"]},
+ {"id":"aurora_koi","name":"Aurora koi","rarity":"LEGENDARY","maps":["hidden","grotto"]},
+ {"id":"coral_grouper","name":"Coral grouper","rarity":"RARE","maps":["rocky"]},
+ {"id":"jellyfish_fish","name":"Jellyfish fish","rarity":"UNCOMMON","maps":["beach"]},
+ {"id":"tropical_angelfish","name":"Tropical angelfish","rarity":"UNCOMMON","maps":["beach"]},
+ {"id":"shadow_flounder","name":"Shadow flounder","rarity":"COMMON","maps":["beach","rocky"]},
+ {"id":"starry_fish","name":"Starry fish","rarity":"EPIC","maps":["rocky"]},
+ {"id":"reef_butterflyfish","name":"Reef butterflyfish","rarity":"RARE","maps":["beach"]},
+ {"id":"crystal_fish","name":"Crystal fish","rarity":"EPIC","maps":["rocky","grotto"]},
+ {"id":"sand_flatfish","name":"Sand flatfish","rarity":"COMMON","maps":["beach"]},
+ {"id":"night_angler","name":"Night angler","rarity":"RARE","maps":["rocky"]},
+ {"id":"pearl_seabass","name":"Pearl seabass","rarity":"RARE","maps":["town","beach"]},
+ {"id":"fire_scorpionfish","name":"Fire scorpionfish","rarity":"EPIC","maps":["rocky"]},
+ {"id":"seahorse","name":"Seahorse","rarity":"UNCOMMON","maps":["town","beach"]},
+ {"id":"mint_wrasse","name":"Mint wrasse","rarity":"UNCOMMON","maps":["beach"]},
+ {"id":"jellyfish_butterflyfish","name":"Jellyfish butterflyfish","rarity":"RARE","maps":["beach"]},
+ {"id":"storm_tuna","name":"Storm tuna","rarity":"LEGENDARY","maps":["rocky"]},
+ {"id":"coral_rabbitfish","name":"Coral rabbitfish","rarity":"COMMON","maps":["beach"]},
+ {"id":"twilight_salmon","name":"Twilight salmon","rarity":"EPIC","maps":["rocky"]},
+ {"id":"ghost_fish","name":"Ghost fish","rarity":"EPIC","maps":["rocky","grotto"]},
+ {"id":"harvest_puffer","name":"Harvest puffer","rarity":"UNCOMMON","maps":["town","beach"]},
+ {"id":"lantern_fish","name":"Lantern fish","rarity":"RARE","maps":["rocky"]},
+ {"id":"tidepool_blenny","name":"Tidepool blenny","rarity":"UNCOMMON","maps":["beach"]}
 ]
 var rumor_found := false
 # Rumor ids heard from Fisher Mera / the notice: "grotto" or a species name.
@@ -248,6 +274,7 @@ func _ready():
 	hero = load("res://assets/hero.png")
 	for asset in ["cottage", "inn", "shop", "tree0", "tree1", "tree2", "barrel", "sign", "rock", "well", "reeds"]:
 		textures[asset] = load("res://assets/" + asset + ".png")
+	_load_fish_name_mapping()
 	_load_fish_art()
 	_build_world()
 	cam.position = player.round() + _map_camera_bias()
@@ -306,30 +333,60 @@ func _fish_art_stem(species_name: String) -> String:
 	# punctuation. Existing files use lowercase snake_case stems.
 	return species_name.to_lower().strip_edges().replace(" ", "_")
 
+func _load_fish_name_mapping() -> void:
+	fish_asset_manifest.clear()
+	fish_asset_by_id.clear()
+	if not FileAccess.file_exists(FISH_NAME_MAPPING_PATH):
+		push_error("Approved fish mapping is missing: " + FISH_NAME_MAPPING_PATH)
+		return
+	var file := FileAccess.open(FISH_NAME_MAPPING_PATH, FileAccess.READ)
+	if file == null:
+		push_error("Approved fish mapping could not be opened: " + FISH_NAME_MAPPING_PATH)
+		return
+	var parsed = JSON.parse_string(file.get_as_text())
+	if typeof(parsed) != TYPE_DICTIONARY:
+		push_error("Approved fish mapping must contain a JSON object")
+		return
+	fish_asset_manifest = parsed
+	var approved: Array = parsed.get("approved_fish", [])
+	for item in approved:
+		if typeof(item) != TYPE_DICTIONARY: continue
+		var entry: Dictionary = item
+		var fish_id := str(entry.get("fish_id", ""))
+		if fish_id.is_empty() or fish_asset_by_id.has(fish_id):
+			push_error("Approved fish mapping has an invalid or duplicate fish_id")
+			continue
+		fish_asset_by_id[fish_id] = entry
+	for fish in FISH_SPECIES:
+		var fish_id := str(fish.get("id", ""))
+		if fish_id.is_empty() or not fish_asset_by_id.has(fish_id):
+			push_error("No approved fish mapping entry for " + str(fish.get("name", fish_id)))
+
+func _mapped_asset_path(entry: Dictionary, key: String, expected_directory: String) -> String:
+	var relative_path := str(entry.get(key, ""))
+	var expected_prefix := expected_directory + "/"
+	if relative_path.is_empty() or not relative_path.begins_with(expected_prefix): return ""
+	var filename := relative_path.get_file()
+	if filename.is_empty(): return ""
+	return "res://assets/" + ("fish/" if key == "pixel_portrait" else "fish_cards/") + filename
+
 func _load_fish_art() -> void:
 	fish_portraits.clear()
 	fish_cards.clear()
 	for fish in FISH_SPECIES:
 		var species_name := str(fish.get("name", ""))
 		if species_name.is_empty(): continue
-		var stem := str(fish.get("art", _fish_art_stem(species_name)))
-		var portrait_path := "res://assets/fish/" + stem + ".png"
-		if ResourceLoader.exists(portrait_path):
+		var fish_id := str(fish.get("id", ""))
+		var mapping: Dictionary = fish_asset_by_id.get(fish_id, {})
+		if mapping.is_empty(): continue
+		var portrait_path := _mapped_asset_path(mapping, "pixel_portrait", "fish_pixel_portraits")
+		if not portrait_path.is_empty() and ResourceLoader.exists(portrait_path):
 			var portrait := load(portrait_path) as Texture2D
 			if portrait != null: fish_portraits[species_name] = portrait
-		# The transparent v2 illustrations are the encyclopedia art. Keep the
-		# older framed card as a compatibility fallback for species without a v2
-		# asset, so a partial art bundle never removes a ledger entry.
-		var card_paths := [
-			"res://assets/fish_cards/" + stem + "_v2.png",
-			"res://assets/fish_cards/" + stem + ".png"
-		]
-		for card_path in card_paths:
-			if not ResourceLoader.exists(card_path): continue
+		var card_path := _mapped_asset_path(mapping, "encyclopedia", "encyclopedia_fish_art")
+		if not card_path.is_empty() and ResourceLoader.exists(card_path):
 			var card := load(card_path) as Texture2D
-			if card != null:
-				fish_cards[species_name] = card
-				break
+			if card != null: fish_cards[species_name] = card
 
 # ---- Tide forecast -------------------------------------------------------
 # The same deterministic rules drive the species pool, the ledger, and smoke
@@ -393,34 +450,36 @@ func _fish_entry(species: String) -> Dictionary:
 	return {}
 
 func _fish_conditions(species: String) -> Dictionary:
-	# Unlisted species retain their old map-only availability. The named
-	# schedules add readable ecological variety without breaking old saves.
+	# The approved roster gets explicit tide windows so every pool has readable
+	# variety while still leaving a broad fallback for ordinary casts.
 	var all_times := ["night", "dawn", "day", "dusk"]
 	var all_weather := ["clear", "overcast", "rain", "storm"]
 	var all_seasons := ["spring", "summer", "autumn", "winter"]
 	match species:
-		"Silver sprat": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
-		"Sand goby": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
-		"Moonfin trout": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
-		"Old boot": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":all_seasons}
 		"Amber anchovy": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
-		"Dune flounder": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
+		"Sunrise bream": return {"times":["dawn", "day"], "weather":["clear", "overcast"], "seasons":["spring", "summer", "autumn"]}
+		"Moonfish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
+		"Coral grouper": return {"times":["day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["summer", "autumn"]}
+		"Jellyfish fish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["spring", "summer", "autumn"]}
+		"Tropical angelfish": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":["summer", "autumn"]}
+		"Shadow flounder": return {"times":["dawn", "night"], "weather":["overcast", "rain"], "seasons":all_seasons}
+		"Starry fish": return {"times":["night"], "weather":["clear", "storm"], "seasons":["autumn", "winter"]}
+		"Reef butterflyfish": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
+		"Crystal fish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
+		"Sand flatfish": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
+		"Night angler": return {"times":["night"], "weather":["clear", "rain", "storm"], "seasons":["summer", "autumn", "winter"]}
+		"Pearl seabass": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer", "autumn"]}
+		"Fire scorpionfish": return {"times":["dusk", "night"], "weather":["rain", "storm"], "seasons":["summer", "autumn"]}
+		"Seahorse": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer"]}
+		"Mint wrasse": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer", "autumn"]}
+		"Jellyfish butterflyfish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["summer", "autumn", "winter"]}
+		"Storm tuna": return {"times":["night"], "weather":["rain", "storm"], "seasons":["summer", "autumn", "winter"]}
+		"Coral rabbitfish": return {"times":["dawn", "day"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
+		"Twilight salmon": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
+		"Ghost fish": return {"times":["night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
+		"Harvest puffer": return {"times":["day", "dusk"], "weather":["overcast", "rain"], "seasons":["summer", "autumn"]}
+		"Lantern fish": return {"times":["night"], "weather":["clear", "rain"], "seasons":["summer", "autumn", "winter"]}
 		"Tidepool blenny": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer"]}
-		"Copper mackerel": return {"times":["day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["summer", "autumn"]}
-		# Saltwater eel remains the town's broad fallback; the newer Storm sardine
-		# carries the weather-specific eel-like niche.
-		"Saltwater eel": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
-		"Lantern squid": return {"times":["night"], "weather":["clear", "rain"], "seasons":["summer", "autumn", "winter"]}
-		"Storm sardine": return {"times":["dusk", "night"], "weather":["rain", "storm"], "seasons":["summer", "autumn"]}
-		"Lighthouse ray": return {"times":["dawn", "day"], "weather":["clear", "overcast"], "seasons":["summer", "autumn"]}
-		"Tidemark carp": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer"]}
-		"Sea lavender perch": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
-		"Pearl puffer": return {"times":["day", "dusk"], "weather":["overcast", "rain"], "seasons":["summer", "autumn"]}
-		"Night sailfish": return {"times":["night"], "weather":["clear", "storm"], "seasons":["autumn", "winter"]}
-		"Crown snapper": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
-		# Singing herring keeps a broad town fallback so old map-only rescue and
-		# fever rolls always retain a rare option in daylight.
-		"Singing herring": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
 		# Aurora koi is the grotto's explicit discovery reward; the hidden spot
 		# gates it, while tide conditions should not make the one-off reward vanish.
 		"Aurora koi": return {"times":all_times, "weather":all_weather, "seasons":all_seasons}
@@ -772,8 +831,8 @@ const HIDDEN_SPOT_COLLECTION_PERCENT := 25
 const RUMOR_TALK_RADIUS := 34.0
 const TIME_NAMES := ["dawn", "day", "dusk", "night"]
 const RUMOR_SOURCES := {
-	"mera": {"label":"Fisher Mera", "pos":Vector2(424,381), "rumors":["grotto", "Moonfin trout", "Lantern squid", "Night sailfish", "Storm sardine"]},
-	"notice": {"label":"Weathered notice", "pos":Vector2(468,381), "rumors":["grotto", "Lighthouse ray", "Pearl puffer", "Sea lavender perch", "Copper mackerel"]}
+	"mera": {"label":"Fisher Mera", "pos":Vector2(424,381), "rumors":["grotto", "Moonfish", "Night angler", "Storm tuna", "Ghost fish"]},
+	"notice": {"label":"Weathered notice", "pos":Vector2(468,381), "rumors":["grotto", "Fire scorpionfish", "Crystal fish", "Twilight salmon", "Lantern fish"]}
 }
 
 func collection_discovered_count() -> int:
@@ -872,7 +931,7 @@ func _update_rumor_gate() -> void:
 		hidden_spot_collected = true
 
 func _at_hidden_fishing_spot() -> bool:
-	# Aurora koi is tied to the grotto pool itself.  Visiting the grotto unlocks
+	# Aurora koi is tied to the grotto pool itself. Visiting the grotto unlocks
 	# the pool for the run, but standing at another rocky shoreline must not
 	# silently include hidden fish in its species roll.
 	if not hidden_spot_unlocked or not hidden_spot_collected: return false
@@ -1010,15 +1069,15 @@ func _pick_cast_candidate(apply_rescue := false) -> Dictionary:
 		for fish in _species_pool():
 			if str(fish.get("rarity", "COMMON")) == "LEGENDARY": legendary_pool.append(fish)
 		if not legendary_pool.is_empty():
-			# Preserve the existing grotto reward split: Aurora koi is a 35%
-			# hidden-spot reward, while Rainbow Kingfish remains the usual result.
+			# Preserve the grotto reward split: Aurora koi is a 35%
+			# hidden-spot reward, while Storm tuna remains the usual result.
 			if _at_hidden_fishing_spot() and rng.randf() < 0.35:
 				for fish in legendary_pool:
 					if str(fish.get("name", "")) == "Aurora koi":
 						candidate = fish
 						return candidate
 			for fish in legendary_pool:
-				if str(fish.get("name", "")) == "Rainbow Kingfish":
+				if str(fish.get("name", "")) == "Storm tuna":
 					candidate = fish
 					return candidate
 			candidate = legendary_pool[0]

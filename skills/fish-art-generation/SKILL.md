@@ -8,27 +8,22 @@ gameplay work.
 
 ## Asset contract
 
-Unless the species entry supplies an `art` override, the loader derives the
-stem with `_fish_art_stem()` in `main.gd`. The current transformation is
-deliberately small and literal: it lowercases the name, strips leading and
-trailing whitespace, and replaces each ASCII space (` `) with `_`. It does not
-normalize punctuation, collapse repeated spaces, or transliterate other
-characters. For example, `Kelp Runner` becomes `kelp_runner`,
-`Angler-Fish` becomes `angler-fish`, and `Angler's  Fish` becomes
-`angler's__fish`. Use that exact result for both files, or provide an explicit
-`art` override when a punctuation-free filename is preferred:
+The approved roster is authoritative in `fish_name_mapping.json`. Each
+`FISH_SPECIES` entry carries the exact `id` from that file, and the loader uses
+the mapping's `pixel_portrait` and `encyclopedia` paths. Similar-looking
+species must never be assigned to an old ID; only the three entries marked
+`matching_original_id` in the mapping retain their original IDs. The small
+`_fish_art_stem()` helper remains available for isolated naming tests, but it
+is not a migration mechanism for the active roster.
 
 | Use | Path | Target | Required treatment |
 | --- | --- | --- | --- |
 | Compact portrait / polygon catch art | `assets/fish/<stem>.png` | 96×64 px | RGBA PNG, transparent background, side profile, flat pixel-friendly shapes |
-| Encyclopedia illustration (preferred) | `assets/fish_cards/<stem>_v2.png` | 768×384 px for a wide fish; up to 768×512 px for a tall composition | RGBA PNG, transparent outside the illustration, no baked-in text or UI |
-| Legacy card fallback | `assets/fish_cards/<stem>.png` | 480×320 px | Keep only when a framed/opaque legacy card already exists; do not create a new one instead of `_v2` |
+| Encyclopedia illustration | `assets/fish_cards/<stem>_v2.png` | 768×512 px for the approved bundle | RGBA PNG, transparent outside the illustration, no baked-in text or UI |
 
 Godot preserves card aspect ratio while fitting it into the ledger, so do not
-stretch a card to fill a fixed rectangle. `_v2` is preferred over the legacy
-file when both exist. The name stem may be overridden with an `art` value in
-`FISH_SPECIES` when a migration or an intentionally shared asset needs a
-different filename; use the same override for both directories.
+stretch a card to fill a fixed rectangle. Keep the `fish_id` and both mapping
+paths synchronized when replacing an approved asset.
 
 ## Visual language
 
@@ -51,12 +46,10 @@ distinct tail on one side, and fins that do not depend on fine antialiasing.
 Do not use text baked into the portrait. The reveal supplies the fish name,
 rarity, size, weight, variant, and crown marker after the flip.
 
-For a hand-authored pixel portrait, extend `tools/generate_fish_art.py` with a
-small function that draws into a 96×64 transparent `Image` and call `finish(im,
-"<stem>")`. Preserve the shared palette and `base()` shadow treatment so a new
-portrait sits naturally beside the existing goby, sprat, trout, bream, and
-kingfish assets. If the art is generated outside the script, save the final
-96×64 file at the same path and still run the validation below.
+The approved bundle is a materialized input, not a generated replacement for
+the source sheet. If a future approved sheet changes, update
+`fish_name_mapping.json`, copy only the listed fish assets, and preserve the
+map, hero, and prop files that are marked unchanged in the bundle manifest.
 
 If using an image model instead of Pillow, generate the compact and card art as
 two views of the same side-profile reference. A useful compact prompt shape is:
@@ -79,9 +72,9 @@ margin on every edge, keep the head and eye readable when reduced to roughly
 
 When deriving a card from a concept sheet, crop one fish at a time, remove the
 paper/background with a connected flood-fill or mask, trim stray border noise,
-and export a straight-alpha RGBA PNG. `tools/crop_fish_cards.py` documents the
-existing crop/mask approach; update its panel coordinates or source path for a
-new sheet rather than hand-cropping a screenshot. The older 480×320 framed cards
+and export a straight-alpha RGBA PNG. Keep any one-off crop/mask script outside the runtime asset directories and
+record the source sheet and crop coordinates with the materialized bundle rather
+than hand-cropping a screenshot without provenance. The older 480×320 framed cards
 are compatibility fallbacks only.
 
 For a new illustration, a matching prompt shape is: `original illustrated
@@ -115,23 +108,21 @@ dictionary.
 
 ## Add a species and wire its art
 
-1. Choose the display name, rarity, legal maps, and (when needed) conditions.
-   Append the dictionary to `FISH_SPECIES` in `main.gd` unless there is a
-   deliberate migration reason to place it elsewhere. Existing smoke tests use
-   a few index-based fixtures, so appending avoids silently changing their
-   meaning; if insertion is necessary, update those fixtures in the same PR.
-2. Add the art stem only when it differs from the generated snake-case value:
+1. Add the approved `fish_id`, display name, rarity, legal maps, and (when
+   needed) conditions to `fish_name_mapping.json` and `FISH_SPECIES` together.
+   Keep the ID order and count aligned; do not alias a new display name to a
+   removed species.
+2. Use the mapping's exact asset paths:
 
    ```gdscript
-   {"name":"Kelp Runner", "rarity":"UNCOMMON", "maps":["beach"], "art":"kelp_runner"}
+   {"id":"kelp_runner", "name":"Kelp Runner", "rarity":"UNCOMMON", "maps":["beach"]}
    ```
 
-   The `art` override controls both `assets/fish/` and `assets/fish_cards/`
-   lookup. Do not add a second ad-hoc loader.
-3. Add `assets/fish/<stem>.png` if a compact portrait is ready. Add
-   `assets/fish_cards/<stem>_v2.png` for the encyclopedia illustration. A card
-   without a portrait, or a portrait without a card, is supported.
-4. Check that the new name is unique, the rarity is one of `COMMON`, `UNCOMMON`,
+   The mapping controls both `assets/fish/` and `assets/fish_cards/` lookup. Do
+   not add a second ad-hoc loader.
+3. Add `assets/fish/<stem>.png` and `assets/fish_cards/<stem>_v2.png` using the
+   exact paths recorded in the mapping.
+4. Check that the new ID and name are unique, the rarity is one of `COMMON`, `UNCOMMON`,
    `RARE`, `EPIC`, or `LEGENDARY`, and every map is one of the maps built by the
    game. Confirm the conditions in `_fish_conditions()` describe the intended
    tide pool and do not make the species unreachable.
@@ -141,9 +132,8 @@ dictionary.
 
 ## Fallback behavior (do not remove)
 
-`_load_fish_art()` loads a portrait when present, then tries
-`<stem>_v2.png` followed by the legacy `<stem>.png`. Missing or unreadable
-files are ignored. Callers then fall through as follows:
+`_load_fish_art()` resolves each path from `fish_name_mapping.json`. Missing or
+unreadable files are ignored. Callers then fall through as follows:
 
 1. Encyclopedia card: transparent card illustration (also preferred for the
    revealed catch face).
@@ -161,9 +151,6 @@ not erase discovery; art should continue to render after that state transition.
 Run these checks from the repository root before committing:
 
 ```sh
-# Optional: regenerate scripted compact portraits (review the diff first)
-python tools/generate_fish_art.py
-
 # Inspect dimensions, mode, and alpha bounds for the new files
 python - <<'PY'
 from pathlib import Path
