@@ -945,6 +945,18 @@ func _species_pool() -> Array[Dictionary]:
 		if fish_available(species): pool.append(fish)
 	return pool
 
+func _map_legal_species_fallback() -> Dictionary:
+	# A tide window can temporarily empty a map's pool. Keep the cast legal by
+	# selecting the first species whose map contract includes the current map;
+	# the grotto shares Rocky Shore's ordinary species. This is deliberately
+	# separate from fish_available(), whose tide checks are what triggered the
+	# empty pool in the first place.
+	for fish in FISH_SPECIES:
+		var maps: Array = fish.get("maps", [])
+		if maps.has(current_map) or (current_map == "grotto" and maps.has("rocky")):
+			return fish
+	return {}
+
 func _weighted_species_pick(pool: Array[Dictionary], bonus: float = -1.0) -> Dictionary:
 	# Keep species selection rarity-weighted in every path, including the
 	# one-shot rescue floor. A uniform rare_pool roll would make each rare and
@@ -967,7 +979,7 @@ func _weighted_species_pick(pool: Array[Dictionary], bonus: float = -1.0) -> Dic
 func _pick_species(grade: String, apply_rescue := false, exclude_legendary := false) -> Dictionary:
 	if apply_rescue: rescue_selection_used = false
 	var pool := _species_pool()
-	if pool.is_empty(): return FISH_SPECIES[0]
+	if pool.is_empty(): return _map_legal_species_fallback()
 	var eligible: Array[Dictionary] = []
 	for fish in pool:
 		if exclude_legendary and str(fish.get("rarity", "COMMON")) == "LEGENDARY": continue
