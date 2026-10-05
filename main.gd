@@ -2196,7 +2196,14 @@ func _load_game(path: String = SAVE_PATH):
 	weather = _normalize_weather(str(data.get("weather", _weather_for_day(day))))
 	season = _normalize_season(str(data.get("season", _season_for_day(day))))
 	var saved_pos := Vector2(float(data.get("x",368)),float(data.get("y",372)))
-	if _walkable(saved_pos): player = saved_pos
+	if _walkable(saved_pos):
+		player = saved_pos
+	else:
+		# A migrated or malformed save must never leave the hero at the previous
+		# map's position (or inside a lagoon/solid). Use the map's known entry
+		# point, then fall back to the town start if a future map changes shape.
+		var safe_spawn := Vector2(510,150) if current_map == "grotto" else Vector2(400,80)
+		if _walkable(safe_spawn): player = safe_spawn
 	if data.get("catches",{}) is Dictionary: catches = data.get("catches",{})
 	catch_metadata.clear()
 	first_capture_metadata.clear()

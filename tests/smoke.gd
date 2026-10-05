@@ -403,6 +403,10 @@ func run():
 	check(game._can_fish() and game._fishing_spots().size()==1 and game._at_hidden_fishing_spot(),'grotto moonlit pool is fishable')
 	game._save_game('user://grotto-map-test.json'); game.current_map='town'; game._build_map('town'); game._load_game('user://grotto-map-test.json')
 	check(game.current_map=='grotto' and game._fishing_spots().size()==1,'save restores the grotto map')
+	var malformed_grotto_save={"map":"grotto","x":512.0,"y":300.0}
+	var malformed_file=FileAccess.open('user://grotto-invalid-test.json',FileAccess.WRITE); malformed_file.store_string(JSON.stringify(malformed_grotto_save)); malformed_file.close()
+	game.player=Vector2(700,700); game._load_game('user://grotto-invalid-test.json')
+	check(game.current_map=='grotto' and game.player==Vector2(510,150) and game._walkable(game.player),'invalid grotto save falls back to safe spawn')
 	game.player=Vector2(32,340); game.transition_active=false; game._check_map_exit(); game._process(0.5)
 	check(game.current_map=='rocky' and game.player==Vector2(90,340) and game._walkable(game.player),'grotto returns to rocky shore via west edge')
 	# Battle lasts through multiple spaced inputs; a single tap is not a catch.
