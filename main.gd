@@ -155,6 +155,16 @@ var battle_tension := 0.0
 var battle_escape := 0.0
 var battle_direction := 1.0
 var combo := 0
+# Battle pacing. A pull is available again after about one pass of the gauge, so
+# the fight is spent timing pulls rather than waiting out a cooldown. Stamina is
+# the same at every chain length: a longer chain adds bonus beats (see
+# fishing_challenge.gd), it does not make the fish harder to land.
+const FISH_STAMINA := 10
+const FIRST_PULL_DELAY := 0.6
+const PULL_COOLDOWN := 1.0
+const PERFECT_PULL_TENSION := 0.05
+const GOOD_PULL_TENSION := 0.10
+const CLEAN_BEAT_TENSION_RELIEF := 0.06
 const FEVER_THRESHOLD := 3
 const FEVER_DURATION := 30.0
 const FEVER_RARITY_BONUS := 0.5
@@ -1618,12 +1628,12 @@ func _process_fishing(delta: float):
 			fx.bite(fx_bite_heat, _float_screen_pos())
 			# A bite opens a short tug-of-war instead of a one-frame skill check.
 			# The fish must be controlled through several good inputs.
-			fish_hp_max = 10 + mini(combo, 4)
+			fish_hp_max = FISH_STAMINA
 			fish_hp = fish_hp_max
 			battle_hits = 0
 			battle_required = fish_hp_max
 			battle_elapsed = 0.0
-			pull_cooldown = 1.0
+			pull_cooldown = FIRST_PULL_DELAY
 			perfect_pulls = 0
 			direction_timer = 2.0
 			battle_tension = clampf(0.22 + float(BAITS[bait_index].tension_bonus), 0.0, 0.9)
@@ -1633,8 +1643,8 @@ func _process_fishing(delta: float):
 			gauge = 0.0
 			gauge_direction = 1.0
 			# The challenge chain sits on top of the existing tug-of-war.  A
-			# growing combo asks for more varied beats, while the line tension and
-			# stamina model below remain authoritative for the actual catch.
+			# growing combo offers more varied bonus beats, while the line tension
+			# and stamina model below remain authoritative for the actual catch.
 			challenge_strength = clampi(combo + 1, 1, 3)
 			fishing_challenge = FishingChallengeScript.new()
 			fishing_challenge.configure(challenge_strength, combo, rng.randi())
@@ -1662,7 +1672,10 @@ func _process_fishing(delta: float):
 		var countering := counter * battle_direction < -0.25
 		var straining := counter * battle_direction > 0.25
 		if fishing_challenge != null and not fishing_challenge.done:
-			fishing_challenge.tick(delta, counter)
+			# The slalom lane is the counter direction already on screen, and a
+			# round's grace only runs while a pull is actually available.
+			fishing_challenge.counter_lane = -battle_direction
+			fishing_challenge.tick(delta, counter, pull_cooldown <= 0.0)
 			challenge_hint_t = maxf(0.0, challenge_hint_t-delta)
 		var escape_rate := float(RODS[rod_index].escape_mult) * float(BAITS[bait_index].get("escape_mult", 1.0))
 		# Bait risk applies to uncountered surges only. A deliberate counter
@@ -1939,31 +1952,11 @@ func _resolve_fishing_timing(position: float):
 
 func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	if pull_cooldown > 0.0: return
-	pull_cooldown = 1.8
+	pull_cooldown = PULL_COOLDOWN
 
-	# Challenge beats are deliberately forgiving and resolve before the normal
-	# gauge grade.  A missed beat strains the same authoritative line model as a
-	# missed gold-zone pull; it never bypasses the existing escape/tension rules.
-	if fishing_challenge != null and not fishing_challenge.done:
-		var challenge_result: Dictionary = fishing_challenge.accept(position, counter_axis)
-		challenge_round_event = str(challenge_result.get("event", ""))
-		challenge_hint_t = 1.1
-		if not bool(challenge_result.get("success", false)):
-			battle_tension = clampf(battle_tension + 0.25, 0.0, 1.0)
-			battle_escape = clampf(battle_escape + 0.12, 0.0, 1.0)
-			shake_t = 0.24
-			_play_se("danger")
-			fx.strain(_float_screen_pos())
-			toast = "CHALLENGE MISSED!  " + challenge_round_event
-			toast_t = 1.2
-			if battle_tension >= 1.0 or battle_escape >= 1.0:
-				_resolve_fishing_timing(-1.0)
-			return
-		if bool(challenge_result.get("round_complete", false)):
-			_play_se("perfect_tug")
-
-	# A pull outside the teal band strains the line. Inside it, each successful
-	# input wears down the fish and raises the spectacle toward the final catch.
+	# The gold/teal gauge is the one rule that decides a pull. Outside the teal
+	# band the line strains; inside it, each successful input wears down the fish
+	# and raises the spectacle toward the final catch.
 	var grade := "MISS"
 	if position >= 0.42 and position <= 0.62: grade = "PERFECT"
 	elif position >= 0.26 and position <= 0.80: grade = "GOOD"
@@ -1978,13 +1971,22 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 		if battle_tension >= 1.0 or battle_escape >= 1.0:
 			_resolve_fishing_timing(-1.0)
 		return
+	# Challenge beats are a bonus on a pull that already landed: a clean beat
+	# eases the line, and a pull outside the outlined zone simply earns no bonus.
+	# A press the gauge shows as GOOD is never punished.
+	var clean_beat := false
+	if fishing_challenge != null and not fishing_challenge.done:
+		var challenge_result: Dictionary = fishing_challenge.accept(position, counter_axis)
+		challenge_round_event = str(challenge_result.get("event", ""))
+		challenge_hint_t = 1.1
+		clean_beat = bool(challenge_result.get("success", false))
 	battle_hits += 1
 	# Let each clean pull add a layer during the same encounter; the retained
 	# catch combo remains the starting energy for the next cast.
 	_music_call("set_combo", [mini(4, combo + battle_hits)])
 	if grade == "PERFECT": perfect_pulls += 1
 	fish_hp = maxi(0, fish_hp - (2 if grade == "PERFECT" else 1))
-	battle_tension = clampf(battle_tension + (0.08 if grade == "PERFECT" else 0.14), 0.0, 1.0)
+	battle_tension = clampf(battle_tension + (PERFECT_PULL_TENSION if grade == "PERFECT" else GOOD_PULL_TENSION) - (CLEAN_BEAT_TENSION_RELIEF if clean_beat else 0.0), 0.0, 1.0)
 	battle_escape = maxf(0.0, battle_escape - (0.24 if grade == "PERFECT" else 0.11))
 	gauge_direction = -gauge_direction
 	shake_t = maxf(shake_t, 0.14 + battle_hits * 0.06)
@@ -1997,7 +1999,7 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 		# Preserve the strongest grade across the battle for rarity/combos.
 		_resolve_fishing_timing(0.5 if perfect_pulls * 2 >= battle_hits else 0.34)
 		return
-	toast = ("PERFECT PULL!  " if grade == "PERFECT" else "GOOD PULL!  ") + "Fish stamina %d/%d" % [fish_hp, fish_hp_max]
+	toast = ("PERFECT PULL!  " if grade == "PERFECT" else "GOOD PULL!  ") + ("CLEAN BEAT  " if clean_beat else "") + "Fish stamina %d/%d" % [fish_hp, fish_hp_max]
 	toast_t = 0.9
 
 func _se_playback() -> AudioStreamGeneratorPlayback:
@@ -2920,14 +2922,14 @@ func _draw_fishing_hud():
 func _challenge_prompt() -> String:
 	if fishing_challenge == null: return ""
 	match fishing_challenge.current_game_name():
-		"SHRINKING RING": return "SPACE inside the shrinking ring"
-		"MOVING SAFE ZONE": return "SPACE while the safe zone overlaps"
+		"SHRINKING RING": return "BONUS  SPACE inside the shrinking ring"
+		"MOVING SAFE ZONE": return "BONUS  SPACE while the safe zone overlaps"
 		"TIDE SLALOM":
 			var lane: float = fishing_challenge.safe_lane()
-			if lane < -0.5: return "HOLD LEFT, then SPACE"
-			if lane > 0.5: return "HOLD RIGHT, then SPACE"
-			return "CENTER, then SPACE"
-		"FINISHING RHYTHM": return "Tap SPACE on every finishing beat"
+			if lane < -0.5: return "BONUS  keep holding LEFT, SPACE in the zone"
+			if lane > 0.5: return "BONUS  keep holding RIGHT, SPACE in the zone"
+			return "BONUS  SPACE in the zone"
+		"FINISHING RHYTHM": return "BONUS  SPACE in the zone on every beat"
 		_: return fishing_challenge.instructions()
 
 func _draw_challenge_target(pos: Vector2, size: Vector2):
@@ -2941,8 +2943,8 @@ func _draw_challenge_target(pos: Vector2, size: Vector2):
 		"MOVING SAFE ZONE": color = Color("#9fd5ac")
 		"TIDE SLALOM": color = Color("#b6b3ed")
 		"FINISHING RHYTHM": color = Color("#f2a66f")
-	# Keep the original gold/teal grade visible underneath. The outlined target
-	# makes each challenge readable even for players who ignore the text prompt.
+	# Keep the original gold/teal grade visible underneath: it alone decides the
+	# pull. The outlined target only marks where a pull also earns the bonus.
 	hud.draw_rect(Rect2(left,pos.y-2,maxf(2.0,right-left),size.y+4),Color(color,0.38))
 	hud.draw_line(Vector2(left,pos.y-4),Vector2(left,pos.y+size.y+4),color,1.0)
 	hud.draw_line(Vector2(right,pos.y-4),Vector2(right,pos.y+size.y+4),color,1.0)

@@ -462,20 +462,24 @@ func run():
 	game._reset_fishing(); game._break_chain(); game.combo=2
 	game.player=Vector2(497,151)
 	game._try_fish(); game._process_fishing(4.0)
-	check(game.fish_hp_max==12 and game.timing_timer==20.0,'battle starts with stamina and a 20 second limit')
+	check(game.fish_hp_max==game.FISH_STAMINA and game.timing_timer==20.0,'battle starts with stamina and a 20 second limit')
+	var chain_stamina: int = game.fish_hp_max
+	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(4.0)
+	check(game.fish_hp_max==chain_stamina,'a longer chain does not raise fish stamina')
+	game._reset_fishing(); game._break_chain(); game.combo=2; game._try_fish(); game._process_fishing(4.0)
 	var before_battle=game.fish_count
 	game._handle_fishing_strike(0.5)
 	check(game.fish_count==before_battle and game.battle_hits==0,'initial tug cooldown rejects instant catch')
-	game._process_fishing(1.1)
+	game._process_fishing(game.FIRST_PULL_DELAY+0.05)
 	game._handle_fishing_strike(0.5)
-	check(game.fishing_state==game.FishingState.TIMING and game.fish_hp==10,'first perfect pull wears fish down but does not finish')
+	check(game.fishing_state==game.FishingState.TIMING and game.fish_hp==game.FISH_STAMINA-2,'first perfect pull wears fish down but does not finish')
 	game._handle_fishing_strike(0.5)
 	check(game.battle_hits==1,'rapid repeated inputs cannot skip battle')
-	for i in range(5):
-		game._process_fishing(1.85)
+	for i in range(4):
+		game._process_fishing(game.PULL_COOLDOWN+0.05)
 		game._handle_fishing_strike(0.5)
-	check(game.fishing_state==game.FishingState.RESULT and game.last_rarity != '', 'six perfect pulls resolve a catch without guaranteed legendary')
-	check(game.battle_elapsed>=9.0 and game.fish_count==before_battle+1,'legendary battle lasts at least nine seconds and counts once')
+	check(game.fishing_state==game.FishingState.RESULT and game.last_rarity != '' and game.battle_hits==5, 'five perfect pulls resolve a catch without guaranteed legendary')
+	check(game.battle_elapsed>=4.0 and game.battle_elapsed<8.0 and game.fish_count==before_battle+1,'battle takes several spaced pulls, not a long wait, and counts once')
 	if game.last_rarity == 'LEGENDARY':
 		check(game.legendary_t==0.0 and game.result_t>6.0,'legendary starts its six second staged celebration')
 		game._process_fishing(1.0); check(game.legendary_stage==1,'legendary advances to rising energy')
@@ -487,6 +491,33 @@ func run():
 	game._process_fishing(1.1)
 	game._handle_fishing_strike(0.0)
 	check(game.fishing_state==game.FishingState.TIMING and game.battle_tension>0.4,'bad pull strains the line without instant failure')
+	# The gauge alone decides a pull; the challenge zone is only a bonus.
+	for seed in range(4):
+		game._reset_fishing(); game._break_chain(); game.combo=2; game._try_fish(); game._process_fishing(4.0)
+		game.fishing_challenge.configure(3,2,seed)
+		var style: String = game.fishing_challenge.current_game_name()
+		while game.pull_cooldown>0.0: game._process_fishing(1.0/60.0)
+		check(game.fishing_challenge.grace_t>0.8,'%s grace is still open when the first pull becomes available' % style)
+		game.battle_direction=1.0; game.direction_timer=9.0
+		for frame in range(120): game._process_fishing(1.0/60.0)
+		check(game.fishing_challenge.grace_t==0.0,'%s grace runs out while a pull is available' % style)
+		if style=='TIDE SLALOM':
+			check(game.fishing_challenge.safe_lane()==-1.0 and game._challenge_prompt().contains('LEFT'),'slalom lane matches the HOLD LEFT counter prompt')
+			game.battle_direction=-1.0; game._process_fishing(0.01)
+			check(game.fishing_challenge.safe_lane()==1.0 and game._challenge_prompt().contains('RIGHT'),'slalom lane follows the fish when it turns')
+		var tension_before: float = game.battle_tension; var escape_before: float = game.battle_escape
+		game._handle_fishing_strike(0.79 if game.fishing_challenge.target_center()<0.53 else 0.27)
+		check(game.battle_hits==1 and game.fish_hp==game.FISH_STAMINA-1 and game.fishing_challenge.round_index==0 and game.fishing_challenge.action_progress==0,'%s: a GOOD pull outside the bonus zone still counts' % style)
+		check(is_equal_approx(game.battle_tension,tension_before+game.GOOD_PULL_TENSION) and game.battle_escape<=escape_before,'%s: a GOOD pull outside the bonus zone is not punished' % style)
+		game.pull_cooldown=0.0; tension_before=game.battle_tension
+		var beat_at: float = game.fishing_challenge.target_center()
+		var beat_tension: float = game.PERFECT_PULL_TENSION if beat_at>=0.42 and beat_at<=0.62 else game.GOOD_PULL_TENSION
+		game._handle_fishing_strike(beat_at,game.fishing_challenge.safe_lane())
+		check(is_equal_approx(game.battle_tension,tension_before+beat_tension-game.CLEAN_BEAT_TENSION_RELIEF),'%s: a clean beat eases the line' % style)
+		game.pull_cooldown=0.0; game.battle_tension=0.2
+		var beats_before: int = game.fishing_challenge.action_progress; var round_before: int = game.fishing_challenge.round_index
+		game._handle_fishing_strike(0.1,game.fishing_challenge.safe_lane())
+		check(game.fishing_challenge.action_progress==beats_before and game.fishing_challenge.round_index==round_before and game.battle_tension>0.5,'%s: a pull off the gauge strains the line and earns no beat' % style)
 	game.battle_tension=0.9; game.pull_cooldown=0.0; game._handle_fishing_strike(0.0)
 	check(game.last_grade=='MISS' and game.combo==0,'repeated bad pulls can snap the line and reset combo')
 	game._reset_fishing()
