@@ -389,6 +389,22 @@ func run():
 	check(not game._can_fish(),'beach inland cast rejected')
 	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(170,590)
 	check(game._can_fish() and game._fishing_spots().size()==2,'rocky tide pools are fishable')
+	# The unlocked cove is a real map transition, not only a hidden fishing spot
+	# layered onto Rocky Shore. Its save/load state and local pool remain stable.
+	game.hidden_spot_unlocked=true; game.hidden_spot_collected=true; game.transition_active=false
+	game.current_map='rocky'; game._build_map('rocky'); game.player=Vector2(690,520); game._check_map_exit()
+	check(game.transition_target=='grotto','rocky grotto exit is gated and reachable')
+	game._transition_to('grotto',Vector2(510,150)); game._process(0.5)
+	check(game.current_map=='grotto' and game.player==Vector2(510,150),'grotto transition rebuilds the map')
+	check(game._walkable(Vector2(32,340)) and not game._walkable(Vector2(512,300)) and game._walkable(Vector2(512,520)),'grotto west route and lagoon collision')
+	var grotto_exit: Dictionary = game._exit_markers()[0]
+	check(grotto_exit.pos==Vector2(40,340) and grotto_exit.dir==Vector2(-1,0),'grotto uses a west-edge return marker')
+	game.player=Vector2(512,520)
+	check(game._can_fish() and game._fishing_spots().size()==1 and game._at_hidden_fishing_spot(),'grotto moonlit pool is fishable')
+	game._save_game('user://grotto-map-test.json'); game.current_map='town'; game._build_map('town'); game._load_game('user://grotto-map-test.json')
+	check(game.current_map=='grotto' and game._fishing_spots().size()==1,'save restores the grotto map')
+	game.player=Vector2(32,340); game.transition_active=false; game._check_map_exit(); game._process(0.5)
+	check(game.current_map=='rocky' and game.player==Vector2(90,340) and game._walkable(game.player),'grotto returns to rocky shore via west edge')
 	# Battle lasts through multiple spaced inputs; a single tap is not a catch.
 	game.transition_active=false
 	game.notebook_open=false
