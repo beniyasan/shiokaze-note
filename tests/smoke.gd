@@ -17,7 +17,9 @@ func run():
 	var game = load('res://main.tscn').instantiate()
 	root.add_child(game); game.set_process(false)
 	check(game._walkable(game.player),'spawn is walkable')
-	check(not game._walkable(Vector2(240,300)),'inn blocks movement')
+	check(not game._walkable(Vector2(240,300)) and not game._walkable(Vector2(478,150)) and not game._walkable(Vector2(800,260)),'cottage garden, inn and market block movement')
+	check(not game._walkable(Vector2(505,280)) and game._walkable(Vector2(505,345)),'the fountain blocks movement but the plaza around it is open')
+	check(not game._walkable(Vector2(300,420)) and not game._walkable(Vector2(700,440)),'the harbour wall drops into water on both sides of the pier')
 	check(not game._walkable(Vector2(400,530)),'sea blocks movement')
 	check(game._walkable(Vector2(502,530)),'pier is walkable')
 	# Tide forecast gates species by map, time, weather, and season.
@@ -409,16 +411,30 @@ func run():
 	check(game.current_map=='rocky' and game.fish_count==5,'beach to rocky preserves ledger')
 	game._save_game('res://.smoke-map-test.json'); game.current_map='town'; game._build_map('town'); game._load_game('res://.smoke-map-test.json')
 	check(game.current_map=='rocky','save restores active map')
-	game.current_map='town'; game._build_map('town'); game.player=Vector2(556,452); game._check_map_exit()
-	check(game._walkable(Vector2(556,452)) and game.transition_target=='beach' and game.transition_spawn==Vector2(400,80),'town beach exit is reachable')
+	game.current_map='town'; game._build_map('town'); game.player=Vector2(992,520); game._check_map_exit()
+	check(game._walkable(Vector2(992,520)) and game.transition_target=='beach' and game.transition_spawn==Vector2(400,80),'town beach exit is reachable')
 	game.transition_active=false
 	# Walk the real runtime path (move, then exit check): the south road must reach
 	# the pier's fishing spot, and stepping off it must not leave town.
 	game.player=Vector2(500,425)
 	check(walk_to(game,Vector2(502,530)) and not game.transition_active and game._can_fish(),'walking the south road reaches the pier without leaving town')
 	check(walk_to(game,Vector2(500,425)) and not game.transition_active,'walking back off the pier stays in town')
-	check(walk_to(game,Vector2(556,452)) and game.transition_active and game.transition_target=='beach','walking onto the sand east of the pier leaves for the beach')
+	# The quay leads east to the sand: off the east edge for the rocky shore,
+	# down onto the east beach for Amber Beach. Neither gate is on the pier.
+	check(walk_to(game,Vector2(500,392)) and walk_to(game,Vector2(986,392)) and not game.transition_active,'the quay runs from the pier to the east sand')
+	check(not game._can_fish() and game._can_fish_at(Vector2(700,392)) and not game._can_fish_at(Vector2(560,300)),'town casts from the quay edge, not the plaza or the east sand')
+	check(walk_to(game,Vector2(1012,380)) and game.transition_active and game.transition_target=='rocky','walking off the east edge leaves for the rocky shore')
+	game.transition_active=false; game.player=Vector2(986,392)
+	check(walk_to(game,Vector2(958,392)) and walk_to(game,Vector2(958,466)) and walk_to(game,Vector2(992,470)) and not game.transition_active,'the sand path leads down to the east beach')
+	check(walk_to(game,Vector2(992,518)) and game.transition_active and game.transition_target=='beach','walking down the east beach leaves for Amber Beach')
 	game.transition_active=false
+	# Both rumor sources stand somewhere the hero can actually reach.
+	for rumor_key in game.RUMOR_SOURCES:
+		var rumor_reachable := false
+		for dx in range(-24,25,8):
+			for dy in range(-24,25,8):
+				if Vector2(dx,dy).length()<game.RUMOR_TALK_RADIUS-4.0 and game._walkable(game.RUMOR_SOURCES[rumor_key].pos+Vector2(dx,dy)): rumor_reachable = true
+		check(rumor_reachable,'%s can be walked up to' % game.RUMOR_SOURCES[rumor_key].label)
 	# The pier is town geometry; the same rectangle is open water elsewhere.
 	game.current_map='beach'; game._build_map('beach')
 	check(not game._walkable(Vector2(502,530)),'beach has no phantom pier')
@@ -626,19 +642,19 @@ func run():
 	var kept_latest: Dictionary = game.catch_latest.duplicate(true)
 	game.catches.clear(); game.catch_metadata.clear(); game.first_capture_metadata.clear(); game.catch_latest.clear()
 	game.rumor_found=false; game.hidden_spot_unlocked=false; game.fish_count=0; game.heard_rumors=[]
-	game.current_map='town'; game._build_map('town'); game.player=Vector2(424,381)
+	game.current_map='town'; game._build_map('town'); game.player=game.RUMOR_SOURCES.mera.pos
 	check(game.rumor_source_near()=='mera','Fisher Mera can be talked to')
 	check(game.talk_to_rumor_source() and game.rumor_found and game.heard_rumors==['grotto'],'fisher NPC tells the grotto rumor first')
 	check(game.toast.contains('Fisher Mera') and game.toast.contains('grotto'),'a heard rumor is shown in the toast bar')
 	check(game.talk_to_rumor_source() and game.heard_rumors.size()==2 and game.heard_rumors[1]=='Moonfish','Mera tells a different rumor each time she is asked')
-	game.player=Vector2(468,381)
+	game.player=game.RUMOR_SOURCES.notice.pos
 	check(game.rumor_source_near()=='notice','the weathered notice can be read')
 	game.rumor_found=false; game.heard_rumors=[]
 	check(game.talk_to_rumor_source() and game.rumor_found,'weathered notice reveals the grotto rumor')
 	check(game.talk_to_rumor_source() and game.heard_rumors==['grotto','Fire scorpionfish'],'notice moves on to a species rumor')
 	game.player=Vector2(300,250)
 	check(game.rumor_source_near()=='' and not game.talk_to_rumor_source(),'no rumor is available away from the plaza')
-	game.player=Vector2(424,381)
+	game.player=game.RUMOR_SOURCES.mera.pos
 	for i in range(8): game.talk_to_rumor_source()
 	var heard_after_all: int = game.heard_rumors.size()
 	check(game.heard_rumors.has('Night angler') and game.talk_to_rumor_source() and game.heard_rumors.size()==heard_after_all and game.toast.contains('nothing new'),'an exhausted source says it has nothing new')
@@ -685,6 +701,11 @@ func run():
 	var koi_shells: int = game.shells; var koi_fish: int = game.fish_count
 	game._try_fish()
 	check(game.fishing_state==game.FishingState.IDLE and game.fish_count==koi_fish and game.shells==koi_shells,'a legendary-only pool refuses the cast')
+	# A caller that resolves a timing result directly must not reach the ledger
+	# with the empty candidate either.
+	var koi_combo: int = game.combo; var koi_catches: int = game.catches.size()
+	game.cast_candidate={}; game._resolve_fishing_timing(0.5)
+	check(game.fishing_state==game.FishingState.IDLE and game.fish_count==koi_fish and game.combo==koi_combo and game.catches.size()==koi_catches and not game.catch_choice_pending(),'resolving a cast in a legendary-only pool records no catch')
 	game.current_map=koi_state.map; game._build_map(koi_state.map); game.player=koi_state.player; game.time_of_day=koi_state.time; game.weather=koi_state.weather; game.season=koi_state.season
 	game.hidden_spot_unlocked=koi_state.unlocked; game.hidden_spot_collected=koi_state.collected; game.combo=koi_state.combo; game._reset_fishing()
 	var worst_rumor_width := 0.0

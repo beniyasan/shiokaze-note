@@ -19,9 +19,12 @@ future integration rather than assuming the dimensions remain unchanged.
 
 - `_build_map()` clears `props`, `solids`, and `landmarks`, then dispatches to a
   builder. Map ids currently are `town`, `beach`, `rocky`, and `grotto`.
-- `_ready()` loads `assets/maps/amber_beach.png`, `rocky_shore.png`, and
-  `moonlit_grotto.png` into `map_art`. `_draw_map_background()` draws them across
-  `WORLD_SIZE`; town retains its existing terrain.
+- `_ready()` loads `assets/maps/saltmere_town.png`, `amber_beach.png`,
+  `rocky_shore.png`, and `moonlit_grotto.png` into `map_art`.
+  `_draw_map_background()` draws them across `WORLD_SIZE`.
+- Town is authored against its backdrop: `TOWN_WALK` lists the rectangles the
+  hero may stand in and `TOWN_SOLIDS` the obstacles inside them
+  (`_town_walkable()`), instead of the shoreline rule the other maps use.
 - `_draw_map_landmarks()` routes static-map labels to `_draw_static_map_labels()`;
   `_map_art_point()` scales label anchors from authored 1024 x 640 coordinates.
   `_using_static_map_art()` suppresses duplicate props/landmark primitives while

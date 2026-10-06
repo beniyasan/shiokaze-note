@@ -12,35 +12,6 @@ const TILE := 16
 const WORLD_W := 64
 const WORLD_H := 40
 const WORLD_SIZE := Vector2(WORLD_W*TILE, WORLD_H*TILE)
-# Compatibility contract retained for the repository smoke suite and tooling.
-const MAP_EXITS := {
-	"town": [
-		{"to":"beach","zone":Rect2(528,448,56,32),"spawn":Vector2(400,80)},
-		{"to":"rocky","zone":Rect2(798,250,62,180),"spawn":Vector2(90,340)}
-	],
-	"beach": [
-		{"to":"town","zone":Rect2(280,0,280,34),"spawn":Vector2(556,430)},
-		{"to":"rocky","zone":Rect2(798,280,62,280),"spawn":Vector2(90,340)}
-	],
-	"rocky": [
-		{"to":"grotto","zone":Rect2(760,450,100,50),"spawn":Vector2(510,150),"needs_grotto":true},
-		{"to":"town","zone":Rect2(0,250,34,180),"spawn":Vector2(760,340)},
-		{"to":"beach","zone":Rect2(390,470,60,40),"spawn":Vector2(770,390)}
-	],
-	"grotto": [
-		{"to":"rocky","zone":Rect2(0,250,34,180),"spawn":Vector2(760,340)}
-	]
-}
-const FISH_STAMINA := 10
-const FIRST_PULL_DELAY := 1.0
-const PULL_COOLDOWN := 1.5
-const GOOD_PULL_TENSION := 0.14
-const PERFECT_PULL_TENSION := 0.08
-const CLEAN_BEAT_TENSION_RELIEF := 0.05
-const LEGENDARY_BASE_CHANCE := 0.01
-const LEGENDARY_FEVER_BONUS := 0.02
-const LEGENDARY_MOONSEED_BONUS := 0.02
-const LEGENDARY_CHANCE_CAP := 0.05
 const SAVE_PATH := "user://saltmere_save.json"
 # Keep the legendary choice controls clear of the 270px viewport edge. These
 # are shared by both the promotion-label and no-label variants so a long-lived
@@ -89,7 +60,7 @@ const WEATHER_NAMES := ["clear", "overcast", "rain", "storm"]
 const SEASON_NAMES := ["spring", "summer", "autumn", "winter"]
 const WEATHER_CYCLE := ["clear", "clear", "overcast", "rain", "clear", "storm", "overcast"]
 var notebook_open := false
-var toast := "Follow the path east, then south to the pier"
+var toast := "Walk east along the quay, then out onto the pier"
 var toast_t := 5.0
 var rng := RandomNumberGenerator.new()
 var cam := Camera2D.new()
@@ -210,9 +181,26 @@ var battle_tension := 0.0
 var battle_escape := 0.0
 var battle_direction := 1.0
 var combo := 0
+# Battle pacing. A pull is available again after about one pass of the gauge, so
+# the fight is spent timing pulls rather than waiting out a cooldown. Stamina is
+# the same at every chain length: a longer chain adds bonus beats (see
+# fishing_challenge.gd), it does not make the fish harder to land.
+const FISH_STAMINA := 10
+const FIRST_PULL_DELAY := 0.6
+const PULL_COOLDOWN := 1.0
+const PERFECT_PULL_TENSION := 0.05
+const GOOD_PULL_TENSION := 0.10
+const CLEAN_BEAT_TENSION_RELIEF := 0.06
 const FEVER_THRESHOLD := 3
 const FEVER_DURATION := 30.0
 const FEVER_RARITY_BONUS := 0.5
+# Legendary roll per eligible cast (see _legendary_chance_for_cast). Sized so a
+# player who fishes Storm tuna's rain/storm evenings lands it in a few in-game
+# years rather than tens of hours.
+const LEGENDARY_BASE_CHANCE := 0.03
+const LEGENDARY_FEVER_BONUS := 0.03
+const LEGENDARY_MOONSEED_BONUS := 0.02
+const LEGENDARY_CHANCE_CAP := 0.08
 const PROMOTION_FALSE_CUE_CHANCE := 0.18
 # A false rainbow/purple float is capped both by these absolute chances and by a
 # ratio of the honest one, so lies stay a minority of each cue.
@@ -298,9 +286,8 @@ func _ready():
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	terrain = load("res://assets/terrain.png")
 	# Saltmere town uses the approved pixel-art backdrop at the same 1024×640
-	# world resolution as the shoreline maps. Gameplay coordinates remain the
-	# authored v2 layout below (including the pier and exit gates), so this is a
-	# presentation swap rather than a route/collision rewrite.
+	# world resolution as the shoreline maps. Its walkable area, exits and rumor
+	# sources are authored against that art (TOWN_WALK, MAP_EXITS, RUMOR_SOURCES).
 	map_art["town"] = load("res://assets/maps/saltmere_town.png")
 	map_art["beach"] = load("res://assets/maps/amber_beach.png")
 	map_art["rocky"] = load("res://assets/maps/rocky_shore.png")
@@ -485,34 +472,36 @@ func _fish_entry(species: String) -> Dictionary:
 
 func _fish_conditions(species: String) -> Dictionary:
 	# The approved roster gets explicit tide windows so every pool has readable
-	# variety while still leaving a broad fallback for ordinary casts.
+	# variety. The windows are tuned so no map is empty for a whole season and
+	# the daytime staples (Sunrise bream, Sand flatfish, Pearl seabass) bite all
+	# year, while night pools stay small enough for their EPIC species to show.
 	var all_times := ["night", "dawn", "day", "dusk"]
 	var all_weather := ["clear", "overcast", "rain", "storm"]
 	var all_seasons := ["spring", "summer", "autumn", "winter"]
 	match species:
 		"Amber anchovy": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
-		"Sunrise bream": return {"times":["dawn", "day"], "weather":["clear", "overcast"], "seasons":["spring", "summer", "autumn", "winter"]}
+		"Sunrise bream": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":all_seasons}
 		"Moonfish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
-		"Coral grouper": return {"times":["day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["summer", "autumn"]}
+		"Coral grouper": return {"times":["day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
 		"Jellyfish fish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["spring", "summer", "autumn"]}
 		"Tropical angelfish": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":["summer", "autumn"]}
 		"Shadow flounder": return {"times":["dawn", "night"], "weather":["overcast", "rain"], "seasons":all_seasons}
 		"Starry fish": return {"times":["night"], "weather":["clear", "storm"], "seasons":["autumn", "winter"]}
 		"Reef butterflyfish": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
 		"Crystal fish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
-		"Sand flatfish": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
+		"Sand flatfish": return {"times":["dawn", "day"], "weather":all_weather, "seasons":all_seasons}
 		"Night angler": return {"times":["night"], "weather":["clear", "rain", "storm"], "seasons":["summer", "autumn", "winter"]}
-		"Pearl seabass": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer", "autumn"]}
+		"Pearl seabass": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast"], "seasons":all_seasons}
 		"Fire scorpionfish": return {"times":["dusk", "night"], "weather":["rain", "storm"], "seasons":["summer", "autumn"]}
-		"Seahorse": return {"times":["dawn", "day"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer"]}
+		"Seahorse": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer", "autumn"]}
 		"Mint wrasse": return {"times":["day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer", "autumn"]}
 		"Jellyfish butterflyfish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["summer", "autumn", "winter"]}
-		"Storm tuna": return {"times":["night"], "weather":["rain", "storm"], "seasons":["summer", "autumn", "winter"]}
+		"Storm tuna": return {"times":["dusk", "night"], "weather":["rain", "storm"], "seasons":all_seasons}
 		"Coral rabbitfish": return {"times":["dawn", "day"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
 		"Twilight salmon": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
 		"Ghost fish": return {"times":["night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
 		"Harvest puffer": return {"times":["day", "dusk"], "weather":["overcast", "rain"], "seasons":["summer", "autumn"]}
-		"Lantern fish": return {"times":["night"], "weather":["clear", "rain"], "seasons":["summer", "autumn", "winter"]}
+		"Lantern fish": return {"times":["night"], "weather":["clear", "rain"], "seasons":all_seasons}
 		"Tidepool blenny": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["spring", "summer"]}
 		# Aurora koi is the grotto's explicit discovery reward; the hidden spot
 		# gates it, while tide conditions should not make the one-off reward vanish.
@@ -565,6 +554,44 @@ func _build_map(map_name: String):
 		_build_grotto()
 	else:
 		_build_town()
+
+# Saltmere town follows the approved backdrop (assets/maps/saltmere_town.png):
+# the hero may stand anywhere inside these rectangles and outside the solids.
+# Coordinates are read off the 1024x640 art, so the cobbles, quay, pier and the
+# east sand are walkable while roofs, gardens, walls and water are not.
+const TOWN_WALK: Array[Rect2] = [
+	Rect2(348,200,342,198), # plaza between the inn, the fountain and the market
+	Rect2(262,322,90,76),   # cobbles south-west of the plaza
+	Rect2(100,364,880,34),  # quay along the harbour wall
+	Rect2(470,392,86,186),  # Old Salt Pier
+	Rect2(978,348,42,50),   # sand at the east end of the quay
+	Rect2(944,388,28,84),   # sand path down to the east beach
+	Rect2(946,460,74,20),
+	Rect2(966,470,54,80)    # east beach
+]
+const TOWN_SOLIDS: Array[Rect2] = [
+	Rect2(442,236,128,84),  # fountain and its flower ring
+	Rect2(354,236,18,20),   # west banner lamp
+	Rect2(627,240,16,18),   # east banner lamp
+	Rect2(332,296,34,26),   # shrub beside the west planter
+	Rect2(332,334,68,24),   # west planter bench
+	Rect2(602,296,56,62),   # east planters
+	Rect2(394,368,24,22),   # shrub on the quay
+	Rect2(668,200,24,48),   # shrub at the market corner
+	Rect2(584,204,12,8)     # notice board post
+]
+
+func _town_walkable(feet: Rect2) -> bool:
+	for c in [feet.position,feet.position+Vector2(8,0),feet.end,feet.position+Vector2(0,5)]:
+		var inside := false
+		for zone in TOWN_WALK:
+			if zone.has_point(c):
+				inside = true
+				break
+		if not inside: return false
+	for body in TOWN_SOLIDS:
+		if body.intersects(feet): return false
+	return true
 
 func _build_town():
 	landmarks = [{"kind":"pier","pos":Vector2(502,500),"label":"Old Salt Pier"}]
@@ -649,11 +676,9 @@ func _build_grotto():
 
 func _add_prop(kind: String, pos: Vector2, body: Rect2):
 	props.append({"kind":kind,"pos":pos})
-	# Shoreline backdrops contain their own visible props, so their old decorative
-	# colliders are intentionally omitted. Town keeps the authored v2 collision
-	# rectangles even with the new backdrop: they preserve the established spawn,
-	# plaza route, and inn/sea smoke-test contracts.
-	if body.size != Vector2.ZERO and (current_map == "town" or not _using_static_map_art()):
+	# Static authored map art already contains visible landmarks; legacy prop
+	# colliders would otherwise become invisible walls at old coordinates.
+	if body.size != Vector2.ZERO and not _using_static_map_art():
 		solids.append(Rect2(pos+body.position,body.size))
 
 func _shore(x: float) -> float:
@@ -672,9 +697,10 @@ func _shore(x: float) -> float:
 func _walkable(pos: Vector2) -> bool:
 	# Feet collision: canopy overlap is intentional for top-down depth.
 	var feet := Rect2(pos-Vector2(4,3),Vector2(8,5))
+	# Town is authored against its backdrop; the other maps end at a shoreline.
+	if current_map == "town": return _town_walkable(feet)
 	for c in [feet.position,feet.position+Vector2(8,0),feet.end,feet.position+Vector2(0,5)]:
-		var on_pier: bool = current_map == "town" and c.x >= 486 and c.x <= 518 and c.y >= 440 and c.y <= 545
-		if not on_pier and (c.x < 28 or c.x >= 828 or c.y < 28 or c.y >= _shore(c.x)-4): return false
+		if c.x < 28 or c.x >= 828 or c.y < 28 or c.y >= _shore(c.x)-4: return false
 	for body in solids:
 		if body.intersects(feet): return false
 	return true
@@ -784,39 +810,56 @@ func _float_screen_pos() -> Vector2:
 	if not is_inside_tree(): return Vector2(240, 160)
 	return get_viewport().get_canvas_transform() * world
 
-func _check_map_exit():
-	if transition_active: return
-	var exit := ""
-	if current_map == "town":
-		# The south road meets the shoreline around y=440; keep the exit on walkable land.
-		if player.y > 448 and player.x > 528 and player.x < 584: exit = "beach"
-		elif player.x > 798 and player.y > 250 and player.y < 430: exit = "rocky"
-	elif current_map == "beach":
-		if player.y < 34 and player.x > 280 and player.x < 560: exit = "town"
-		elif player.x > 798 and player.y > 280 and player.y < 560: exit = "rocky"
-	elif current_map == "rocky":
+# Every map connection lives in this one table: the trigger zone the hero walks
+# into, the spawn in the destination map, and the signpost drawn for it. A zone
+# must stay clear of fishing spots and of the spawns that arrive on its map, so
+# travel never swallows a fishing bank or bounces straight back (see the exit
+# checks in tests/smoke.gd).
+const MAP_EXITS := {
+	"town": [
+		# Both routes leave by the sand at the east end of the quay, well clear of
+		# Old Salt Pier: down onto the east beach for Amber Beach, off the east
+		# edge for the rocky shore.
+		{"to":"beach","zone":Rect2(962,514,62,40),"spawn":Vector2(400,80),"marker":Vector2(992,504),"label":"BEACH","dir":Vector2(0,1)},
+		{"to":"rocky","zone":Rect2(1006,340,18,62),"spawn":Vector2(90,340),"marker":Vector2(1000,356),"label":"ROCKY SHORE","dir":Vector2(1,0)}
+	],
+	"beach": [
+		{"to":"town","zone":Rect2(280,0,280,34),"spawn":Vector2(992,486),"marker":Vector2(420,40),"label":"TOWN","dir":Vector2(0,-1)},
+		{"to":"rocky","zone":Rect2(798,280,62,280),"spawn":Vector2(420,440),"marker":Vector2(800,390),"label":"ROCKY SHORE","dir":Vector2(1,0)}
+	],
+	"rocky": [
 		# Keep the legacy pool at (690,480) fishable; the grotto gate is farther
 		# east on the same bank so merely approaching the pool cannot transition.
-		if hidden_spot_unlocked and player.x > 760 and player.y > 450 and player.y < 500: exit = "grotto"
-		elif player.x < 34 and player.y > 250 and player.y < 430: exit = "town"
-		elif player.y > 470 and player.x > 390 and player.x < 450: exit = "beach"
-	elif current_map == "grotto":
+		{"to":"grotto","zone":Rect2(760,450,100,50),"spawn":Vector2(510,150),"marker":Vector2(780,460),"label":"MOONLIT GROTTO","dir":Vector2(1,0),"needs_grotto":true},
+		{"to":"town","zone":Rect2(0,250,34,180),"spawn":Vector2(986,378),"marker":Vector2(40,340),"label":"TOWN","dir":Vector2(-1,0)},
+		# A narrow gate at the water's edge: the rest of the lower bank stays
+		# walkable and fishable.
+		{"to":"beach","zone":Rect2(390,470,60,40),"spawn":Vector2(770,390),"marker":Vector2(420,458),"label":"BEACH","dir":Vector2(0,1)}
+	],
+	"grotto": [
 		# The grotto's return route is the west edge, matching the authored map
 		# workflow and keeping the cave entry above the lagoon as a one-way route.
-		if player.x < 34 and player.y > 250 and player.y < 430: exit = "rocky"
-	if exit != "":
-		var spawn := _entry_spawn(exit)
-		_transition_to(exit, spawn)
+		{"to":"rocky","zone":Rect2(0,250,34,180),"spawn":Vector2(90,340),"marker":Vector2(40,340),"label":"ROCKY SHORE","dir":Vector2(-1,0)}
+	]
+}
+
+func _map_exits(map_name: String = "") -> Array[Dictionary]:
+	var exits: Array[Dictionary] = []
+	for entry in MAP_EXITS.get(current_map if map_name.is_empty() else map_name, []):
+		if bool(entry.get("needs_grotto", false)) and not hidden_spot_unlocked: continue
+		exits.append(entry)
+	return exits
+
+func _check_map_exit():
+	if transition_active: return
+	for entry in _map_exits():
+		if (entry.zone as Rect2).has_point(player):
+			_transition_to(str(entry.to), entry.spawn)
+			return
 
 func _entry_spawn(map_name: String) -> Vector2:
-	if current_map == "town" and map_name == "beach": return Vector2(400,80)
-	if current_map == "town" and map_name == "rocky": return Vector2(90,340)
-	if current_map == "beach" and map_name == "town": return Vector2(500,520)
-	if current_map == "beach" and map_name == "rocky": return Vector2(90,340)
-	if current_map == "rocky" and map_name == "town": return Vector2(760,340)
-	if current_map == "rocky" and map_name == "grotto": return Vector2(510,150)
-	if current_map == "rocky" and map_name == "beach": return Vector2(770,390)
-	if current_map == "grotto" and map_name == "rocky": return Vector2(90,340)
+	for entry in _map_exits():
+		if str(entry.to) == map_name: return entry.spawn
 	return Vector2(400,80)
 
 func _map_camera_bias() -> Vector2:
@@ -840,10 +883,16 @@ func _transition_to(map_name: String, spawn: Vector2):
 	toast = "Travelling to " + map_name.capitalize() + "..."; toast_t = 1.0
 
 func _can_fish() -> bool:
+	return _can_fish_at(player)
+
+func _can_fish_at(pos: Vector2) -> bool:
 	for spot in _fishing_spots():
-		if player.distance_to(spot.pos) <= 24.0: return true
+		if pos.distance_to(spot.pos) <= 24.0: return true
 	if current_map == "grotto": return false
-	return (player.y >= _shore(player.x)-21 and player.x>70 and player.x<810)
+	# Town casts from the harbour edge: the quay's seaward strip or anywhere on
+	# the pier. The east sand is the way out, not a fishing bank.
+	if current_map == "town": return pos.y >= 380.0 and pos.x < 940.0
+	return (pos.y >= _shore(pos.x)-21 and pos.x>70 and pos.x<810)
 
 func _fishing_spots() -> Array[Dictionary]:
 	match current_map:
@@ -868,8 +917,8 @@ const HIDDEN_SPOT_COLLECTION_PERCENT := 25
 const RUMOR_TALK_RADIUS := 34.0
 const TIME_NAMES := ["dawn", "day", "dusk", "night"]
 const RUMOR_SOURCES := {
-	"mera": {"label":"Fisher Mera", "pos":Vector2(424,381), "rumors":["grotto", "Moonfish", "Night angler", "Storm tuna", "Ghost fish"]},
-	"notice": {"label":"Weathered notice", "pos":Vector2(468,381), "rumors":["grotto", "Fire scorpionfish", "Crystal fish", "Twilight salmon", "Lantern fish"]}
+	"mera": {"label":"Fisher Mera", "pos":Vector2(428,342), "rumors":["grotto", "Moonfish", "Night angler", "Storm tuna", "Ghost fish"]},
+	"notice": {"label":"Weathered notice", "pos":Vector2(590,212), "rumors":["grotto", "Fire scorpionfish", "Crystal fish", "Twilight salmon", "Lantern fish"]}
 }
 
 func collection_discovered_count() -> int:
@@ -982,6 +1031,14 @@ func _species_pool() -> Array[Dictionary]:
 		if fish_available(species): pool.append(fish)
 	return pool
 
+# A legendary only ever rides on an ordinary bite (see _pick_cast_candidate), so
+# a cast needs at least one non-legendary species in the water.
+func _ordinary_pool() -> Array[Dictionary]:
+	var pool: Array[Dictionary] = []
+	for fish in _species_pool():
+		if str(fish.get("rarity", "COMMON")) != "LEGENDARY": pool.append(fish)
+	return pool
+
 func _weighted_species_pick(pool: Array[Dictionary], bonus: float = -1.0) -> Dictionary:
 	# Keep species selection rarity-weighted in every path, including the
 	# one-shot rescue floor. A uniform rare_pool roll would make each rare and
@@ -1001,12 +1058,6 @@ func _weighted_species_pick(pool: Array[Dictionary], bonus: float = -1.0) -> Dic
 		if roll <= 0.0: return pool[i]
 	return pool[pool.size() - 1]
 
-func _ordinary_pool() -> Array[Dictionary]:
-	var ordinary: Array[Dictionary] = []
-	for fish in _species_pool():
-		if str(fish.get("rarity", "COMMON")) != "LEGENDARY": ordinary.append(fish)
-	return ordinary
-
 func _pick_species(grade: String, apply_rescue := false, exclude_legendary := false) -> Dictionary:
 	if apply_rescue: rescue_selection_used = false
 	var pool := _species_pool()
@@ -1016,12 +1067,16 @@ func _pick_species(grade: String, apply_rescue := false, exclude_legendary := fa
 	# registering a catch.
 	if pool.is_empty(): return {}
 	var eligible: Array[Dictionary] = []
+	var ordinary: Array[Dictionary] = []
 	for fish in pool:
 		if exclude_legendary and str(fish.get("rarity", "COMMON")) == "LEGENDARY": continue
+		ordinary.append(fish)
 		if grade == "PERFECT" or fish.rarity in ["COMMON","UNCOMMON","RARE"]: eligible.append(fish)
-	if eligible.is_empty():
-		if exclude_legendary: return {}
-		eligible = pool
+	# A grade can leave nothing eligible (an all-EPIC pool on a GOOD pull), so
+	# fall back to the ordinary pool. Never fall back to the excluded legendary:
+	# a pool holding only a legendary would hand it out on every cast.
+	if eligible.is_empty(): eligible = ordinary
+	if eligible.is_empty(): return {}
 	# Rescue is intentionally a soft odds nudge before the one-shot RARE floor.
 	# It makes an unlucky forecast feel warmer without handing out a catch or
 	# changing the map/time/weather legality of the pool.
@@ -1067,7 +1122,6 @@ func _candidate_share_at_least(min_rank: int) -> float:
 	for fish in pool:
 		if str(fish.get("rarity", "COMMON")) == "LEGENDARY": has_legendary = true
 		else: eligible.append(fish)
-	if eligible.is_empty(): eligible = pool
 	var bonus := _rarity_bonus_total()
 	var total := 0.0
 	var matched := 0.0
@@ -1099,20 +1153,22 @@ func _rarity_bonus_scale(rarity: String) -> float:
 
 func _legendary_chance_for_cast() -> float:
 	# The upcoming bite is eligible for a legendary only on Rocky Shore after
-	# the third chain catch.  FEVER and Moonseed each add a small, bounded nudge;
-	# together they cap the chance at 5% rather than making a legendary routine.
+	# the third chain catch.  FEVER and Moonseed each add a bounded nudge; together
+	# they cap the chance at 8% rather than making a legendary routine.
 	if current_map not in ["rocky", "grotto"] or combo + 1 < FEVER_THRESHOLD: return 0.0
-	var chance := 0.01
-	if fever_active: chance += 0.02
-	if bait_index == 2: chance += 0.02
-	return minf(chance, 0.05)
+	var chance := LEGENDARY_BASE_CHANCE
+	if fever_active: chance += LEGENDARY_FEVER_BONUS
+	if bait_index == 2: chance += LEGENDARY_MOONSEED_BONUS
+	return minf(chance, LEGENDARY_CHANCE_CAP)
 
 func _pick_cast_candidate(apply_rescue := false) -> Dictionary:
 	# Keep the explicit legendary roll as the only way a cast can become
 	# legendary; the ordinary perfect-pool pick excludes legendary entries so its
-	# small base weight cannot bypass the five-percent cap.
+	# small base weight cannot bypass the capped roll.
 	var candidate := _pick_species("PERFECT", apply_rescue, true)
-	if candidate.is_empty(): return {}
+	# No ordinary bite means no cast at all, so there is nothing for a legendary
+	# to ride on: skip the roll rather than let it fill the empty candidate.
+	if candidate.is_empty(): return candidate
 	var chance := _legendary_chance_for_cast()
 	if chance > 0.0 and rng.randf() < chance:
 		var legendary_pool: Array[Dictionary] = []
@@ -1576,14 +1632,8 @@ func _try_fish():
 		# Restrictive tide windows can leave a map with no legal species. Keep the
 		# cast idle in that state instead of charging tackle or creating an illegal
 		# catch through an empty candidate.
-		var available_pool := _species_pool()
-		var ordinary_available := false
-		for fish in available_pool:
-			if str(fish.get("rarity", "COMMON")) != "LEGENDARY":
-				ordinary_available = true
-				break
-		if available_pool.is_empty() or not ordinary_available:
-			toast = "No ordinary fish are biting under this tide"; toast_t = 2.5
+		if _ordinary_pool().is_empty():
+			toast = "No fish are biting under this tide"; toast_t = 2.5
 			return
 		var cast_cost := tackle_cost()
 		if shells < cast_cost:
@@ -1721,7 +1771,7 @@ func _process_fishing(delta: float):
 			fx.bite(fx_bite_heat, _float_screen_pos())
 			# A bite opens a short tug-of-war instead of a one-frame skill check.
 			# The fish must be controlled through several good inputs.
-			fish_hp_max = 10
+			fish_hp_max = FISH_STAMINA
 			fish_hp = fish_hp_max
 			battle_hits = 0
 			battle_required = fish_hp_max
@@ -1736,8 +1786,8 @@ func _process_fishing(delta: float):
 			gauge = 0.0
 			gauge_direction = 1.0
 			# The challenge chain sits on top of the existing tug-of-war.  A
-			# growing combo asks for more varied beats, while the line tension and
-			# stamina model below remain authoritative for the actual catch.
+			# growing combo offers more varied bonus beats, while the line tension
+			# and stamina model below remain authoritative for the actual catch.
 			challenge_strength = clampi(combo + 1, 1, 3)
 			fishing_challenge = FishingChallengeScript.new()
 			fishing_challenge.configure(challenge_strength, combo, rng.randi())
@@ -1765,7 +1815,8 @@ func _process_fishing(delta: float):
 		var countering := counter * battle_direction < -0.25
 		var straining := counter * battle_direction > 0.25
 		if fishing_challenge != null and not fishing_challenge.done:
-			# Keep the slalom lane and the visible counter prompt on one direction.
+			# The slalom lane is the counter direction already on screen, and a
+			# round's grace only runs while a pull is actually available.
 			fishing_challenge.counter_lane = -battle_direction
 			fishing_challenge.tick(delta, counter, pull_cooldown <= 0.0)
 			challenge_hint_t = maxf(0.0, challenge_hint_t-delta)
@@ -1972,7 +2023,7 @@ func _resolve_fishing_timing(position: float):
 	# Defensive compatibility path: a caller may have entered the timing state
 	# before a restrictive tide left the map with no legal species. Do not let an
 	# empty candidate reach the ledger; cancel the cast as a no-op instead.
-	if cast_candidate.is_empty() and _species_pool().is_empty():
+	if cast_candidate.is_empty() and _ordinary_pool().is_empty():
 		_reset_fishing()
 		toast = "No fish are biting under this tide"; toast_t = 2.5
 		return
@@ -2053,33 +2104,9 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	if pull_cooldown > 0.0: return
 	pull_cooldown = PULL_COOLDOWN
 
-	# Challenge beats are deliberately forgiving and resolve before the normal
-	# gauge grade.  A missed beat strains the same authoritative line model as a
-	# missed gold-zone pull; it never bypasses the existing escape/tension rules.
-	var challenge_clean := false
-	if fishing_challenge != null and not fishing_challenge.done:
-		var challenge_result: Dictionary = fishing_challenge.accept(position, counter_axis)
-		challenge_clean = bool(challenge_result.get("success", false))
-		challenge_round_event = str(challenge_result.get("event", ""))
-		challenge_hint_t = 1.1
-		if not challenge_clean:
-			# A missed bonus beat strains the line, but the authoritative gauge
-			# pull still resolves normally instead of being discarded.
-			# The normal gauge pull remains authoritative; a missed bonus beat
-			# is feedback only and must not double-penalize a valid pull.
-			shake_t = 0.24
-			_play_se("danger")
-			fx.strain(_float_screen_pos())
-			toast = "CHALLENGE MISSED!  " + challenge_round_event
-			toast_t = 1.2
-			if battle_tension >= 1.0 or battle_escape >= 1.0:
-				_resolve_fishing_timing(-1.0)
-				return
-		if bool(challenge_result.get("round_complete", false)):
-			_play_se("perfect_tug")
-
-	# A pull outside the teal band strains the line. Inside it, each successful
-	# input wears down the fish and raises the spectacle toward the final catch.
+	# The gold/teal gauge is the one rule that decides a pull. Outside the teal
+	# band the line strains; inside it, each successful input wears down the fish
+	# and raises the spectacle toward the final catch.
 	var grade := "MISS"
 	if position >= 0.42 and position <= 0.62: grade = "PERFECT"
 	elif position >= 0.26 and position <= 0.80: grade = "GOOD"
@@ -2094,15 +2121,22 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 		if battle_tension >= 1.0 or battle_escape >= 1.0:
 			_resolve_fishing_timing(-1.0)
 		return
+	# Challenge beats are a bonus on a pull that already landed: a clean beat
+	# eases the line, and a pull outside the outlined zone simply earns no bonus.
+	# A press the gauge shows as GOOD is never punished.
+	var clean_beat := false
+	if fishing_challenge != null and not fishing_challenge.done:
+		var challenge_result: Dictionary = fishing_challenge.accept(position, counter_axis)
+		challenge_round_event = str(challenge_result.get("event", ""))
+		challenge_hint_t = 1.1
+		clean_beat = bool(challenge_result.get("success", false))
 	battle_hits += 1
 	# Let each clean pull add a layer during the same encounter; the retained
 	# catch combo remains the starting energy for the next cast.
 	_music_call("set_combo", [mini(4, combo + battle_hits)])
 	if grade == "PERFECT": perfect_pulls += 1
 	fish_hp = maxi(0, fish_hp - (2 if grade == "PERFECT" else 1))
-	battle_tension = clampf(battle_tension + (PERFECT_PULL_TENSION if grade == "PERFECT" else GOOD_PULL_TENSION), 0.0, 1.0)
-	if challenge_clean:
-		battle_tension = maxf(0.0, battle_tension - CLEAN_BEAT_TENSION_RELIEF)
+	battle_tension = clampf(battle_tension + (PERFECT_PULL_TENSION if grade == "PERFECT" else GOOD_PULL_TENSION) - (CLEAN_BEAT_TENSION_RELIEF if clean_beat else 0.0), 0.0, 1.0)
 	battle_escape = maxf(0.0, battle_escape - (0.24 if grade == "PERFECT" else 0.11))
 	gauge_direction = -gauge_direction
 	shake_t = maxf(shake_t, 0.14 + battle_hits * 0.06)
@@ -2115,7 +2149,7 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 		# Preserve the strongest grade across the battle for rarity/combos.
 		_resolve_fishing_timing(0.5 if perfect_pulls * 2 >= battle_hits else 0.34)
 		return
-	toast = ("PERFECT PULL!  " if grade == "PERFECT" else "GOOD PULL!  ") + "Fish stamina %d/%d" % [fish_hp, fish_hp_max]
+	toast = ("PERFECT PULL!  " if grade == "PERFECT" else "GOOD PULL!  ") + ("CLEAN BEAT  " if clean_beat else "") + "Fish stamina %d/%d" % [fish_hp, fish_hp_max]
 	toast_t = 0.9
 
 func _se_playback() -> AudioStreamGeneratorPlayback:
@@ -2349,7 +2383,7 @@ func _load_game(path: String = SAVE_PATH):
 		# A migrated or malformed save must never leave the hero at the previous
 		# map's position (or inside a lagoon/solid). Use the map's known entry
 		# point, then fall back to the town start if a future map changes shape.
-		var safe_spawn := Vector2(510,150) if current_map == "grotto" else Vector2(400,80)
+		var safe_spawn := Vector2(510,150) if current_map == "grotto" else (Vector2(368,372) if current_map == "town" else Vector2(400,80))
 		if _walkable(safe_spawn): player = safe_spawn
 	if data.get("catches",{}) is Dictionary: catches = data.get("catches",{})
 	catch_metadata.clear()
@@ -2726,30 +2760,11 @@ func _draw_breakwater(center: Vector2) -> void:
 
 func _exit_markers() -> Array[Dictionary]:
 	# Exit markers are deliberately kept in world space so they remain visible as
-	# the camera follows the player. Their locations mirror _check_map_exit().
-	match current_map:
-		"town":
-			return [
-				{"pos":Vector2(500,441),"label":"BEACH","dir":Vector2(0,1)},
-				{"pos":Vector2(800,338),"label":"ROCKY SHORE","dir":Vector2(1,0)}
-			]
-		"beach":
-			return [
-				{"pos":Vector2(420,40),"label":"TOWN","dir":Vector2(0,-1)},
-				{"pos":Vector2(800,390),"label":"ROCKY SHORE","dir":Vector2(1,0)}
-			]
-		"rocky":
-			var rocky_markers: Array[Dictionary] = [
-				{"pos":Vector2(40,340),"label":"TOWN","dir":Vector2(-1,0)},
-				{"pos":Vector2(420,430),"label":"BEACH","dir":Vector2(0,1)}
-			]
-			if hidden_spot_unlocked:
-				rocky_markers.append({"pos":Vector2(780,460),"label":"MOONLIT GROTTO","dir":Vector2(1,0)})
-			return rocky_markers
-		"grotto":
-			return [{"pos":Vector2(40,340),"label":"ROCKY SHORE","dir":Vector2(-1,0)}]
-		_:
-			return []
+	# the camera follows the player. Their locations come from MAP_EXITS.
+	var markers: Array[Dictionary] = []
+	for entry in _map_exits():
+		markers.append({"pos":entry.marker,"label":entry.label,"dir":entry.dir})
+	return markers
 
 func _draw_exit_markers():
 	for marker in _exit_markers():
@@ -2775,6 +2790,7 @@ func _draw_map_landmarks():
 			# Moonlit Grotto is a gameplay unlock layered onto the Rocky Shore art.
 			_draw_tide_pool(Vector2(690,480),24.0,Color("#4d5fa0"),Color("#d9d2ff"))
 			draw_string(ThemeDB.fallback_font,Vector2(638,563),"Moonlit Grotto",HORIZONTAL_ALIGNMENT_CENTER,104,10,Color("#e4dcff"))
+		if current_map == "town": _draw_rumor_sources()
 		_draw_fishing_markers()
 		return
 	# Small, readable primitives make each shoreline recognizable without new art.
@@ -2854,6 +2870,29 @@ func _draw_map_landmarks():
 		var pulse := 1.0 + sin(elapsed*3.0 + p.x)*0.15
 		draw_circle(p,5.0*pulse,Color(0.91,0.81,0.47,0.85))
 		draw_arc(p,9.0*pulse,0,TAU,12,Color("#f3e2a2"),1.0)
+
+func _draw_rumor_sources() -> void:
+	# The town backdrop has no figures of its own, so Fisher Mera and the notice
+	# board are drawn over it where RUMOR_SOURCES says they can be talked to.
+	for key in RUMOR_SOURCES:
+		var p: Vector2 = RUMOR_SOURCES[key].pos
+		if key == "mera":
+			# A dark outline keeps the small figure readable on the busy cobbles.
+			draw_circle(p + Vector2(0,-12), 8.5, Color("#1f2a33"))
+			draw_rect(Rect2(p + Vector2(-9.5,-6.5), Vector2(19,20)), Color("#1f2a33"))
+			draw_circle(p + Vector2(0,-12), 7.0, Color("#e3bd83"))
+			draw_rect(Rect2(p + Vector2(-8,-5), Vector2(16,17)), Color("#3f8f96"))
+			draw_line(p + Vector2(-6,12), p + Vector2(-10,21), Color("#3d4d51"), 3.0)
+			draw_line(p + Vector2(6,12), p + Vector2(10,21), Color("#3d4d51"), 3.0)
+			draw_line(p + Vector2(7,-2), p + Vector2(16,-14), Color("#8f6e4e"), 2.0)
+		else:
+			draw_line(p + Vector2(0,14), p + Vector2(0,-4), Color("#604c3d"), 3.0)
+			draw_rect(Rect2(p + Vector2(-11,-18), Vector2(22,16)), Color("#c59b65"))
+			draw_rect(Rect2(p + Vector2(-11,-18), Vector2(22,16)), Color("#6d5544"), false, 1.0)
+			draw_rect(Rect2(p + Vector2(-7,-14), Vector2(14,8)), Color("#efe2bd"))
+		if _next_unheard_rumor(str(key)) != "":
+			# A bobbing "!" says there is a new rumor to hear.
+			draw_string(ThemeDB.fallback_font, p + Vector2(-4,-24 + sin(elapsed * 3.0) * 1.5), "!", HORIZONTAL_ALIGNMENT_CENTER, 8, 13, Color("#ffe08a"))
 
 func _draw_static_map_labels() -> void:
 	# The generated background boards are intentionally blank so text stays
@@ -3067,14 +3106,14 @@ func _draw_fishing_hud():
 func _challenge_prompt() -> String:
 	if fishing_challenge == null: return ""
 	match fishing_challenge.current_game_name():
-		"SHRINKING RING": return "SPACE inside the shrinking ring"
-		"MOVING SAFE ZONE": return "SPACE while the safe zone overlaps"
+		"SHRINKING RING": return "BONUS  SPACE inside the shrinking ring"
+		"MOVING SAFE ZONE": return "BONUS  SPACE while the safe zone overlaps"
 		"TIDE SLALOM":
 			var lane: float = fishing_challenge.safe_lane()
-			if lane < -0.5: return "HOLD LEFT, then SPACE"
-			if lane > 0.5: return "HOLD RIGHT, then SPACE"
-			return "CENTER, then SPACE"
-		"FINISHING RHYTHM": return "Tap SPACE on every finishing beat"
+			if lane < -0.5: return "BONUS  keep holding LEFT, SPACE in the zone"
+			if lane > 0.5: return "BONUS  keep holding RIGHT, SPACE in the zone"
+			return "BONUS  SPACE in the zone"
+		"FINISHING RHYTHM": return "BONUS  SPACE in the zone on every beat"
 		_: return fishing_challenge.instructions()
 
 func _draw_challenge_target(pos: Vector2, size: Vector2):
@@ -3088,8 +3127,8 @@ func _draw_challenge_target(pos: Vector2, size: Vector2):
 		"MOVING SAFE ZONE": color = Color("#9fd5ac")
 		"TIDE SLALOM": color = Color("#b6b3ed")
 		"FINISHING RHYTHM": color = Color("#f2a66f")
-	# Keep the original gold/teal grade visible underneath. The outlined target
-	# makes each challenge readable even for players who ignore the text prompt.
+	# Keep the original gold/teal grade visible underneath: it alone decides the
+	# pull. The outlined target only marks where a pull also earns the bonus.
 	hud.draw_rect(Rect2(left,pos.y-2,maxf(2.0,right-left),size.y+4),Color(color,0.38))
 	hud.draw_line(Vector2(left,pos.y-4),Vector2(left,pos.y+size.y+4),color,1.0)
 	hud.draw_line(Vector2(right,pos.y-4),Vector2(right,pos.y+size.y+4),color,1.0)

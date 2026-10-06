@@ -6,7 +6,7 @@ All visuals are original primitive pixel-style shapes; no Dragon Quest, Final Fa
 
 ## Saltmere town slice (v3 local refinement)
 
-The playable slice uses a 480×270 integer-scaled viewport over the same broad 64×40 world. Original generated pixel art (`assets/`) adds a hand-authored-feeling terrain texture, three building variants, trees, rocks, reeds, well, barrels, and a 16×24 hero sprite sheet with four facing directions and four walking frames. The town route runs from the plaza down a cobbled path to the pier; shallow water and building footprints have collision, while the pier remains a valid fishing route.
+The playable slice uses a 480×270 integer-scaled viewport over the same broad 64×40 world. Original generated pixel art (`assets/`) adds a hand-authored-feeling terrain texture, three building variants, trees, rocks, reeds, well, barrels, and a 16×24 hero sprite sheet with four facing directions and four walking frames. Saltmere town uses the approved pixel-art backdrop (`assets/maps/saltmere_town.png`): the plaza, the quay along the harbour wall, Old Salt Pier and the east sand are walkable, while buildings, gardens, the fountain and water have collision. Casts are made from the quay edge or anywhere on the pier.
 
 ## Fishing battle
 
@@ -37,7 +37,7 @@ XDG_DATA_HOME=/tmp/godot-data XDG_CACHE_HOME=/tmp/godot-cache XDG_CONFIG_HOME=/t
 
 ## Three-map slice
 
-The first connected region has three focused maps: Saltmere town, Amber beach, and Rocky shore. Exits connect town south to beach north, town east to rocky west, and beach east to rocky shore (with matching return entrances). A short pixel fade runs during each transition. The active map is written into the save file alongside day, time, fish count, catch ledger, and player position; older saves default to town.
+The first connected region has three focused maps: Saltmere town, Amber beach, and Rocky shore. Exits connect town to beach north and to rocky west, and beach east to rocky shore (with matching return entrances). Both town exits leave by the sand at the east end of the quay: off the east edge for the rocky shore, down onto the east beach for Amber Beach. A short pixel fade runs during each transition. The active map is written into the save file alongside day, time, fish count, catch ledger, and player position; older saves default to town.
 
 NPC schedules, quests, and the wider offshore/lighthouse progression remain future work.
 
