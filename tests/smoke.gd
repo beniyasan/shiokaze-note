@@ -465,6 +465,26 @@ func run():
 				if str(back.to) == map_name: way_back = true
 			check(clear,'spawn is walkable and outside every trigger: '+route)
 			check(way_back,'destination has a return exit: '+route)
+	# Every painted signboard carries its whole name, centred on the board.
+	check(game._static_map_signs('town').is_empty() and game._static_map_signs('beach').size()==3 and game._static_map_signs('rocky').size()==4 and game._static_map_signs('grotto').size()==1,'each art map lists its signboards')
+	for map_name in ['beach','rocky','grotto']:
+		for sign_entry in game._static_map_signs(map_name):
+			var sign_layout: Dictionary = game._static_sign_layout(sign_entry)
+			if not sign_layout.on_board:
+				check(sign_layout.pos.x>=0.0 and sign_layout.pos.x+sign_layout.width<=game.WORLD_SIZE.x,'%s caption stays inside the world' % sign_entry.text)
+				continue
+			var sign_board: Rect2 = sign_layout.board
+			check(sign_layout.pos.x>=sign_board.position.x+game.STATIC_SIGN_MARGIN-0.5 and sign_layout.pos.x+sign_layout.width<=sign_board.end.x-game.STATIC_SIGN_MARGIN+0.5,'%s fits on its signboard' % sign_entry.text)
+			check(absf(sign_layout.pos.x+sign_layout.width*0.5-sign_board.get_center().x)<=1.0 and sign_layout.pos==sign_layout.pos.round() and sign_layout.pos.y>sign_board.position.y and sign_layout.pos.y<sign_board.end.y,'%s is centred on its signboard' % sign_entry.text)
+			check(sign_layout.size>=game.STATIC_SIGN_MIN_FONT_SIZE,'%s stays at a readable size' % sign_entry.text)
+	# Every exit signpost fits its whole label and stays inside the world.
+	for map_name in game.MAP_EXITS:
+		game.current_map=map_name; game._build_map(map_name)
+		for marker in game._exit_markers():
+			var board: Rect2 = game._exit_sign_board(marker)
+			var text_width: float = game._exit_sign_text_width(marker.label)
+			check(text_width>0.0 and board.size.x>=text_width+game.EXIT_SIGN_PADDING*2.0-0.5,'%s sign in %s is wide enough for its label' % [marker.label, map_name])
+			check(board.position.x>=0.0 and board.end.x<=game.WORLD_SIZE.x,'%s sign in %s stays inside the world' % [marker.label, map_name])
 	game.hidden_spot_unlocked=unlocked_before
 	# Each map exposes named, local fishing landmarks as well as its shoreline.
 	game.current_map='beach'; game._build_map('beach'); game.player=Vector2(205,157)

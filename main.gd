@@ -2766,6 +2766,21 @@ func _exit_markers() -> Array[Dictionary]:
 		markers.append({"pos":entry.marker,"label":entry.label,"dir":entry.dir})
 	return markers
 
+const EXIT_SIGN_FONT_SIZE := 8
+const EXIT_SIGN_PADDING := 5.0
+
+func _exit_sign_text_width(label: String) -> float:
+	return ThemeDB.fallback_font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, EXIT_SIGN_FONT_SIZE).x
+
+# The board is as wide as its label needs (never narrower than the original
+# 54px) and slides sideways to stay inside the world, so a long name or a
+# signpost at the map edge is never cut off. The post stays on the marker.
+func _exit_sign_board(marker: Dictionary) -> Rect2:
+	var p: Vector2 = marker.pos
+	var width := maxf(54.0, ceilf(_exit_sign_text_width(str(marker.label))) + EXIT_SIGN_PADDING * 2.0)
+	var left := clampf(p.x - width * 0.5, 2.0, WORLD_SIZE.x - 2.0 - width)
+	return Rect2(Vector2(left, p.y - 19.0), Vector2(width, 12.0))
+
 func _draw_exit_markers():
 	for marker in _exit_markers():
 		var p: Vector2 = marker.pos
@@ -2773,7 +2788,7 @@ func _draw_exit_markers():
 		# A small pixel signpost with a directional chevron. It uses the same
 		# muted wood/ink palette as the existing sign prop.
 		draw_line(p + Vector2(0,10), p + Vector2(0,-7), Color("#604c3d"), 2.0)
-		var board := Rect2(p + Vector2(-27,-19), Vector2(54,12))
+		var board := _exit_sign_board(marker)
 		draw_rect(board, Color("#c59b65"))
 		draw_rect(board.grow(-1), Color("#6d5544"), false, 1.0)
 		var tip := p + d * 9.0
@@ -2781,17 +2796,19 @@ func _draw_exit_markers():
 		var right := tip - d * 5.0 - Vector2(-d.y,d.x) * 4.0
 		draw_line(tip,left,Color("#f0dcaa"),2.0)
 		draw_line(tip,right,Color("#f0dcaa"),2.0)
-		draw_string(ThemeDB.fallback_font, p + Vector2(-24,-10), str(marker.label), HORIZONTAL_ALIGNMENT_CENTER, 48, 8, Color("#3f4038"))
+		draw_string(ThemeDB.fallback_font, Vector2(board.position.x + EXIT_SIGN_PADDING, p.y - 10.0), str(marker.label), HORIZONTAL_ALIGNMENT_CENTER, board.size.x - EXIT_SIGN_PADDING * 2.0, EXIT_SIGN_FONT_SIZE, Color("#3f4038"))
 
 func _draw_map_landmarks():
 	if _using_static_map_art():
-		_draw_static_map_labels()
 		if current_map == "rocky" and hidden_spot_unlocked:
 			# Moonlit Grotto is a gameplay unlock layered onto the Rocky Shore art.
 			_draw_tide_pool(Vector2(690,480),24.0,Color("#4d5fa0"),Color("#d9d2ff"))
 			draw_string(ThemeDB.fallback_font,Vector2(638,563),"Moonlit Grotto",HORIZONTAL_ALIGNMENT_CENTER,104,10,Color("#e4dcff"))
 		if current_map == "town": _draw_rumor_sources()
+		# Several fishing spots sit on a signboard, so the names go on last and
+		# the pulsing marker never covers their letters.
 		_draw_fishing_markers()
+		_draw_static_map_labels()
 		return
 	# Small, readable primitives make each shoreline recognizable without new art.
 	if current_map == "rocky":
@@ -2894,33 +2911,67 @@ func _draw_rumor_sources() -> void:
 			# A bobbing "!" says there is a new rumor to hear.
 			draw_string(ThemeDB.fallback_font, p + Vector2(-4,-24 + sin(elapsed * 3.0) * 1.5), "!", HORIZONTAL_ALIGNMENT_CENTER, 8, 13, Color("#ffe08a"))
 
+# Blank signboards painted into the 1024x640 map art, with the text drawn on
+# them at runtime so it stays dynamic and localized. "board" is the wooden face
+# of a sign measured from the art, inside its dark outline; an entry with only
+# "pos" is a caption with no board behind it.
+const STATIC_MAP_SIGNS := {
+	"beach": [
+		{"board":Rect2(166,138,74,28),"text":"North Tide Pool"},
+		{"board":Rect2(835,263,79,29),"text":"Driftwood Cove"},
+		{"board":Rect2(687,346,73,29),"text":"South Tide Pool"}
+	],
+	"rocky": [
+		{"board":Rect2(460,127,75,24),"text":"Blackglass Pool"},
+		{"board":Rect2(734,225,84,28),"text":"Stone Breakwater"},
+		{"board":Rect2(568,349,77,28),"text":"Gull's Pool"},
+		{"pos":Vector2(948,112),"text":"Farwatch Lighthouse"}
+	],
+	"grotto": [
+		{"board":Rect2(257,144,69,25),"text":"Moonlit Grotto"}
+	]
+}
+const STATIC_SIGN_FONT_SIZE := 10
+const STATIC_SIGN_MIN_FONT_SIZE := 7
+const STATIC_SIGN_MARGIN := 3.0
+
+func _static_map_signs(map_name: String = "") -> Array:
+	# Saltmere's approved town art has no blank boards, so town has no entries.
+	return STATIC_MAP_SIGNS.get(current_map if map_name.is_empty() else map_name, [])
+
+# Where and how large a sign's text is drawn: centred on its board, in the
+# largest size that fits inside the board's margins.
+func _static_sign_layout(entry: Dictionary) -> Dictionary:
+	var font := ThemeDB.fallback_font
+	var text := str(entry.text)
+	var size := STATIC_SIGN_FONT_SIZE
+	if not entry.has("board"):
+		var caption_width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+		var anchor := _map_art_point(entry.pos)
+		return {"pos":Vector2(anchor.x - caption_width * 0.5, anchor.y).round(), "width":caption_width, "size":size, "on_board":false}
+	var corner := _map_art_point(entry.board.position)
+	var board := Rect2(corner, _map_art_point(entry.board.end) - corner)
+	var width := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	while width > board.size.x - STATIC_SIGN_MARGIN * 2.0 and size > STATIC_SIGN_MIN_FONT_SIZE:
+		size -= 1
+		width = font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
+	var centre := board.get_center()
+	# The baseline sits a little below the middle so the letters look centred.
+	# Snapping to whole pixels keeps small text crisp and evenly spaced on the
+	# board instead of drifting by a fraction of a pixel.
+	var baseline := centre.y + (font.get_ascent(size) - font.get_descent(size)) * 0.5
+	return {"pos":Vector2(centre.x - width * 0.5, baseline).round(), "width":width, "size":size, "on_board":true, "board":board}
+
 func _draw_static_map_labels() -> void:
-	# The generated background boards are intentionally blank so text stays
-	# dynamic and localized. These coordinates match the 1024x640 map art.
-	var labels: Array[Dictionary] = []
-	if current_map == "town":
-		# Saltmere's approved town board is intentionally unlabelled. Keep the
-		# live pier marker below, while rumor/NPC prompts remain HUD-driven.
-		labels = []
-	elif current_map == "beach":
-		labels = [
-			{"pos":Vector2(205,157),"text":"North Tide Pool"},
-			{"pos":Vector2(873,285),"text":"Driftwood Cove"},
-			{"pos":Vector2(725,370),"text":"South Tide Pool"}
-		]
-	elif current_map == "rocky":
-		labels = [
-			{"pos":Vector2(497,151),"text":"Blackglass Pool"},
-			{"pos":Vector2(773,248),"text":"Stone Breakwater"},
-			{"pos":Vector2(614,375),"text":"Gull's Pool"},
-			{"pos":Vector2(953,112),"text":"Farwatch Lighthouse"}
-		]
-	else:
-		labels = [{"pos":Vector2(292,176),"text":"Moonlit Grotto"}]
-	for entry in labels:
-		var p := _map_art_point(entry.pos)
+	for entry in _static_map_signs():
+		var layout := _static_sign_layout(entry)
 		var text := str(entry.text)
-		draw_string(ThemeDB.fallback_font,p,text,HORIZONTAL_ALIGNMENT_CENTER,100.0 * WORLD_SIZE.x / 1024.0,10,Color("#2b3031"))
+		if bool(layout.on_board):
+			draw_string(ThemeDB.fallback_font, layout.pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, int(layout.size), Color("#2b3031"))
+		else:
+			# A caption over open terrain needs its own contrast.
+			draw_string(ThemeDB.fallback_font, layout.pos + Vector2(1,1), text, HORIZONTAL_ALIGNMENT_LEFT, -1, int(layout.size), Color(0.08,0.11,0.13,0.85))
+			draw_string(ThemeDB.fallback_font, layout.pos, text, HORIZONTAL_ALIGNMENT_LEFT, -1, int(layout.size), Color("#f1e3ba"))
 
 func _map_art_point(point: Vector2) -> Vector2:
 	# Generated maps are authored at 1024x640. Keep labels locked to the same
