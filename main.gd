@@ -60,7 +60,7 @@ const WEATHER_NAMES := ["clear", "overcast", "rain", "storm"]
 const SEASON_NAMES := ["spring", "summer", "autumn", "winter"]
 const WEATHER_CYCLE := ["clear", "clear", "overcast", "rain", "clear", "storm", "overcast"]
 var notebook_open := false
-var toast := "Follow the path east, then south to the pier"
+var toast := "Walk east along the quay, then out onto the pier"
 var toast_t := 5.0
 var rng := RandomNumberGenerator.new()
 var cam := Camera2D.new()
@@ -285,6 +285,10 @@ func _music_call(method: String, args: Array = []) -> void:
 func _ready():
 	texture_filter = CanvasItem.TEXTURE_FILTER_NEAREST
 	terrain = load("res://assets/terrain.png")
+	# Saltmere town uses the approved pixel-art backdrop at the same 1024×640
+	# world resolution as the shoreline maps. Its walkable area, exits and rumor
+	# sources are authored against that art (TOWN_WALK, MAP_EXITS, RUMOR_SOURCES).
+	map_art["town"] = load("res://assets/maps/saltmere_town.png")
 	map_art["beach"] = load("res://assets/maps/amber_beach.png")
 	map_art["rocky"] = load("res://assets/maps/rocky_shore.png")
 	map_art["grotto"] = load("res://assets/maps/moonlit_grotto.png")
@@ -551,6 +555,44 @@ func _build_map(map_name: String):
 	else:
 		_build_town()
 
+# Saltmere town follows the approved backdrop (assets/maps/saltmere_town.png):
+# the hero may stand anywhere inside these rectangles and outside the solids.
+# Coordinates are read off the 1024x640 art, so the cobbles, quay, pier and the
+# east sand are walkable while roofs, gardens, walls and water are not.
+const TOWN_WALK: Array[Rect2] = [
+	Rect2(348,200,342,198), # plaza between the inn, the fountain and the market
+	Rect2(262,322,90,76),   # cobbles south-west of the plaza
+	Rect2(100,364,880,34),  # quay along the harbour wall
+	Rect2(470,392,86,186),  # Old Salt Pier
+	Rect2(978,348,42,50),   # sand at the east end of the quay
+	Rect2(944,388,28,84),   # sand path down to the east beach
+	Rect2(946,460,74,20),
+	Rect2(966,470,54,80)    # east beach
+]
+const TOWN_SOLIDS: Array[Rect2] = [
+	Rect2(442,236,128,84),  # fountain and its flower ring
+	Rect2(354,236,18,20),   # west banner lamp
+	Rect2(627,240,16,18),   # east banner lamp
+	Rect2(332,296,34,26),   # shrub beside the west planter
+	Rect2(332,334,68,24),   # west planter bench
+	Rect2(602,296,56,62),   # east planters
+	Rect2(394,368,24,22),   # shrub on the quay
+	Rect2(668,200,24,48),   # shrub at the market corner
+	Rect2(584,204,12,8)     # notice board post
+]
+
+func _town_walkable(feet: Rect2) -> bool:
+	for c in [feet.position,feet.position+Vector2(8,0),feet.end,feet.position+Vector2(0,5)]:
+		var inside := false
+		for zone in TOWN_WALK:
+			if zone.has_point(c):
+				inside = true
+				break
+		if not inside: return false
+	for body in TOWN_SOLIDS:
+		if body.intersects(feet): return false
+	return true
+
 func _build_town():
 	landmarks = [{"kind":"pier","pos":Vector2(502,500),"label":"Old Salt Pier"}]
 	_add_prop("inn", Vector2(240,322), Rect2(-32,-40,64,37))
@@ -655,10 +697,10 @@ func _shore(x: float) -> float:
 func _walkable(pos: Vector2) -> bool:
 	# Feet collision: canopy overlap is intentional for top-down depth.
 	var feet := Rect2(pos-Vector2(4,3),Vector2(8,5))
+	# Town is authored against its backdrop; the other maps end at a shoreline.
+	if current_map == "town": return _town_walkable(feet)
 	for c in [feet.position,feet.position+Vector2(8,0),feet.end,feet.position+Vector2(0,5)]:
-		# The pier only exists in town; other maps end at their shoreline.
-		var on_pier: bool = current_map == "town" and c.x >= 486 and c.x <= 518 and c.y >= 440 and c.y <= 545
-		if not on_pier and (c.x < 28 or c.x >= 828 or c.y < 28 or c.y >= _shore(c.x)-4): return false
+		if c.x < 28 or c.x >= 828 or c.y < 28 or c.y >= _shore(c.x)-4: return false
 	for body in solids:
 		if body.intersects(feet): return false
 	return true
@@ -775,20 +817,21 @@ func _float_screen_pos() -> Vector2:
 # checks in tests/smoke.gd).
 const MAP_EXITS := {
 	"town": [
-		# The south road runs straight onto Old Salt Pier, so the beach gate sits
-		# on the sand just east of it rather than across the road.
-		{"to":"beach","zone":Rect2(528,448,56,32),"spawn":Vector2(400,80),"marker":Vector2(556,440),"label":"BEACH","dir":Vector2(0,1)},
-		{"to":"rocky","zone":Rect2(798,250,62,180),"spawn":Vector2(90,340),"marker":Vector2(800,338),"label":"ROCKY SHORE","dir":Vector2(1,0)}
+		# Both routes leave by the sand at the east end of the quay, well clear of
+		# Old Salt Pier: down onto the east beach for Amber Beach, off the east
+		# edge for the rocky shore.
+		{"to":"beach","zone":Rect2(962,514,62,40),"spawn":Vector2(400,80),"marker":Vector2(992,504),"label":"BEACH","dir":Vector2(0,1)},
+		{"to":"rocky","zone":Rect2(1006,340,18,62),"spawn":Vector2(90,340),"marker":Vector2(1000,356),"label":"ROCKY SHORE","dir":Vector2(1,0)}
 	],
 	"beach": [
-		{"to":"town","zone":Rect2(280,0,280,34),"spawn":Vector2(556,430),"marker":Vector2(420,40),"label":"TOWN","dir":Vector2(0,-1)},
+		{"to":"town","zone":Rect2(280,0,280,34),"spawn":Vector2(992,486),"marker":Vector2(420,40),"label":"TOWN","dir":Vector2(0,-1)},
 		{"to":"rocky","zone":Rect2(798,280,62,280),"spawn":Vector2(420,440),"marker":Vector2(800,390),"label":"ROCKY SHORE","dir":Vector2(1,0)}
 	],
 	"rocky": [
 		# Keep the legacy pool at (690,480) fishable; the grotto gate is farther
 		# east on the same bank so merely approaching the pool cannot transition.
 		{"to":"grotto","zone":Rect2(760,450,100,50),"spawn":Vector2(510,150),"marker":Vector2(780,460),"label":"MOONLIT GROTTO","dir":Vector2(1,0),"needs_grotto":true},
-		{"to":"town","zone":Rect2(0,250,34,180),"spawn":Vector2(760,340),"marker":Vector2(40,340),"label":"TOWN","dir":Vector2(-1,0)},
+		{"to":"town","zone":Rect2(0,250,34,180),"spawn":Vector2(986,378),"marker":Vector2(40,340),"label":"TOWN","dir":Vector2(-1,0)},
 		# A narrow gate at the water's edge: the rest of the lower bank stays
 		# walkable and fishable.
 		{"to":"beach","zone":Rect2(390,470,60,40),"spawn":Vector2(770,390),"marker":Vector2(420,458),"label":"BEACH","dir":Vector2(0,1)}
@@ -840,10 +883,16 @@ func _transition_to(map_name: String, spawn: Vector2):
 	toast = "Travelling to " + map_name.capitalize() + "..."; toast_t = 1.0
 
 func _can_fish() -> bool:
+	return _can_fish_at(player)
+
+func _can_fish_at(pos: Vector2) -> bool:
 	for spot in _fishing_spots():
-		if player.distance_to(spot.pos) <= 24.0: return true
+		if pos.distance_to(spot.pos) <= 24.0: return true
 	if current_map == "grotto": return false
-	return (player.y >= _shore(player.x)-21 and player.x>70 and player.x<810)
+	# Town casts from the harbour edge: the quay's seaward strip or anywhere on
+	# the pier. The east sand is the way out, not a fishing bank.
+	if current_map == "town": return pos.y >= 380.0 and pos.x < 940.0
+	return (pos.y >= _shore(pos.x)-21 and pos.x>70 and pos.x<810)
 
 func _fishing_spots() -> Array[Dictionary]:
 	match current_map:
@@ -868,8 +917,8 @@ const HIDDEN_SPOT_COLLECTION_PERCENT := 25
 const RUMOR_TALK_RADIUS := 34.0
 const TIME_NAMES := ["dawn", "day", "dusk", "night"]
 const RUMOR_SOURCES := {
-	"mera": {"label":"Fisher Mera", "pos":Vector2(424,381), "rumors":["grotto", "Moonfish", "Night angler", "Storm tuna", "Ghost fish"]},
-	"notice": {"label":"Weathered notice", "pos":Vector2(468,381), "rumors":["grotto", "Fire scorpionfish", "Crystal fish", "Twilight salmon", "Lantern fish"]}
+	"mera": {"label":"Fisher Mera", "pos":Vector2(428,342), "rumors":["grotto", "Moonfish", "Night angler", "Storm tuna", "Ghost fish"]},
+	"notice": {"label":"Weathered notice", "pos":Vector2(590,212), "rumors":["grotto", "Fire scorpionfish", "Crystal fish", "Twilight salmon", "Lantern fish"]}
 }
 
 func collection_discovered_count() -> int:
@@ -2334,7 +2383,7 @@ func _load_game(path: String = SAVE_PATH):
 		# A migrated or malformed save must never leave the hero at the previous
 		# map's position (or inside a lagoon/solid). Use the map's known entry
 		# point, then fall back to the town start if a future map changes shape.
-		var safe_spawn := Vector2(510,150) if current_map == "grotto" else Vector2(400,80)
+		var safe_spawn := Vector2(510,150) if current_map == "grotto" else (Vector2(368,372) if current_map == "town" else Vector2(400,80))
 		if _walkable(safe_spawn): player = safe_spawn
 	if data.get("catches",{}) is Dictionary: catches = data.get("catches",{})
 	catch_metadata.clear()
@@ -2516,6 +2565,22 @@ func _draw():
 
 func _draw_map_background() -> void:
 	match current_map:
+		"town":
+			var town_art: Texture2D = map_art.get("town")
+			if town_art != null:
+				draw_texture_rect(town_art,Rect2(Vector2.ZERO,WORLD_SIZE),false)
+			else:
+				draw_texture(terrain,Vector2.ZERO)
+				# Town's fallback terrain sheet has the authored shoreline, so keep
+				# the restrained animated highlights when the backdrop is missing.
+				for x in range(32,819,24):
+					var y := _shore(x) + 3 + int(sin(elapsed*1.5+x)*2)
+					draw_line(Vector2(x,y),Vector2(x+12,y),Color("#c4dbc1"))
+				for i in range(28):
+					var x := 50+i*33
+					var y := 558+(i%4)*18
+					var drift := int(sin(elapsed+i)*3)
+					draw_line(Vector2(x+drift,y),Vector2(x+drift+6,y),Color("#64a2a5"))
 		"beach":
 			var beach_art: Texture2D = map_art.get("beach")
 			if beach_art != null:
@@ -2536,16 +2601,6 @@ func _draw_map_background() -> void:
 				_draw_rocky_background()
 		_:
 			draw_texture(terrain,Vector2.ZERO)
-			# Town's hand-authored sheet already contains the shoreline, but a few
-			# restrained highlights keep it alive beside the newer map backdrops.
-			for x in range(32,819,24):
-				var y := _shore(x) + 3 + int(sin(elapsed*1.5+x)*2)
-				draw_line(Vector2(x,y),Vector2(x+12,y),Color("#c4dbc1"))
-			for i in range(28):
-				var x := 50+i*33
-				var y := 558+(i%4)*18
-				var drift := int(sin(elapsed+i)*3)
-				draw_line(Vector2(x+drift,y),Vector2(x+drift+6,y),Color("#64a2a5"))
 
 func _using_static_map_art() -> bool:
 	return map_art.get(current_map) is Texture2D
@@ -2735,6 +2790,7 @@ func _draw_map_landmarks():
 			# Moonlit Grotto is a gameplay unlock layered onto the Rocky Shore art.
 			_draw_tide_pool(Vector2(690,480),24.0,Color("#4d5fa0"),Color("#d9d2ff"))
 			draw_string(ThemeDB.fallback_font,Vector2(638,563),"Moonlit Grotto",HORIZONTAL_ALIGNMENT_CENTER,104,10,Color("#e4dcff"))
+		if current_map == "town": _draw_rumor_sources()
 		_draw_fishing_markers()
 		return
 	# Small, readable primitives make each shoreline recognizable without new art.
@@ -2815,11 +2871,38 @@ func _draw_map_landmarks():
 		draw_circle(p,5.0*pulse,Color(0.91,0.81,0.47,0.85))
 		draw_arc(p,9.0*pulse,0,TAU,12,Color("#f3e2a2"),1.0)
 
+func _draw_rumor_sources() -> void:
+	# The town backdrop has no figures of its own, so Fisher Mera and the notice
+	# board are drawn over it where RUMOR_SOURCES says they can be talked to.
+	for key in RUMOR_SOURCES:
+		var p: Vector2 = RUMOR_SOURCES[key].pos
+		if key == "mera":
+			# A dark outline keeps the small figure readable on the busy cobbles.
+			draw_circle(p + Vector2(0,-12), 8.5, Color("#1f2a33"))
+			draw_rect(Rect2(p + Vector2(-9.5,-6.5), Vector2(19,20)), Color("#1f2a33"))
+			draw_circle(p + Vector2(0,-12), 7.0, Color("#e3bd83"))
+			draw_rect(Rect2(p + Vector2(-8,-5), Vector2(16,17)), Color("#3f8f96"))
+			draw_line(p + Vector2(-6,12), p + Vector2(-10,21), Color("#3d4d51"), 3.0)
+			draw_line(p + Vector2(6,12), p + Vector2(10,21), Color("#3d4d51"), 3.0)
+			draw_line(p + Vector2(7,-2), p + Vector2(16,-14), Color("#8f6e4e"), 2.0)
+		else:
+			draw_line(p + Vector2(0,14), p + Vector2(0,-4), Color("#604c3d"), 3.0)
+			draw_rect(Rect2(p + Vector2(-11,-18), Vector2(22,16)), Color("#c59b65"))
+			draw_rect(Rect2(p + Vector2(-11,-18), Vector2(22,16)), Color("#6d5544"), false, 1.0)
+			draw_rect(Rect2(p + Vector2(-7,-14), Vector2(14,8)), Color("#efe2bd"))
+		if _next_unheard_rumor(str(key)) != "":
+			# A bobbing "!" says there is a new rumor to hear.
+			draw_string(ThemeDB.fallback_font, p + Vector2(-4,-24 + sin(elapsed * 3.0) * 1.5), "!", HORIZONTAL_ALIGNMENT_CENTER, 8, 13, Color("#ffe08a"))
+
 func _draw_static_map_labels() -> void:
 	# The generated background boards are intentionally blank so text stays
 	# dynamic and localized. These coordinates match the 1024x640 map art.
 	var labels: Array[Dictionary] = []
-	if current_map == "beach":
+	if current_map == "town":
+		# Saltmere's approved town board is intentionally unlabelled. Keep the
+		# live pier marker below, while rumor/NPC prompts remain HUD-driven.
+		labels = []
+	elif current_map == "beach":
 		labels = [
 			{"pos":Vector2(205,157),"text":"North Tide Pool"},
 			{"pos":Vector2(873,285),"text":"Driftwood Cove"},
