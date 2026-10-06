@@ -1296,10 +1296,16 @@ func run():
 	land_fish.call('RARE')
 	for frame in range(30): game._process_fishing(1.0/60.0)
 	check(game.reveal_t>0.3 and game.reveal_t<0.82 and not fx.gacha.is_empty(),'a reveal is under way, before its charge')
+	# Force rolls the default would rarely give, so a reroll could not pass by luck.
+	fx.gacha.style='thunder'; fx.gacha.variant=2; fx.gacha.festival=true; fx.gacha.seed=424242
+	var saved_roll: Dictionary = fx.gacha_roll()
 	game._save_game('res://.smoke-gacha-mid.json')
 	game._reset_fishing(); fx.counters.clear(); fx.sounds.clear()
 	game._load_game('res://.smoke-gacha-mid.json')
 	check(game.catch_choice_pending() and not fx.gacha.is_empty() and float(fx.gacha.flip_t)<0.0 and float(fx.gacha.charge_t)<0.0 and fx.GACHA_STYLES.has(fx.gacha.style) and not game.gacha_flip_buffer.is_empty(),'loading a face-down reveal brings the gacha show back')
+	check(saved_roll=={'style':'thunder','variant':2,'festival':true,'seed':424242} and fx.gacha_roll()==saved_roll and int(fx.counters.get('gacha_resume',0))==1 and int(fx.counters.get('gacha_begin',0))==0 and fx.sounds.is_empty() and float(fx.gacha.t)>0.3,'the restored pull is the same one: same style, melody, festival and seed, with no reroll and no opening sound')
+	var resumed_turn: PackedFloat32Array = game._render_se(game._gacha_flip_notes(2, 2, 3, fx.firework_times(2, true)), [[0.09, 0.22]], game.GACHA_SE_MAX_SECONDS)
+	check(game.gacha_flip_buffer.size()==resumed_turn.size(),'the restored pull turns with its own melody and festival fireworks')
 	for frame in range(200):
 		if game.reveal_t >= game._reveal_face_time(): break
 		game._process_fishing(1.0/60.0); fx.update(1.0/60.0)
@@ -1324,6 +1330,34 @@ func run():
 	game._process_fishing(0.5); fx.update(0.5)
 	check(not fx.sounds.has('gacha_flip') and not fx.sounds.has('flip2'),'the restored card does not turn a second time')
 	game._reset_fishing()
+	# Saves without usable rolls fall back to a fresh draw rather than no show.
+	check(not fx.gacha_resume({}, 0.2) and not fx.gacha_resume({'style':'volcano','variant':1}, 0.2),'unknown or missing saved rolls are refused')
+	land_fish.call('RARE')
+	for frame in range(30): game._process_fishing(1.0/60.0)
+	game._save_game('res://.smoke-gacha-old.json')
+	var old_save = JSON.parse_string(FileAccess.get_file_as_string('res://.smoke-gacha-old.json'))
+	old_save.erase('gacha')
+	var old_file := FileAccess.open('res://.smoke-gacha-old.json', FileAccess.WRITE); old_file.store_string(JSON.stringify(old_save)); old_file.close()
+	game._reset_fishing(); fx.counters.clear()
+	game._load_game('res://.smoke-gacha-old.json')
+	check(not fx.gacha.is_empty() and int(fx.counters.get('gacha_begin',0))==1 and int(fx.counters.get('gacha_resume',0))==0,'a save from before the rolls were stored draws a new pull')
+	game._reset_fishing()
+	check(fx.gacha_roll().is_empty(),'nothing is saved for the gacha outside a reveal')
+	# Every firework of the longest finale gets its full time on screen.
+	fx.gacha_begin(); fx.gacha.festival=true; fx.reveal_flip(3,false,false)
+	var launches: Array = fx.firework_times(3, true)
+	var shown_all := true; var last_launch: float = launches[launches.size()-1]
+	for show in fx.gacha.fireworks:
+		fx.gacha.flip_t = float(show.at) + fx.GACHA_FIREWORK_LIFE * 0.5
+		if not is_equal_approx(fx.firework_progress(show), 0.5): shown_all = false
+		fx.gacha.flip_t = float(show.at) + fx.GACHA_FIREWORK_LIFE - 0.01
+		if fx.firework_progress(show) < 0.95: shown_all = false
+		fx.gacha.flip_t = float(show.at) - 0.01
+		if fx.firework_progress(show) >= 0.0: shown_all = false
+	check(shown_all and fx.gacha.fireworks.size()==18 and last_launch>fx.GACHA_FIREWORK_LIFE,'every firework is on screen for its full life, however late it launches (last at %.2fs)' % last_launch)
+	fx.gacha.flip_t = last_launch + fx.GACHA_FIREWORK_LIFE + 0.01
+	check(fx.gacha.fireworks.all(func(show): return fx.firework_progress(show) < 0.0),'the finale is over once the last firework has burned out')
+	fx.clear_show(); fx.flash_log.clear()
 	# LEGENDARY keeps its own arc.
 	land_fish.call('LEGENDARY')
 	check(game.last_rarity=='LEGENDARY' and fx.gacha.is_empty(),'a LEGENDARY catch keeps its own reveal, without the gacha')

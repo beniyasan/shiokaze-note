@@ -2631,15 +2631,17 @@ func _prepare_gacha_flip_se() -> void:
 	gacha_flip_buffer = _render_se(_gacha_flip_notes(heat, int(fx.gacha.variant), fx.gacha_star_count(heat), times), [[0.09, 0.22]], GACHA_SE_MAX_SECONDS)
 
 # Brings the gacha show back for a result card restored from a save.  A card
-# saved face-down resumes the show from where its reveal clock stands; a card
-# already turned shows its star rating without replaying the turn.
-func _restore_gacha() -> void:
+# saved face-down resumes the same pull (its style, melody and festival roll
+# are in the save) from where its reveal clock stands; a card already turned
+# shows its star rating without replaying the turn.  A save from before the
+# rolls were stored, or with rolls this build does not know, draws new ones.
+func _restore_gacha(roll: Dictionary = {}) -> void:
 	if last_rarity == "LEGENDARY" or last_rarity == "" or last_grade == "MISS": return
 	var heat := _rarity_heat(last_rarity)
 	if reveal_t >= _reveal_face_time():
 		fx.gacha_restore_turned(heat)
 		return
-	fx.gacha_begin()
+	if not fx.gacha_resume(roll, reveal_t): fx.gacha_begin()
 	fx.gacha_heat(_reveal_glow_rank_at(reveal_t))
 	_prepare_gacha_flip_se()
 	var scale := 0.62 if reveal_shortened else 1.0
@@ -2749,7 +2751,7 @@ func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		toast = "Could not save. Please check available storage."; toast_t = 4; return
-	f.store_string(JSON.stringify({"version":13,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"weather":weather,"season":season,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"heard_rumors":heard_rumors,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected,"pending_catch":pending_catch,"pending_catch_state":pending_catch_state,"last_catch_decision":last_catch_decision,"reveal_t":reveal_t,"reveal_stage":reveal_stage,"reveal_shortened":reveal_shortened,"legendary_t":legendary_t,"legendary_stage":legendary_stage,"fx_reduced":fx.reduced,"fever_announce_pending":fever_announce_pending and fever_active and catch_choice_pending()}))
+	f.store_string(JSON.stringify({"version":13,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"weather":weather,"season":season,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"heard_rumors":heard_rumors,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected,"pending_catch":pending_catch,"pending_catch_state":pending_catch_state,"last_catch_decision":last_catch_decision,"reveal_t":reveal_t,"reveal_stage":reveal_stage,"reveal_shortened":reveal_shortened,"legendary_t":legendary_t,"legendary_stage":legendary_stage,"fx_reduced":fx.reduced,"fever_announce_pending":fever_announce_pending and fever_active and catch_choice_pending(),"gacha":fx.gacha_roll() if catch_choice_pending() else {}}))
 	toast = "Saved to the tide ledger"; toast_t = 2.4
 
 func _normalize_catch_metadata(raw: Dictionary, species: String, first_capture := true) -> Dictionary:
@@ -2903,7 +2905,8 @@ func _load_game(path: String = SAVE_PATH):
 			legendary_t = clampf(float(data.get("legendary_t", 6.0 if last_rarity == "LEGENDARY" else 0.0)), 0.0, 6.0)
 			legendary_stage = clampi(int(data.get("legendary_stage", 3 if last_rarity == "LEGENDARY" and legendary_t >= 3.75 else 0)), 0, 3)
 			result_t = 999.0
-			_restore_gacha()
+			var saved_gacha = data.get("gacha", {})
+			_restore_gacha(saved_gacha if saved_gacha is Dictionary else {})
 			toast = "Catch restored / choose REGISTER or SELL"
 			toast_t = 4.0
 	rumor_found = bool(data.get("rumor_found", false))

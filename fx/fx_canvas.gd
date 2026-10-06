@@ -300,9 +300,8 @@ func _draw_gacha_back() -> void:
 	# Fireworks after the turn, across the whole screen.
 	if flipped:
 		for show in g.fireworks:
-			var age := flip_t - float(show.at)
-			if age <= 0.0 or age >= d.GACHA_FIREWORK_LIFE: continue
-			var fp := age / d.GACHA_FIREWORK_LIFE
+			var fp: float = d.firework_progress(show)
+			if fp < 0.0: continue
 			var centre: Vector2 = show.pos
 			var radius := float(show.size) * _ease_out(fp * 1.5)
 			var fade := (1.0 - fp) * k

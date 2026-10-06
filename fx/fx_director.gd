@@ -704,6 +704,37 @@ func gacha_begin() -> void:
 	_count("gacha_begin")
 	_count("gacha_style_" + str(gacha.style))
 
+# The rolls of the pull in progress, for the save file.  Empty once the card
+# has turned: there is nothing left of the show to resume.
+func gacha_roll() -> Dictionary:
+	if gacha.is_empty() or float(gacha.flip_t) >= 0.0: return {}
+	return {"style": str(gacha.style), "variant": int(gacha.variant), "festival": bool(gacha.festival), "seed": int(gacha.seed)}
+
+# Resumes a pull from its saved rolls, `elapsed` seconds into the reveal, without
+# rolling again or replaying the style's opening sound.  Returns false, leaving
+# nothing started, if the saved rolls are missing or not ones this build knows.
+func gacha_resume(roll: Dictionary, elapsed: float) -> bool:
+	if not GACHA_STYLES.has(str(roll.get("style", ""))): return false
+	gacha = {
+		"style": str(roll.style),
+		"variant": posmod(int(roll.get("variant", 0)), GACHA_FLIP_VARIANTS),
+		"festival": bool(roll.get("festival", false)),
+		"seed": int(roll.get("seed", 0)),
+		"t": maxf(0.0, elapsed), "heat": 0, "charge_t": -1.0, "charge_dur": 0.0,
+		"flip_t": -1.0, "rank": -1, "stars": 0, "fireworks": []
+	}
+	_count("gacha_resume")
+	return true
+
+# How far through its burst a firework is, 0 to 1, or -1 while it is not on
+# screen.  Each one lives GACHA_FIREWORK_LIFE from its own launch time, so the
+# late ones of a long finale are shown in full.
+func firework_progress(show: Dictionary) -> float:
+	if gacha.is_empty() or float(gacha.flip_t) < 0.0: return -1.0
+	var age := float(gacha.flip_t) - float(show.at)
+	if age <= 0.0 or age >= GACHA_FIREWORK_LIFE: return -1.0
+	return age / GACHA_FIREWORK_LIFE
+
 # A card that was already turned when it was saved: the star rating and the
 # settled halo, with no style, charge, fireworks or sound to replay.
 func gacha_restore_turned(rank: int) -> void:
