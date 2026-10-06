@@ -981,6 +981,48 @@ func run():
 	check(int(fx.counters.get('cutin_premium',0))>=1,'golden tide lands its premium cut-in')
 	fx.cue_step(3, Vector2(240,160))
 	check(int(fx.counters.get('cutin_premium',0))>=2,'after the golden tide the rainbow step stays on the gold ladder')
+	# Pull impacts: one screen-wide burst per pull, sized by the grade, and a run
+	# of PERFECT pulls climbs two more steps.
+	check(fx.impact_tier('MISS')==0 and fx.impact_tier('GOOD')==1 and fx.impact_tier('PERFECT',1)==2 and fx.impact_tier('PERFECT',2)==3 and fx.impact_tier('PERFECT',3)==4 and fx.impact_tier('PERFECT',9)==4,'pull impacts climb red, GOOD, PERFECT, then two streak steps')
+	var impact_pos := Vector2(200,150)
+	fx.clear_show(); fx.counters.clear(); fx.flash_log.clear()
+	fx.pull('GOOD',impact_pos,1,0.2)
+	var good_particles: int = fx.particles.size(); var good_shake: float = fx.shake_power; var good_stop: float = fx.hitstop_t
+	check(fx.impacts.size()==1 and fx.impacts[0].tier==1 and int(fx.counters.get('flash',0))==0 and fx.chroma()==0.0,'a GOOD pull bursts without a full-screen flash')
+	fx.clear_show(); fx.counters.clear(); fx.flash_log.clear()
+	fx.pull('PERFECT',impact_pos,1,0.2,1)
+	var perfect_particles: int = fx.particles.size(); var perfect_shake: float = fx.shake_power
+	check(fx.impacts[0].tier==2 and int(fx.counters.get('flash',0))==1 and perfect_particles>good_particles and perfect_shake>good_shake and fx.hitstop_t>good_stop,'a PERFECT pull is visibly bigger than a GOOD one')
+	fx.clear_show(); fx.counters.clear(); fx.flash_log.clear(); fx.sounds.clear()
+	fx.pull('PERFECT',impact_pos,3,0.2,3,true)
+	check(fx.impacts[0].tier==4 and fx.impacts[0].streak==3 and fx.impacts[0].clean and fx.particles.size()>perfect_particles and fx.shake_power>perfect_shake and fx.chroma()>0.0 and fx.sounds.has('streak'),'a PERFECT streak climbs to the top impact tier')
+	check(game.fx_front._impact_label(fx.impacts[0])=='PERFECT x3!!' and game.fx_front._impact_label({'tier':1,'streak':0})=='GOOD!' and game.fx_front._impact_label({'tier':0,'streak':0})=='STRAIN!','each impact names its grade')
+	check(fx.IMPACT_MAX_DUR<game.PULL_COOLDOWN and fx.IMPACT_DURS.max()<=fx.IMPACT_MAX_DUR,'every pull impact ends well inside the pull cooldown')
+	fx.update(fx.IMPACT_MAX_DUR+0.01)
+	check(fx.impacts.is_empty(),'pull impacts clear themselves')
+	fx.strain(impact_pos)
+	check(fx.impacts.size()==1 and fx.impacts[0].tier==0,'a strained pull gets the red impact')
+	# The photosensitivity budget still holds when PERFECT pulls arrive together.
+	fx.clear_show(); fx.counters.clear(); fx.flash_log.clear()
+	for i in range(6): fx.pull('PERFECT',impact_pos,i+1,0.5,i+1)
+	check(int(fx.counters.get('flash',0))==fx.FLASH_MAX_PER_WINDOW and int(fx.counters.get('flash_suppressed',0))==3 and fx.impacts.size()<=4,'stacked PERFECT pulls stay inside the flash budget')
+	fx.clear_show(); fx.flash_log.clear(); fx.reduced=true
+	fx.pull('PERFECT',impact_pos,3,0.5,3)
+	check(fx.current_flash_alpha()<=fx.FLASH_ALPHA_CAP_REDUCED and fx.chroma()==0.0 and fx.soft_overlay(0.2)==0.0,'reduced flashing dims the top-tier impact and drops its wash')
+	fx.reduced=false; fx.clear_show(); fx.flash_log.clear()
+	check(fx.impacts.is_empty(),'resetting the show clears pull impacts')
+	# The live battle feeds the streak: PERFECT pulls build it, anything else ends it.
+	game._reset_fishing(); game._break_chain(); game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530)
+	game.time_of_day=0.5; game.weather='clear'; game.season='spring'; game._try_fish(); game._process_fishing(4.0)
+	game.pull_cooldown=0.0; game._handle_fishing_strike(0.5)
+	game.pull_cooldown=0.0; game._handle_fishing_strike(0.5)
+	check(game.perfect_streak==2 and fx.impacts[fx.impacts.size()-1].tier==3,'two PERFECT pulls in a row raise the impact tier')
+	game.pull_cooldown=0.0; game._handle_fishing_strike(0.30)
+	check(game.perfect_streak==0 and fx.impacts[fx.impacts.size()-1].tier==1,'a GOOD pull ends the PERFECT streak')
+	game.pull_cooldown=0.0; game._handle_fishing_strike(0.5)
+	game.pull_cooldown=0.0; game.battle_tension=0.0; game._handle_fishing_strike(0.05)
+	check(game.perfect_streak==0 and fx.impacts[fx.impacts.size()-1].tier==0,'a strained pull ends the PERFECT streak')
+	game._reset_fishing(); fx.flash_log.clear()
 	# Resetting a cast is a hard boundary: no reveal particles, banners, shards,
 	# active flash or delayed callback may leak into the idle world/next cast.
 	fx.cast(3)

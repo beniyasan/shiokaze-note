@@ -176,6 +176,8 @@ var battle_required := 4
 var battle_elapsed := 0.0
 var pull_cooldown := 0.0
 var perfect_pulls := 0
+# Consecutive PERFECT pulls in the current battle; it scales the pull impact.
+var perfect_streak := 0
 var direction_timer := 0.0
 var battle_tension := 0.0
 var battle_escape := 0.0
@@ -1778,6 +1780,7 @@ func _process_fishing(delta: float):
 			battle_elapsed = 0.0
 			pull_cooldown = FIRST_PULL_DELAY
 			perfect_pulls = 0
+			perfect_streak = 0
 			direction_timer = 2.0
 			battle_tension = clampf(0.22 + float(BAITS[bait_index].tension_bonus), 0.0, 0.9)
 			battle_escape = 0.0
@@ -2114,6 +2117,7 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 		battle_tension = clampf(battle_tension + 0.33 * float(RODS[rod_index].tension_mult), 0.0, 1.0)
 		battle_escape = clampf(battle_escape + 0.16, 0.0, 1.0)
 		shake_t = 0.28
+		perfect_streak = 0
 		_play_se("danger")
 		fx.strain(_float_screen_pos())
 		toast = "LINE STRAIN! Counter the fish, then try again"
@@ -2135,13 +2139,14 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	# catch combo remains the starting energy for the next cast.
 	_music_call("set_combo", [mini(4, combo + battle_hits)])
 	if grade == "PERFECT": perfect_pulls += 1
+	perfect_streak = perfect_streak + 1 if grade == "PERFECT" else 0
 	fish_hp = maxi(0, fish_hp - (2 if grade == "PERFECT" else 1))
 	battle_tension = clampf(battle_tension + (PERFECT_PULL_TENSION if grade == "PERFECT" else GOOD_PULL_TENSION) - (CLEAN_BEAT_TENSION_RELIEF if clean_beat else 0.0), 0.0, 1.0)
 	battle_escape = maxf(0.0, battle_escape - (0.24 if grade == "PERFECT" else 0.11))
 	gauge_direction = -gauge_direction
 	shake_t = maxf(shake_t, 0.14 + battle_hits * 0.06)
 	_play_se("perfect_tug" if grade == "PERFECT" else "tug")
-	fx.pull(grade, _float_screen_pos(), battle_hits, 1.0 - float(fish_hp) / maxf(1.0, float(fish_hp_max)))
+	fx.pull(grade, _float_screen_pos(), battle_hits, 1.0 - float(fish_hp) / maxf(1.0, float(fish_hp_max)), perfect_streak, clean_beat)
 	if fish_hp > 0 and fish_hp <= 2 and not fx_last_pull_shown:
 		fx_last_pull_shown = true
 		fx.last_pull(fx_bite_heat, _float_screen_pos())
@@ -2228,6 +2233,9 @@ func _play_se(kind: String):
 			base = 110.0; duration = 0.13; volume = 0.42; sweep = -60.0; noise = 0.35
 		"landed":
 			base = 196.0; duration = 0.38; volume = 0.36; sweep = 200.0; tones = [392.0, 587.3]; noise = 0.2
+		"streak":
+			# A rising sting for a run of PERFECT pulls; each step climbs a tone.
+			base = 659.3 * pow(2.0, float(mini(perfect_streak, 6) - 2) / 6.0); duration = 0.3; volume = 0.3; sweep = 240.0; tones = [base * 1.25, base * 1.5, base * 2.0]; decay = 0.16
 		"snap":
 			base = 900.0; duration = 0.22; volume = 0.26; sweep = -760.0; noise = 0.6
 		"promote":
@@ -2308,6 +2316,7 @@ func _reset_fishing():
 	battle_elapsed = 0.0
 	pull_cooldown = 0.0
 	perfect_pulls = 0
+	perfect_streak = 0
 	direction_timer = 0.0
 	battle_tension = 0.0
 	battle_escape = 0.0

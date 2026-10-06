@@ -66,6 +66,7 @@ func _draw_front() -> void:
 	if d.crack_t >= 0.0: _draw_cracks()
 	for s in d.shards: _draw_shard(s)
 	for p in d.particles: _draw_particle(p)
+	for i in d.impacts: _draw_impact(i)
 	for c in d.cutins: _draw_cutin(c)
 	for p in d.pops: _draw_pop(p)
 	if d.fever_border > 0.01: _draw_fever_border(d.fever_border)
@@ -95,6 +96,107 @@ func _draw_particle(p: Dictionary) -> void:
 			if sz > 1.8 and life > 0.5:
 				draw_line(pos - Vector2(sz * 1.8, 0), pos + Vector2(sz * 1.8, 0), Color(1, 1, 0.9, life * 0.7), 1.0)
 				draw_line(pos - Vector2(0, sz * 1.8), pos + Vector2(0, sz * 1.8), Color(1, 1, 0.9, life * 0.7), 1.0)
+
+# ---- pull impacts ----------------------------------------------------------
+
+func _impact_color(tier: int, phase: float = 0.0) -> Color:
+	match tier:
+		0: return Color("#ff5a4a")
+		1: return Color("#8fe6d2")
+		2: return Color("#ffd44a")
+		3: return Color("#fff0a8")
+		_: return Color.from_hsv(fmod(director.time * 0.9 + phase, 1.0), 0.6, 1.0)
+
+func _impact_label(i: Dictionary) -> String:
+	match int(i.tier):
+		0: return "STRAIN!"
+		1: return "GOOD!"
+		2: return "PERFECT!!"
+		_: return "PERFECT x%d!!" % int(i.streak)
+
+func _draw_impact(i: Dictionary) -> void:
+	var d: FxDirector = director
+	var tier := int(i.tier)
+	var t := float(i.t)
+	var p := clampf(t / float(i.dur), 0.0, 1.0)
+	var fade := 1.0 - p
+	var pos: Vector2 = i.pos
+	# Reduced flashing keeps every shape but dims it; the full-screen wash below
+	# goes through soft_overlay() and disappears entirely.
+	var k := 0.45 if d.reduced else 1.0
+	var col := _impact_color(tier)
+	var r := RandomNumberGenerator.new()
+	r.seed = int(i.seed)
+	# Screen-edge frame: thick on the hit, gone by the end.
+	var frame_w := float([12, 6, 12, 16, 20][tier]) * fade + 1.0
+	var frame_a := float([0.6, 0.4, 0.65, 0.75, 0.85][tier]) * fade * k
+	for band in range(3):
+		var inset := float(band) * frame_w * 0.5
+		var band_w := frame_w * 0.5
+		var band_a := frame_a * (1.0 - float(band) / 3.0)
+		var r_band := Rect2(inset, inset, W - inset * 2.0, H - inset * 2.0)
+		if tier >= 4:
+			# The top tier wraps the screen in four hues at once, so it reads as
+			# a rainbow on any single frame rather than one colour at a time.
+			draw_rect(Rect2(r_band.position, Vector2(r_band.size.x, band_w)), Color(_impact_color(tier, 0.0), band_a))
+			draw_rect(Rect2(r_band.position + Vector2(r_band.size.x - band_w, band_w), Vector2(band_w, r_band.size.y - band_w * 2.0)), Color(_impact_color(tier, 0.25), band_a))
+			draw_rect(Rect2(r_band.position + Vector2(0, r_band.size.y - band_w), Vector2(r_band.size.x, band_w)), Color(_impact_color(tier, 0.5), band_a))
+			draw_rect(Rect2(r_band.position + Vector2(0, band_w), Vector2(band_w, r_band.size.y - band_w * 2.0)), Color(_impact_color(tier, 0.75), band_a))
+		else:
+			_frame(r_band, band_w, Color(col, band_a))
+	if tier == 0:
+		# A strained line tears across the screen instead of bursting outward.
+		for j in range(6):
+			var y := r.randf_range(20.0, H - 20.0)
+			var tear := r.randf_range(-10.0, 10.0)
+			var x0 := r.randf_range(0.0, W * 0.4) * p
+			draw_line(Vector2(x0, y), Vector2(W - r.randf_range(0.0, W * 0.3) * p, y + tear), Color(col, 0.7 * fade * k), 1.0 + r.randf() * 1.5)
+	else:
+		# Shock rings from the float. A GOOD ring stays local; a PERFECT ring
+		# crosses the whole screen, and a streak adds more of them.
+		var reach := float([0, 170, 560, 560, 560][tier])
+		for ring in range(maxi(1, tier - 1)):
+			var rp := clampf((t - float(ring) * 0.07) / float(i.dur), 0.0, 1.0)
+			if rp <= 0.0: continue
+			draw_arc(pos, _ease_out(rp) * reach, 0, TAU, 56, Color(_impact_color(tier, float(ring) * 0.33), 0.7 * (1.0 - rp) * k), float([0, 2, 3, 3, 4][tier]))
+		# Rays fly out past the ring toward the screen edges.
+		var rays := int([0, 14, 22, 30, 38][tier])
+		for j in range(rays):
+			var a := float(j) * TAU / float(rays) + r.randf_range(-0.08, 0.08)
+			var dir := Vector2(cos(a), sin(a))
+			var length := (40.0 + r.randf() * 140.0) * (0.4 if tier == 1 else 0.6 + float(tier) * 0.2)
+			var r0 := 14.0 + _ease_out(p) * (60.0 + r.randf() * (60.0 if tier == 1 else 220.0) + float(tier) * 40.0)
+			# Neighbouring rays take scattered hues: the float is often near a
+			# screen edge, where only a narrow fan of rays is in view.
+			var ray_col := _impact_color(tier, fmod(float(j) * 0.37, 1.0))
+			draw_line(pos + dir * r0, pos + dir * (r0 + length * (1.0 - p * 0.5)), Color(ray_col, 0.55 * fade * k), 1.0 + (1.0 if tier >= 3 else 0.0) + r.randf())
+		if tier >= 2:
+			# The wash is a light, near-white lift even on the rainbow tier: a
+			# strong or hue-cycling tint over the teal HUD reads as a green cast.
+			draw_rect(Rect2(0, 0, W, H), Color(1.0, 0.98, 0.9, d.soft_overlay(0.04 * float(tier - 1) * fade * fade)))
+	# The grade slams in below the gauge rows, so the timing bar stays clear.
+	var size := int([20, 20, 30, 33, 36][tier])
+	var slam := 1.0 + float([0.5, 0.35, 1.2, 1.5, 1.8][tier]) * (1.0 - _ease_out(clampf(t / 0.12, 0.0, 1.0)))
+	var alpha := 1.0 - clampf((t - float(i.dur) * 0.7) / (float(i.dur) * 0.3), 0.0, 1.0)
+	var rot := float([0.0, 0.0, -0.04, -0.06, -0.08][tier])
+	var text_pos: Vector2 = d.IMPACT_TEXT_POS
+	if tier == 0: text_pos += Vector2(sin(d.time * 90.0), cos(d.time * 77.0)) * 2.0 * fade
+	if tier >= 2:
+		# A slanted band behind the word, like a cut-in that lasts one beat.
+		var h := float(size) + 12.0
+		var cy := text_pos.y - float(size) * 0.36
+		var skew := 18.0
+		var band_poly := PackedVector2Array([Vector2(-20 + skew, cy - h * 0.5), Vector2(W + 20 + skew, cy - h * 0.5), Vector2(W + 20 - skew, cy + h * 0.5), Vector2(-20 - skew, cy + h * 0.5)])
+		draw_colored_polygon(band_poly, Color(0.04, 0.03, 0.09, 0.55 * alpha))
+		draw_line(band_poly[0], band_poly[1], Color(col, 0.9 * alpha), 2.0)
+		draw_line(band_poly[3], band_poly[2], Color(col, 0.9 * alpha), 2.0)
+		for j in range(8):
+			var sx := fmod(float(j) * 71.0 + t * 1100.0, W + 100.0) - 50.0
+			var sy := cy - h * 0.5 + 4.0 + fmod(float(j) * 11.0, h - 8.0)
+			draw_line(Vector2(sx, sy), Vector2(sx + 30.0, sy), Color(1, 1, 1, 0.3 * alpha), 1.0)
+	_text_center(_impact_label(i), text_pos, size, Color(col, alpha), slam, rot, tier >= 4)
+	if bool(i.clean):
+		_text_center("CLEAN BEAT", text_pos + Vector2(0, 14), 9, Color(0.82, 0.8, 1.0, alpha), 1.0, 0.0, false)
 
 func _cutin_colors(style: String) -> Array:
 	match style:

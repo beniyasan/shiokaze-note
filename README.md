@@ -103,9 +103,13 @@ The whole cast is staged as one escalating show, defined in
   EPIC-or-better candidate, and a golden-tide cast never fakes out (no downward false
   cue, no mid-wait reversal). These rolls use the FX director's own RNG, so they never
   change which fish bites.
-- **Reach.** Purple-or-hotter bites enter a letterboxed REACH / SUPER REACH. Each pull
-  has a short hit-stop, splash and callout; banners use a slim top strip so the timing
-  gauge is never covered.
+- **Reach.** Purple-or-hotter bites enter a letterboxed REACH / SUPER REACH; banners use
+  a slim top strip so the timing gauge is never covered.
+- **Pull impacts.** Every pull fires a one-beat, screen-wide burst sized by its grade:
+  a red tear for a strained pull, a teal ring for GOOD, and for PERFECT a gold shock
+  ring, rays, party poppers and a slammed `PERFECT!!`. Consecutive PERFECT pulls climb
+  to `PERFECT x2!!` and a rainbow `PERFECT x3!!`. The burst is gone within 0.6 s, inside
+  the pull cooldown, and the grade is drawn below the gauge rows.
 - **Reveal.** The card glows in the promised heat, then promotes one step at a time
   to the real result (`UP!`) or quietly fizzles. The flip bursts in proportion to
   rarity, followed by `NEW!` / `CROWN!` stamps. LEGENDARY cracks the screen, then
