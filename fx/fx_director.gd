@@ -71,6 +71,19 @@ var fever_border := 0.0
 var fever_target := 0.0
 var music_duck := 1.0
 
+# Pull impacts: one short, screen-wide burst per pull whose size is the grade
+# (see pull()). Each is over within IMPACT_MAX_DUR, well inside the pull
+# cooldown, so it never sits on the gauge when the next pull can be timed.
+const IMPACT_MAX_DUR := 0.6
+const IMPACT_DURS := [0.32, 0.34, 0.46, 0.52, IMPACT_MAX_DUR]
+# The grade is written in a lane along the bottom of the screen, over the toast
+# bar (which says the same thing in words) and below every row of the fishing
+# panel, so stamina, tension, the counter prompt and the escape meter stay
+# readable through a pull.
+const IMPACT_LANE_TOP := 234.0
+const IMPACT_TEXT_POS := Vector2(240, 264)
+const IMPACT_TEXT_SIZES := [20, 20, 24, 26, 28]
+var impacts: Array[Dictionary] = []
 var cutins: Array[Dictionary] = []
 var pops: Array[Dictionary] = []
 var particles: Array[Dictionary] = []
@@ -124,6 +137,8 @@ func update(delta: float) -> void:
 	vignette = lerpf(vignette, vignette_target, k)
 	speed = lerpf(speed, speed_target, k)
 	fever_border = move_toward(fever_border, fever_target, delta * 1.6)
+	for i in impacts: i.t = float(i.t) + delta
+	impacts = impacts.filter(func(i): return float(i.t) < float(i.dur))
 	for c in cutins: c.t = float(c.t) + delta
 	cutins = cutins.filter(func(c): return float(c.t) < float(c.dur))
 	for p in pops: p.t = float(p.t) + delta
@@ -258,7 +273,9 @@ func pop(text: String, pos: Vector2, color: Color, size: int = 14, dur: float = 
 	pops.append({"text": text, "pos": pos, "color": color, "size": size, "t": 0.0, "dur": dur, "style": style})
 	if pops.size() > 10: pops.pop_front()
 
-func burst(pos: Vector2, color: Color, count: int, spd: float, kind: String = "spark", rainbow: bool = false) -> void:
+# max_life caps how long each particle lives (0 = the kind's own lifetime), for
+# effects that promise to be off screen by a deadline.
+func burst(pos: Vector2, color: Color, count: int, spd: float, kind: String = "spark", rainbow: bool = false, max_life: float = 0.0) -> void:
 	for i in range(count):
 		if particles.size() >= MAX_PARTICLES: particles.pop_front()
 		var a := rng.randf() * TAU
@@ -280,6 +297,10 @@ func burst(pos: Vector2, color: Color, count: int, spd: float, kind: String = "s
 				gravity = 120.0; drag = 0.25; life = rng.randf_range(1.2, 2.2); size = rng.randf_range(2.0, 3.4)
 			"ash":
 				gravity = 60.0; drag = 0.3; life = rng.randf_range(0.5, 0.9)
+		if max_life > 0.0 and life > max_life:
+			# Keep the spread of lifetimes, squeezed under the cap, so capped
+			# particles still fade out raggedly instead of vanishing together.
+			life = max_life * rng.randf_range(0.6, 1.0)
 		particles.append({"pos": pos, "vel": v, "color": col, "size": size, "life": life, "max": life, "gravity": gravity, "drag": drag, "kind": kind, "rot": rng.randf() * TAU, "spin": rng.randf_range(-9.0, 9.0)})
 
 func schedule(delay: float, fn: String, args: Array = []) -> void:
@@ -318,6 +339,7 @@ func clear_show() -> void:
 	flash_alpha = 0.0
 	flash_t = 0.0
 	flash_dur = 0.0
+	impacts.clear()
 	cutins.clear()
 	pops.clear()
 	particles.clear()
@@ -430,16 +452,41 @@ func reach_start(heat: int) -> void:
 	schedule(0.12, "cutin", [REACH_TITLES[clampi(heat, 0, 4)], "Keep the line in the gold zone", "reach_premium" if heat >= HEAT_PREMIUM else ("super" if heat >= 3 else "reach"), 1.1, "top"])
 	_count("reach_%d" % heat)
 
-func pull(grade: String, pos: Vector2, hits: int, power: float) -> void:
-	var perfect := grade == "PERFECT"
-	hitstop(0.09 if perfect else 0.05)
-	shake(1.5 + (2.0 if perfect else 0.6) + power * 2.0, 0.22)
-	zoom_punch(0.03 + (0.025 if perfect else 0.0) + power * 0.02, 0.28)
-	burst(pos, Color("#d8f1ff"), 10 + hits * 2, 100.0, "drop")
+# The size of a pull's celebration. 0 is a strained (missed) pull, 1 a GOOD
+# pull, 2 a PERFECT pull, and a run of consecutive PERFECT pulls climbs to 3
+# and 4. Everything about the impact scales from this one number.
+func impact_tier(grade: String, streak: int = 0) -> int:
+	if grade == "PERFECT": return clampi(1 + maxi(1, streak), 2, 4)
+	return 1 if grade == "GOOD" else 0
+
+func _add_impact(grade: String, tier: int, pos: Vector2, streak: int, clean: bool) -> void:
+	impacts.append({"grade": grade, "tier": tier, "pos": pos, "t": 0.0, "dur": float(IMPACT_DURS[tier]), "streak": streak, "clean": clean, "seed": rng.randi()})
+	if impacts.size() > 4: impacts.pop_front()
+	_count("impact_tier%d" % tier)
+
+func pull(grade: String, pos: Vector2, hits: int, power: float, streak: int = 0, clean: bool = false) -> void:
+	var tier := impact_tier(grade, streak)
+	var perfect := tier >= 2
+	var step := tier - 1
+	hitstop([0.05, 0.09, 0.11, 0.13][step])
+	shake(1.5 + [0.6, 2.0, 2.8, 3.6][step] + power * 2.0, 0.22 + 0.04 * float(step))
+	zoom_punch(0.03 + [0.0, 0.025, 0.04, 0.055][step] + power * 0.02, 0.28)
+	# Everything a pull throws is capped to the impact's lifetime, so nothing
+	# from this pull is still in the air when the next one can be timed.
+	burst(pos, Color("#d8f1ff"), 10 + hits * 2, 100.0, "drop", false, IMPACT_MAX_DUR)
+	_add_impact(grade, tier, pos, streak, clean)
 	if perfect:
-		burst(pos, HEAT_COLORS[1], 12, 120.0, "spark")
-		request_flash(Color("#fff3c2"), 0.14, 0.12)
-	pop("PERFECT!!" if perfect else "GOOD!", pos + Vector2(rng.randf_range(-10, 10), -26), HEAT_COLORS[1] if perfect else Color("#d8f1ff"), 15 if perfect else 12, 0.65)
+		var rainbow := tier >= 4
+		burst(pos, HEAT_COLORS[1], 12 + tier * 4, 120.0 + float(tier) * 20.0, "spark", rainbow, IMPACT_MAX_DUR)
+		request_flash(Color("#fff3c2") if tier == 2 else Color("#fffdf0"), [0.0, 0.22, 0.30, 0.38][step], 0.14)
+		# Party poppers from both bottom corners carry the hit across the screen.
+		var popper := [0, 8, 14, 20][step] as int
+		burst(Vector2(36, 252), HEAT_COLORS[1], popper, 300.0, "confetti", tier >= 3, IMPACT_MAX_DUR)
+		burst(Vector2(SCREEN.x - 36, 252), HEAT_COLORS[1], popper, 300.0, "confetti", tier >= 3, IMPACT_MAX_DUR)
+		for k in range((tier - 2) * 4):
+			burst(Vector2(rng.randf_range(30.0, SCREEN.x - 30.0), rng.randf_range(24.0, SCREEN.y - 40.0)), Color("#fff6cf"), 4, 50.0, "spark", rainbow, IMPACT_MAX_DUR)
+		if tier >= 3: chroma_pulse(0.35 + 0.15 * float(tier - 3), 0.3)
+		if tier >= 3: _sound("streak")
 	speed_target = clampf(speed_target + 0.05, 0.0, 1.0) if letterbox_target > 0.0 else maxf(speed_target, power * 0.35)
 	_sound("impact")
 
@@ -455,14 +502,24 @@ func last_pull(heat: int, pos: Vector2) -> void:
 
 func strain(pos: Vector2) -> void:
 	shake(3.0, 0.3)
-	burst(pos, Color("#ff7b6b"), 8, 70.0, "ash")
-	pop("STRAIN!", pos + Vector2(0, -24), Color("#ff8a7a"), 12, 0.6)
+	burst(pos, Color("#ff7b6b"), 8, 70.0, "ash", false, IMPACT_MAX_DUR)
+	# A missed pull gets the same screen-wide treatment in red, so the three
+	# outcomes of a pull read as one family: red, teal, gold.
+	_add_impact("MISS", 0, pos, 0, false)
 
 func set_danger(tension: float) -> void:
 	danger = clampf((tension - 0.7) / 0.3, 0.0, 1.0)
 
 func landed(rank: int, legendary: bool, pos: Vector2) -> void:
+	# The pull that lands the fish fires its impact in this same frame. Carry
+	# that one burst across the reset so the finishing blow is actually seen; it
+	# is over within IMPACT_MAX_DUR, before the card shows anything to read.
+	var finishing: Array[Dictionary] = []
+	if not impacts.is_empty():
+		var newest: Dictionary = impacts[impacts.size() - 1]
+		if float(newest.t) <= 0.0 and int(newest.tier) > 0: finishing.append(newest)
 	clear_show()
+	impacts = finishing
 	# Battle callouts must not linger over the face-down card.
 	pops.clear()
 	cutins.clear()
