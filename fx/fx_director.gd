@@ -81,8 +81,8 @@ const IMPACT_DURS := [0.32, 0.34, 0.46, 0.52, IMPACT_MAX_DUR]
 # panel, so stamina, tension, the counter prompt and the escape meter stay
 # readable through a pull.
 const IMPACT_LANE_TOP := 234.0
-const IMPACT_TEXT_POS := Vector2(240, 262)
-const IMPACT_TEXT_SIZES := [20, 20, 26, 28, 30]
+const IMPACT_TEXT_POS := Vector2(240, 264)
+const IMPACT_TEXT_SIZES := [20, 20, 24, 26, 28]
 var impacts: Array[Dictionary] = []
 var cutins: Array[Dictionary] = []
 var pops: Array[Dictionary] = []

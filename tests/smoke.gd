@@ -1005,9 +1005,10 @@ func run():
 	var lowest_hud_row: float = game.FISHING_HUD_ESCAPE_Y + game.CHALLENGE_HUD_OFFSET
 	check(fx.IMPACT_LANE_TOP>lowest_hud_row+2.0,'the impact lane starts below the escape meter')
 	for impact_step in range(5):
-		var impact_size: int = game.fx_front._impact_text_size(impact_step)
-		var text_top: float = fx.IMPACT_TEXT_POS.y - ThemeDB.fallback_font.get_ascent(impact_size) * 0.8
-		check(text_top>=fx.IMPACT_LANE_TOP and fx.IMPACT_TEXT_POS.y<=270.0,'tier %d grade text stays in the impact lane' % impact_step)
+		# Worst case over the whole slam: widest label, peak stretch, tilt, outline.
+		var impact_label: String = game.fx_front._impact_label({'tier':impact_step,'streak':5})
+		var text_top: float = game.fx_front._impact_text_top(impact_step, impact_label)
+		check(text_top>=fx.IMPACT_LANE_TOP and fx.IMPACT_TEXT_POS.y<=270.0,'tier %d grade text stays in the impact lane through its slam (top %.1f)' % [impact_step, text_top])
 		var impact_band: Rect2 = game.fx_front._impact_band(impact_step)
 		check(impact_band.position.y>=fx.IMPACT_LANE_TOP and impact_band.end.y<=270.0,'tier %d band stays in the impact lane' % impact_step)
 	fx.update(fx.IMPACT_MAX_DUR+0.01)

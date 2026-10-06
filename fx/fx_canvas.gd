@@ -176,12 +176,13 @@ func _draw_impact(i: Dictionary) -> void:
 			# The wash is a light, near-white lift even on the rainbow tier: a
 			# strong or hue-cycling tint over the teal HUD reads as a green cast.
 			draw_rect(Rect2(0, 0, W, H), Color(1.0, 0.98, 0.9, d.soft_overlay(0.04 * float(tier - 1) * fade * fade)))
-	# The grade slams into the bottom lane (see IMPACT_LANE_TOP). It stretches in
-	# sideways rather than growing tall, so it stays in its lane from the first frame.
+	# The grade slams into the bottom lane (see IMPACT_LANE_TOP). The slam is a
+	# purely sideways stretch and the word is level, so its height never changes
+	# and it is inside the lane on every frame, including the first.
 	var size := _impact_text_size(tier)
-	var slam := 1.0 + float([0.5, 0.35, 1.0, 1.3, 1.6][tier]) * (1.0 - _ease_out(clampf(t / 0.12, 0.0, 1.0)))
+	var slam := 1.0 + float(IMPACT_SLAM[tier]) * (1.0 - _ease_out(clampf(t / 0.12, 0.0, 1.0)))
 	var alpha := 1.0 - clampf((t - float(i.dur) * 0.7) / (float(i.dur) * 0.3), 0.0, 1.0)
-	var rot := float([0.0, 0.0, -0.03, -0.04, -0.05][tier])
+	var rot := float(IMPACT_TEXT_ROT[tier])
 	var text_pos: Vector2 = d.IMPACT_TEXT_POS
 	if tier == 0: text_pos += Vector2(sin(d.time * 90.0), cos(d.time * 77.0)) * 2.0 * fade
 	# A slanted band behind the word, like a cut-in that lasts one beat. Every
@@ -200,10 +201,33 @@ func _draw_impact(i: Dictionary) -> void:
 			var sx := fmod(float(j) * 71.0 + t * 1100.0, W + 100.0) - 50.0
 			var sy := top + 4.0 + fmod(float(j) * 11.0, rows.size.y - 8.0)
 			draw_line(Vector2(sx, sy), Vector2(sx + 30.0, sy), Color(1, 1, 1, 0.3 * alpha), 1.0)
-	_text_center(_impact_label(i), text_pos, size, Color(col, alpha), slam, rot, tier >= 4, 0.2)
+	_text_center(_impact_label(i), text_pos, size, Color(col, alpha), slam, rot, tier >= 4, IMPACT_SLAM_TALL)
 	if bool(i.clean):
-		# Beside the grade, at the right end of the lane.
-		_text_center("CLEAN BEAT", Vector2(W - 64.0, text_pos.y - 4.0), 8, Color(0.82, 0.8, 1.0, alpha), 1.0, 0.0, false)
+		# Beside the grade, at the right end of the lane. It waits for the slam
+		# to settle, because the stretched word reaches this far at first.
+		var clean_alpha := alpha * clampf((t - 0.09) / 0.06, 0.0, 1.0)
+		_text_center("CLEAN BEAT", Vector2(W - 64.0, text_pos.y - 4.0), 8, Color(0.82, 0.8, 1.0, clean_alpha), 1.0, 0.0, false)
+
+# How the grade arrives: extra horizontal scale at the first frame per tier, how
+# much of that scale also applies vertically, and the word's tilt. Height and
+# tilt are both zero so the lane holds; _impact_text_top() is what tests check.
+const IMPACT_SLAM := [0.5, 0.35, 1.0, 1.3, 1.6]
+const IMPACT_SLAM_TALL := 0.0
+const IMPACT_TEXT_ROT := [0.0, 0.0, 0.0, 0.0, 0.0]
+# Capital letters reach about this share of the font size above the baseline.
+const IMPACT_CAP_HEIGHT := 0.74
+# _text_center() outlines glyphs 5px wide, so 2.5px beyond the ink.
+const IMPACT_OUTLINE := 2.5
+
+# The highest point the grade text can reach at any moment of its slam: the
+# stretched, tilted word's upper corner plus its outline.
+func _impact_text_top(tier: int, label: String) -> float:
+	var size := _impact_text_size(tier)
+	var peak := 1.0 + float(IMPACT_SLAM[tier])
+	var height := float(size) * IMPACT_CAP_HEIGHT * (1.0 + (peak - 1.0) * IMPACT_SLAM_TALL)
+	var half_width := ThemeDB.fallback_font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x * 0.5 * peak
+	var lift := absf(sin(float(IMPACT_TEXT_ROT[tier]))) * half_width
+	return float(director.IMPACT_TEXT_POS.y) - height - lift - IMPACT_OUTLINE
 
 func _impact_text_size(tier: int) -> int:
 	return int(director.IMPACT_TEXT_SIZES[clampi(tier, 0, director.IMPACT_TEXT_SIZES.size() - 1)])
