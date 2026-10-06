@@ -998,6 +998,18 @@ func run():
 	check(fx.impacts[0].tier==4 and fx.impacts[0].streak==3 and fx.impacts[0].clean and fx.particles.size()>perfect_particles and fx.shake_power>perfect_shake and fx.chroma()>0.0 and fx.sounds.has('streak'),'a PERFECT streak climbs to the top impact tier')
 	check(game.fx_front._impact_label(fx.impacts[0])=='PERFECT x3!!' and game.fx_front._impact_label({'tier':1,'streak':0})=='GOOD!' and game.fx_front._impact_label({'tier':0,'streak':0})=='STRAIN!','each impact names its grade')
 	check(fx.IMPACT_MAX_DUR<game.PULL_COOLDOWN and fx.IMPACT_DURS.max()<=fx.IMPACT_MAX_DUR,'every pull impact ends well inside the pull cooldown')
+	# The top tier's look is capped but its count is not.
+	check(fx.impact_tier('PERFECT',5)==4 and game.fx_front._impact_label({'tier':4,'streak':5})=='PERFECT x5!!','a long PERFECT streak keeps counting on the top tier')
+	# The grade sits in a lane below every row of the fishing panel, even with
+	# a challenge pushing the panel down, and inside the screen.
+	var lowest_hud_row: float = game.FISHING_HUD_ESCAPE_Y + game.CHALLENGE_HUD_OFFSET
+	check(fx.IMPACT_LANE_TOP>lowest_hud_row+2.0,'the impact lane starts below the escape meter')
+	for impact_step in range(5):
+		var impact_size: int = game.fx_front._impact_text_size(impact_step)
+		var text_top: float = fx.IMPACT_TEXT_POS.y - ThemeDB.fallback_font.get_ascent(impact_size) * 0.8
+		check(text_top>=fx.IMPACT_LANE_TOP and fx.IMPACT_TEXT_POS.y<=270.0,'tier %d grade text stays in the impact lane' % impact_step)
+		var impact_band: Rect2 = game.fx_front._impact_band(impact_step)
+		check(impact_band.position.y>=fx.IMPACT_LANE_TOP and impact_band.end.y<=270.0,'tier %d band stays in the impact lane' % impact_step)
 	fx.update(fx.IMPACT_MAX_DUR+0.01)
 	check(fx.impacts.is_empty(),'pull impacts clear themselves')
 	fx.strain(impact_pos)

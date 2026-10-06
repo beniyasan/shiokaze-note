@@ -108,8 +108,10 @@ The whole cast is staged as one escalating show, defined in
 - **Pull impacts.** Every pull fires a one-beat, screen-wide burst sized by its grade:
   a red tear for a strained pull, a teal ring for GOOD, and for PERFECT a gold shock
   ring, rays, party poppers and a slammed `PERFECT!!`. Consecutive PERFECT pulls climb
-  to `PERFECT x2!!` and a rainbow `PERFECT x3!!`. The burst is gone within 0.6 s, inside
-  the pull cooldown, and the grade is drawn below the gauge rows.
+  to `PERFECT x2!!` and a rainbow `PERFECT x3!!`; the look stops there but the count
+  keeps going (`x4`, `x5`). The burst is gone within 0.6 s, inside the pull cooldown,
+  and the grade is written in a lane along the bottom of the screen, clear of every
+  row of the fishing panel.
 - **Reveal.** The card glows in the promised heat, then promotes one step at a time
   to the real result (`UP!`) or quietly fizzles. The flip bursts in proportion to
   rarity, followed by `NEW!` / `CROWN!` stamps. LEGENDARY cracks the screen, then

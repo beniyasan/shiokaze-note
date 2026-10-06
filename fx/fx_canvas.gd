@@ -112,6 +112,8 @@ func _impact_label(i: Dictionary) -> String:
 		0: return "STRAIN!"
 		1: return "GOOD!"
 		2: return "PERFECT!!"
+		# The look stops climbing at the top tier, but the count keeps going: a
+		# fourth and fifth PERFECT in a row read x4 and x5.
 		_: return "PERFECT x%d!!" % int(i.streak)
 
 func _draw_impact(i: Dictionary) -> void:
@@ -174,29 +176,44 @@ func _draw_impact(i: Dictionary) -> void:
 			# The wash is a light, near-white lift even on the rainbow tier: a
 			# strong or hue-cycling tint over the teal HUD reads as a green cast.
 			draw_rect(Rect2(0, 0, W, H), Color(1.0, 0.98, 0.9, d.soft_overlay(0.04 * float(tier - 1) * fade * fade)))
-	# The grade slams in below the gauge rows, so the timing bar stays clear.
-	var size := int([20, 20, 30, 33, 36][tier])
-	var slam := 1.0 + float([0.5, 0.35, 1.2, 1.5, 1.8][tier]) * (1.0 - _ease_out(clampf(t / 0.12, 0.0, 1.0)))
+	# The grade slams into the bottom lane (see IMPACT_LANE_TOP). It stretches in
+	# sideways rather than growing tall, so it stays in its lane from the first frame.
+	var size := _impact_text_size(tier)
+	var slam := 1.0 + float([0.5, 0.35, 1.0, 1.3, 1.6][tier]) * (1.0 - _ease_out(clampf(t / 0.12, 0.0, 1.0)))
 	var alpha := 1.0 - clampf((t - float(i.dur) * 0.7) / (float(i.dur) * 0.3), 0.0, 1.0)
-	var rot := float([0.0, 0.0, -0.04, -0.06, -0.08][tier])
+	var rot := float([0.0, 0.0, -0.03, -0.04, -0.05][tier])
 	var text_pos: Vector2 = d.IMPACT_TEXT_POS
 	if tier == 0: text_pos += Vector2(sin(d.time * 90.0), cos(d.time * 77.0)) * 2.0 * fade
+	# A slanted band behind the word, like a cut-in that lasts one beat. Every
+	# grade gets one: the lane lies over the toast bar, whose text would
+	# otherwise show through the letters.
+	var rows := _impact_band(tier)
+	var top := rows.position.y
+	var bottom := rows.end.y
+	var skew := 14.0
+	var band_poly := PackedVector2Array([Vector2(-20 + skew, top), Vector2(W + 20 + skew, top), Vector2(W + 20 - skew, bottom), Vector2(-20 - skew, bottom)])
+	draw_colored_polygon(band_poly, Color(0.04, 0.03, 0.09, (0.82 if tier >= 2 else 0.9) * alpha))
+	draw_line(band_poly[0], band_poly[1], Color(col, (0.9 if tier >= 2 else 0.5) * alpha), 2.0 if tier >= 2 else 1.0)
+	draw_line(band_poly[3], band_poly[2], Color(col, (0.9 if tier >= 2 else 0.5) * alpha), 2.0 if tier >= 2 else 1.0)
 	if tier >= 2:
-		# A slanted band behind the word, like a cut-in that lasts one beat.
-		var h := float(size) + 12.0
-		var cy := text_pos.y - float(size) * 0.36
-		var skew := 18.0
-		var band_poly := PackedVector2Array([Vector2(-20 + skew, cy - h * 0.5), Vector2(W + 20 + skew, cy - h * 0.5), Vector2(W + 20 - skew, cy + h * 0.5), Vector2(-20 - skew, cy + h * 0.5)])
-		draw_colored_polygon(band_poly, Color(0.04, 0.03, 0.09, 0.55 * alpha))
-		draw_line(band_poly[0], band_poly[1], Color(col, 0.9 * alpha), 2.0)
-		draw_line(band_poly[3], band_poly[2], Color(col, 0.9 * alpha), 2.0)
 		for j in range(8):
 			var sx := fmod(float(j) * 71.0 + t * 1100.0, W + 100.0) - 50.0
-			var sy := cy - h * 0.5 + 4.0 + fmod(float(j) * 11.0, h - 8.0)
+			var sy := top + 4.0 + fmod(float(j) * 11.0, rows.size.y - 8.0)
 			draw_line(Vector2(sx, sy), Vector2(sx + 30.0, sy), Color(1, 1, 1, 0.3 * alpha), 1.0)
-	_text_center(_impact_label(i), text_pos, size, Color(col, alpha), slam, rot, tier >= 4)
+	_text_center(_impact_label(i), text_pos, size, Color(col, alpha), slam, rot, tier >= 4, 0.2)
 	if bool(i.clean):
-		_text_center("CLEAN BEAT", text_pos + Vector2(0, 14), 9, Color(0.82, 0.8, 1.0, alpha), 1.0, 0.0, false)
+		# Beside the grade, at the right end of the lane.
+		_text_center("CLEAN BEAT", Vector2(W - 64.0, text_pos.y - 4.0), 8, Color(0.82, 0.8, 1.0, alpha), 1.0, 0.0, false)
+
+func _impact_text_size(tier: int) -> int:
+	return int(director.IMPACT_TEXT_SIZES[clampi(tier, 0, director.IMPACT_TEXT_SIZES.size() - 1)])
+
+# The rows the slanted band behind a grade occupies.
+func _impact_band(tier: int) -> Rect2:
+	var size := float(_impact_text_size(tier))
+	var h := size + 4.0
+	var cy: float = director.IMPACT_TEXT_POS.y - size * 0.36
+	return Rect2(0, cy - h * 0.5, W, h)
 
 func _cutin_colors(style: String) -> Array:
 	match style:
@@ -371,10 +388,12 @@ func _frame(r: Rect2, w: float, col: Color) -> void:
 func _ease_out(x: float) -> float:
 	return 1.0 - pow(1.0 - clampf(x, 0.0, 1.0), 3.0)
 
-func _text_center(text: String, pos: Vector2, size: int, col: Color, scale: float, rot: float, rainbow: bool) -> void:
+# tall is how much of `scale` also applies vertically: 1.0 scales evenly, lower
+# values stretch the text sideways while keeping its height nearly unchanged.
+func _text_center(text: String, pos: Vector2, size: int, col: Color, scale: float, rot: float, rainbow: bool, tall: float = 1.0) -> void:
 	var font := ThemeDB.fallback_font
 	var w := font.get_string_size(text, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x
-	draw_set_transform(pos, rot, Vector2(scale, scale))
+	draw_set_transform(pos, rot, Vector2(scale, 1.0 + (scale - 1.0) * tall))
 	var origin := Vector2(-w * 0.5, 0)
 	draw_string_outline(font, origin + Vector2(1, 2), text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, 5, Color(0.03, 0.02, 0.08, col.a * 0.9))
 	draw_string_outline(font, origin, text, HORIZONTAL_ALIGNMENT_LEFT, -1, size, 3, Color(0.03, 0.02, 0.08, col.a))

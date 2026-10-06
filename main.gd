@@ -3118,10 +3118,16 @@ func _draw_hud():
 		_text(Vector2(85,240),"? mystery ~ shimmer ! gilded ^ crown  green dot: biting now",8,true)
 		_text(Vector2(85,220),"N close  /  A D read rumors" + ("  /  grotto opens at %d%%" % HIDDEN_SPOT_COLLECTION_PERCENT if rumor_found and not hidden_spot_unlocked else ""),8,true)
 
+# The escape meter is the lowest row of the fishing panel; a live challenge
+# pushes every row down by CHALLENGE_HUD_OFFSET. Screen effects that must not
+# cover the panel (the pull-impact lane) are laid out below this.
+const FISHING_HUD_ESCAPE_Y := 201
+const CHALLENGE_HUD_OFFSET := 30
+
 func _draw_fishing_hud():
 	# Speed lines, letterbox and danger edges now live on the FX back layer.
 	var challenge_live: bool = fishing_challenge != null and not fishing_challenge.done
-	var challenge_offset := 30 if challenge_live else 0
+	var challenge_offset := CHALLENGE_HUD_OFFSET if challenge_live else 0
 	if fishing_state == FishingState.ANTICIPATING:
 		# The wait is the stage for the cue show: keep the world and the float
 		# visible and put the readout in a slim strip near the bottom.
@@ -3160,7 +3166,7 @@ func _draw_fishing_hud():
 	_text(Vector2(114,171 + challenge_offset), "LINE TENSION", 9)
 	hud_bar(Vector2(194,166 + challenge_offset),Vector2(172,6),battle_tension,Color("#bd7b58"))
 	_text(Vector2(114,186 + challenge_offset), "FISH " + ("<" if battle_direction < 0 else ">") + "  HOLD " + ("RIGHT" if battle_direction < 0 else "LEFT") + " TO COUNTER", 10)
-	_text(Vector2(114,201 + challenge_offset), "ESCAPE", 8)
+	_text(Vector2(114,FISHING_HUD_ESCAPE_Y + challenge_offset), "ESCAPE", 8)
 	hud_bar(Vector2(151,195 + challenge_offset),Vector2(215,4),battle_escape,Color("#c06363"))
 
 func _challenge_prompt() -> String:
