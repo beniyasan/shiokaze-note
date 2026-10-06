@@ -282,6 +282,9 @@ var challenge_hint_t := 0.0
 var music: Node
 var se_player := AudioStreamPlayer.new()
 const SE_RATE := 22050.0
+# Each SE voice can hold this much queued sound.  It must exceed the longest
+# sound the game renders (GACHA_SE_MAX_SECONDS), or that sound's tail is cut.
+const SE_BUFFER_SECONDS := 3.0
 var hud := Node2D.new()
 # Dopamine FX (see EFFECTS_DESIGN.md). The director owns the heat ladder and
 # timing; main only reports events. It exists before _ready so direct calls
@@ -362,7 +365,7 @@ func _ready():
 		var player_node := se_player if i == 0 else AudioStreamPlayer.new()
 		var generator := AudioStreamGenerator.new()
 		generator.mix_rate = SE_RATE
-		generator.buffer_length = 1.0
+		generator.buffer_length = SE_BUFFER_SECONDS
 		player_node.stream = generator
 		player_node.volume_db = -8.0
 		add_child(player_node)
@@ -2627,6 +2630,22 @@ func _prepare_gacha_flip_se() -> void:
 	var times: Array = fx.firework_times(heat, bool(fx.gacha.festival))
 	gacha_flip_buffer = _render_se(_gacha_flip_notes(heat, int(fx.gacha.variant), fx.gacha_star_count(heat), times), [[0.09, 0.22]], GACHA_SE_MAX_SECONDS)
 
+# Brings the gacha show back for a result card restored from a save.  A card
+# saved face-down resumes the show from where its reveal clock stands; a card
+# already turned shows its star rating without replaying the turn.
+func _restore_gacha() -> void:
+	if last_rarity == "LEGENDARY" or last_rarity == "" or last_grade == "MISS": return
+	var heat := _rarity_heat(last_rarity)
+	if reveal_t >= _reveal_face_time():
+		fx.gacha_restore_turned(heat)
+		return
+	fx.gacha_begin()
+	fx.gacha_heat(_reveal_glow_rank_at(reveal_t))
+	_prepare_gacha_flip_se()
+	var scale := 0.62 if reveal_shortened else 1.0
+	if reveal_t >= 0.82 * scale:
+		fx.reveal_charge(maxf(0.05, 1.42 * scale - reveal_t))
+
 func _push_se(samples: PackedFloat32Array) -> void:
 	var playback := _se_playback()
 	if playback == null: return
@@ -2884,6 +2903,7 @@ func _load_game(path: String = SAVE_PATH):
 			legendary_t = clampf(float(data.get("legendary_t", 6.0 if last_rarity == "LEGENDARY" else 0.0)), 0.0, 6.0)
 			legendary_stage = clampi(int(data.get("legendary_stage", 3 if last_rarity == "LEGENDARY" and legendary_t >= 3.75 else 0)), 0, 3)
 			result_t = 999.0
+			_restore_gacha()
 			toast = "Catch restored / choose REGISTER or SELL"
 			toast_t = 4.0
 	rumor_found = bool(data.get("rumor_found", false))

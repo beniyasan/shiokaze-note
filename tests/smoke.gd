@@ -1287,6 +1287,43 @@ func run():
 	var big_peak := 0.0
 	for sample in big_turn: big_peak = maxf(big_peak, absf(sample))
 	check(big_peak>0.3 and big_peak<=0.9001 and big_turn.size()<=int(game.GACHA_SE_MAX_SECONDS*game.SE_RATE),'the biggest turn (EPIC, festival) stays unclipped and within its length')
+	# Every SE voice can hold the longest sound the game renders.
+	var voices_ok: bool = game.SE_BUFFER_SECONDS > game.GACHA_SE_MAX_SECONDS and game.se_players.size() == 4
+	for voice in game.se_players:
+		if voice.stream == null or voice.stream.buffer_length < game.GACHA_SE_MAX_SECONDS: voices_ok = false
+	check(voices_ok and big_turn.size() < int(game.SE_BUFFER_SECONDS*game.SE_RATE),'an SE voice is long enough for the whole gacha finale')
+	# A reveal saved face-down resumes its gacha show after loading.
+	land_fish.call('RARE')
+	for frame in range(30): game._process_fishing(1.0/60.0)
+	check(game.reveal_t>0.3 and game.reveal_t<0.82 and not fx.gacha.is_empty(),'a reveal is under way, before its charge')
+	game._save_game('res://.smoke-gacha-mid.json')
+	game._reset_fishing(); fx.counters.clear(); fx.sounds.clear()
+	game._load_game('res://.smoke-gacha-mid.json')
+	check(game.catch_choice_pending() and not fx.gacha.is_empty() and float(fx.gacha.flip_t)<0.0 and float(fx.gacha.charge_t)<0.0 and fx.GACHA_STYLES.has(fx.gacha.style) and not game.gacha_flip_buffer.is_empty(),'loading a face-down reveal brings the gacha show back')
+	for frame in range(200):
+		if game.reveal_t >= game._reveal_face_time(): break
+		game._process_fishing(1.0/60.0); fx.update(1.0/60.0)
+	check(int(fx.counters.get('gacha_charge',0))==1 and fx.sounds.has('gacha_flip') and int(fx.gacha.stars)==3,'the restored reveal charges and turns with the gacha sound')
+	# Saved after the charge began: the charge resumes for the time that is left.
+	land_fish.call('RARE')
+	for frame in range(200):
+		if game.reveal_t >= 1.0*(0.62 if game.reveal_shortened else 1.0): break
+		game._process_fishing(1.0/60.0)
+	game._save_game('res://.smoke-gacha-charge.json'); var saved_reveal_t: float = game.reveal_t
+	game._reset_fishing(); game._load_game('res://.smoke-gacha-charge.json')
+	check(float(fx.gacha.charge_t)>=0.0 and float(fx.gacha.charge_dur)<0.6 and float(fx.gacha.charge_dur)>=0.05 and is_equal_approx(game.reveal_t, saved_reveal_t),'a reveal saved mid-charge resumes the charge for the time left')
+	# Saved after the turn: the rating is shown, nothing is replayed.
+	for frame in range(200):
+		if game.reveal_t >= game._reveal_face_time(): break
+		game._process_fishing(1.0/60.0); fx.update(1.0/60.0)
+	game._process_fishing(0.2)
+	game._save_game('res://.smoke-gacha-turned.json')
+	game._reset_fishing(); fx.counters.clear(); fx.sounds.clear()
+	game._load_game('res://.smoke-gacha-turned.json')
+	check(not fx.gacha.is_empty() and fx.gacha_stars_shown()==3 and fx.gacha.fireworks.is_empty() and fx.sounds.is_empty() and int(fx.counters.get('gacha_restore',0))==1 and int(fx.counters.get('gacha_begin',0))==0,'a card saved after its turn shows its stars without replaying the show')
+	game._process_fishing(0.5); fx.update(0.5)
+	check(not fx.sounds.has('gacha_flip') and not fx.sounds.has('flip2'),'the restored card does not turn a second time')
+	game._reset_fishing()
 	# LEGENDARY keeps its own arc.
 	land_fish.call('LEGENDARY')
 	check(game.last_rarity=='LEGENDARY' and fx.gacha.is_empty(),'a LEGENDARY catch keeps its own reveal, without the gacha')

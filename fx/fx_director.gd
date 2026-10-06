@@ -704,6 +704,17 @@ func gacha_begin() -> void:
 	_count("gacha_begin")
 	_count("gacha_style_" + str(gacha.style))
 
+# A card that was already turned when it was saved: the star rating and the
+# settled halo, with no style, charge, fireworks or sound to replay.
+func gacha_restore_turned(rank: int) -> void:
+	var shown := clampi(rank, 0, 3)
+	gacha = {
+		"style": "", "variant": 0, "festival": false, "seed": rng.randi(),
+		"t": 99.0, "heat": shown, "charge_t": -1.0, "charge_dur": 0.0,
+		"flip_t": 99.0, "rank": shown, "stars": gacha_star_count(shown), "fireworks": []
+	}
+	_count("gacha_restore")
+
 # The heat the summon light currently shows (what the player was promised, then
 # each promotion or the fizzle).  The show before the flip only ever uses this.
 func gacha_heat(heat: int) -> void:
