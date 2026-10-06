@@ -33,7 +33,7 @@ const MAP_EXITS := {
 }
 const FISH_STAMINA := 10
 const FIRST_PULL_DELAY := 1.0
-const PULL_COOLDOWN := 1.8
+const PULL_COOLDOWN := 1.5
 const GOOD_PULL_TENSION := 0.14
 const PERFECT_PULL_TENSION := 0.08
 const CLEAN_BEAT_TENSION_RELIEF := 0.05
@@ -811,6 +811,7 @@ func _entry_spawn(map_name: String) -> Vector2:
 	if current_map == "beach" and map_name == "rocky": return Vector2(90,340)
 	if current_map == "rocky" and map_name == "town": return Vector2(760,340)
 	if current_map == "rocky" and map_name == "grotto": return Vector2(510,150)
+	if current_map == "rocky" and map_name == "beach": return Vector2(770,390)
 	if current_map == "grotto" and map_name == "rocky": return Vector2(90,340)
 	return Vector2(400,80)
 
@@ -2057,8 +2058,8 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 		if not challenge_clean:
 			# A missed bonus beat strains the line, but the authoritative gauge
 			# pull still resolves normally instead of being discarded.
-			battle_tension = clampf(battle_tension + 0.25, 0.0, 1.0)
-			battle_escape = clampf(battle_escape + 0.12, 0.0, 1.0)
+			# The normal gauge pull remains authoritative; a missed bonus beat
+			# is feedback only and must not double-penalize a valid pull.
 			shake_t = 0.24
 			_play_se("danger")
 			fx.strain(_float_screen_pos())
