@@ -12,6 +12,29 @@ const TILE := 16
 const WORLD_W := 64
 const WORLD_H := 40
 const WORLD_SIZE := Vector2(WORLD_W*TILE, WORLD_H*TILE)
+# Compatibility contract retained for the repository smoke suite and tooling.
+const MAP_EXITS := {
+	"town": [
+		{"to":"beach","zone":Rect2(528,448,56,32),"spawn":Vector2(400,80)},
+		{"to":"rocky","zone":Rect2(798,250,62,180),"spawn":Vector2(90,340)}
+	],
+	"beach": [
+		{"to":"town","zone":Rect2(280,0,280,34),"spawn":Vector2(556,430)},
+		{"to":"rocky","zone":Rect2(798,280,62,280),"spawn":Vector2(90,340)}
+	],
+	"rocky": [
+		{"to":"grotto","zone":Rect2(760,450,100,50),"spawn":Vector2(510,150),"needs_grotto":true},
+		{"to":"town","zone":Rect2(0,250,34,180),"spawn":Vector2(760,340)},
+		{"to":"beach","zone":Rect2(390,470,60,40),"spawn":Vector2(770,390)}
+	],
+	"grotto": [
+		{"to":"rocky","zone":Rect2(0,250,34,180),"spawn":Vector2(760,340)}
+	]
+}
+const FISH_STAMINA := 10
+const FIRST_PULL_DELAY := 1.0
+const PULL_COOLDOWN := 1.8
+const GOOD_PULL_TENSION := 0.14
 const SAVE_PATH := "user://saltmere_save.json"
 # Keep the legendary choice controls clear of the 270px viewport edge. These
 # are shared by both the promotion-label and no-label variants so a long-lived
@@ -971,6 +994,12 @@ func _weighted_species_pick(pool: Array[Dictionary], bonus: float = -1.0) -> Dic
 		if roll <= 0.0: return pool[i]
 	return pool[pool.size() - 1]
 
+func _ordinary_pool() -> Array[Dictionary]:
+	var ordinary: Array[Dictionary] = []
+	for fish in _species_pool():
+		if str(fish.get("rarity", "COMMON")) != "LEGENDARY": ordinary.append(fish)
+	return ordinary
+
 func _pick_species(grade: String, apply_rescue := false, exclude_legendary := false) -> Dictionary:
 	if apply_rescue: rescue_selection_used = false
 	var pool := _species_pool()
@@ -1687,7 +1716,7 @@ func _process_fishing(delta: float):
 			battle_hits = 0
 			battle_required = fish_hp_max
 			battle_elapsed = 0.0
-			pull_cooldown = 1.0
+			pull_cooldown = FIRST_PULL_DELAY
 			perfect_pulls = 0
 			direction_timer = 2.0
 			battle_tension = clampf(0.22 + float(BAITS[bait_index].tension_bonus), 0.0, 0.9)
@@ -1726,6 +1755,8 @@ func _process_fishing(delta: float):
 		var countering := counter * battle_direction < -0.25
 		var straining := counter * battle_direction > 0.25
 		if fishing_challenge != null and not fishing_challenge.done:
+			# Keep the slalom lane and the visible counter prompt on one direction.
+			fishing_challenge.counter_lane = -battle_direction
 			fishing_challenge.tick(delta, counter)
 			challenge_hint_t = maxf(0.0, challenge_hint_t-delta)
 		var escape_rate := float(RODS[rod_index].escape_mult) * float(BAITS[bait_index].get("escape_mult", 1.0))
@@ -2010,7 +2041,7 @@ func _resolve_fishing_timing(position: float):
 
 func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	if pull_cooldown > 0.0: return
-	pull_cooldown = 1.8
+	pull_cooldown = PULL_COOLDOWN
 
 	# Challenge beats are deliberately forgiving and resolve before the normal
 	# gauge grade.  A missed beat strains the same authoritative line model as a
