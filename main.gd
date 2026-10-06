@@ -204,6 +204,9 @@ var pull_cooldown := 0.0
 var perfect_pulls := 0
 # Consecutive PERFECT pulls in the current battle; it scales the pull impact.
 var perfect_streak := 0
+# Which pull sound played last ("MISS", "GOOD", "PERFECT x3"); the sound itself
+# needs an audio device, so headless checks read this instead.
+var last_pull_se := ""
 var direction_timer := 0.0
 var battle_tension := 0.0
 var battle_escape := 0.0
@@ -2235,7 +2238,7 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 		battle_escape = clampf(battle_escape + 0.16, 0.0, 1.0)
 		shake_t = 0.28
 		perfect_streak = 0
-		_play_se("danger")
+		_play_pull_se("MISS", 0, false)
 		fx.strain(_float_screen_pos())
 		toast = "LINE STRAIN! Counter the fish, then try again"
 		toast_t = 1.2
@@ -2262,7 +2265,7 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	battle_escape = maxf(0.0, battle_escape - (0.24 if grade == "PERFECT" else 0.11))
 	gauge_direction = -gauge_direction
 	shake_t = maxf(shake_t, 0.14 + battle_hits * 0.06)
-	_play_se("perfect_tug" if grade == "PERFECT" else "tug")
+	_play_pull_se(grade, perfect_streak, clean_beat)
 	fx.pull(grade, _float_screen_pos(), battle_hits, 1.0 - float(fish_hp) / maxf(1.0, float(fish_hp_max)), perfect_streak, clean_beat)
 	if fish_hp > 0 and fish_hp <= 2 and not fx_last_pull_shown:
 		fx_last_pull_shown = true
@@ -2309,12 +2312,6 @@ func _play_se(kind: String):
 			base = 540.0; duration = 0.22; volume = 0.24; tones = [810.0]
 		"battle_start":
 			base = 420.0; duration = 0.30; volume = 0.25; sweep = 260.0; tones = [630.0]
-		"tug":
-			base = 300.0 + battle_hits * 55.0; duration = 0.17; volume = 0.25; tones = [base * 1.5]
-		"perfect_tug":
-			base = 500.0 + battle_hits * 70.0; duration = 0.24; volume = 0.34; sweep = 180.0; tones = [base * 1.5, base * 2.0]
-		"danger":
-			base = 120.0; duration = 0.28; volume = 0.28; sweep = -70.0
 		"miss":
 			base = 150.0; duration = 0.28; volume = 0.22; sweep = -55.0
 		"catch":
@@ -2346,17 +2343,12 @@ func _play_se(kind: String):
 			base = 880.0; duration = 0.5; volume = 0.2; sweep = 440.0; tones = [1318.5]; noise = 0.06
 		"premium":
 			base = 1046.5; duration = 0.95; volume = 0.3; tones = [1568.0, 2093.0, 2637.0]; decay = 0.8
-		"impact":
-			base = 110.0; duration = 0.13; volume = 0.42; sweep = -60.0; noise = 0.35
 		"landed":
 			base = 196.0; duration = 0.38; volume = 0.36; sweep = 200.0; tones = [392.0, 587.3]; noise = 0.2
 		"plop":
 			base = 190.0; duration = 0.13; volume = 0.2; sweep = -90.0; noise = 0.3
 		"nibble":
 			base = 520.0; duration = 0.06; volume = 0.14; sweep = -140.0
-		"streak":
-			# A rising sting for a run of PERFECT pulls; each step climbs a tone.
-			base = 659.3 * pow(2.0, float(mini(perfect_streak, 6) - 2) / 6.0); duration = 0.3; volume = 0.3; sweep = 240.0; tones = [base * 1.25, base * 1.5, base * 2.0]; decay = 0.16
 		"snap":
 			base = 900.0; duration = 0.22; volume = 0.26; sweep = -760.0; noise = 0.6
 		"promote":
@@ -2395,6 +2387,140 @@ func _play_se(kind: String):
 			# Two low thumps: lub-dub.
 			envelope = exp(-t / 0.035) + (exp(-(t - 0.16) / 0.04) * 0.8 if t >= 0.16 else 0.0)
 		playback.push_frame(Vector2.ONE * sample * volume * clampf(envelope, 0.0, 1.0))
+
+# ---- Pull sounds -----------------------------------------------------------
+# The sound of a pull says what it was before the eye has read it.  Each grade
+# has its own voice, built from the notes the field music is made of (A minor /
+# C major pentatonic), so a run of pulls plays along with the music:
+#   MISS     a low square buzz falling a tritone, with a line-creak of noise.
+#   GOOD     one soft two-note "pon" on a triangle wave and a light plop,
+#            pitched below every PERFECT run.
+#   PERFECT  a kick, a bright run up the C major chord and an echo.  Each
+#            consecutive PERFECT starts the run higher and makes it longer;
+#            the third adds a shimmer, the fourth a held chord, the fifth a
+#            sub boom: the pull that lands the fish is the biggest.
+const PULL_SE_SCALE := [523.25, 587.33, 659.25, 783.99, 880.0] # C5 D5 E5 G5 A5
+# Runs up the C major chord, as degrees of that pentatonic scale, by streak.
+# Each streak starts higher and runs longer; the top note climbs E5, G5, E6, G6,
+# C7 and stops there, where a thin square wave is still clean at this sample rate.
+const PULL_SE_RUNS := [[-2, 0, 2], [0, 2, 3], [2, 3, 5, 7], [2, 3, 5, 7, 8], [0, 3, 5, 7, 8, 10]]
+const PULL_SE_MAX_STREAK := 5
+const PULL_SE_MAX_SECONDS := 0.95
+
+func _pull_se_pitch(degree: int) -> float:
+	var size := PULL_SE_SCALE.size()
+	return float(PULL_SE_SCALE[posmod(degree, size)]) * pow(2.0, floorf(float(degree) / float(size)))
+
+# The notes of one pull sound.  Each note: start time "t", frequency "f" (and
+# "f_end" to slide), duration "dur", volume "vol", "wave" (sine, tri, square,
+# thin, noise), "attack" and "decay" in seconds.  Kept as data so it can be
+# checked without an audio device.
+func _pull_se_notes(grade: String, streak: int = 0, clean: bool = false) -> Array[Dictionary]:
+	var notes: Array[Dictionary] = []
+	if grade == "MISS":
+		# Two low, hollow notes falling a tritone: the one interval the music
+		# never plays, so it cannot be mistaken for a hit.
+		notes.append({"t": 0.0, "f": 155.56, "f_end": 147.0, "dur": 0.13, "vol": 0.24, "wave": "square", "attack": 0.004, "decay": 0.03})
+		notes.append({"t": 0.12, "f": 110.0, "f_end": 92.0, "dur": 0.22, "vol": 0.26, "wave": "square", "attack": 0.004, "decay": 0.10})
+		notes.append({"t": 0.0, "f": 77.78, "f_end": 55.0, "dur": 0.34, "vol": 0.20, "wave": "tri", "attack": 0.004, "decay": 0.12})
+		notes.append({"t": 0.0, "f": 0.0, "dur": 0.16, "vol": 0.13, "wave": "noise", "attack": 0.002, "decay": 0.12})
+		return notes
+	if grade == "GOOD":
+		notes.append({"t": 0.0, "f": 130.0, "f_end": 70.0, "dur": 0.09, "vol": 0.22, "wave": "sine", "attack": 0.002, "decay": 0.07})
+		notes.append({"t": 0.0, "f": _pull_se_pitch(-3), "dur": 0.08, "vol": 0.26, "wave": "tri", "attack": 0.004, "decay": 0.04})
+		notes.append({"t": 0.07, "f": _pull_se_pitch(-2), "dur": 0.16, "vol": 0.28, "wave": "tri", "attack": 0.004, "decay": 0.11})
+		if clean: notes.append({"t": 0.15, "f": _pull_se_pitch(7), "dur": 0.09, "vol": 0.10, "wave": "sine", "attack": 0.002, "decay": 0.07})
+		return notes
+	var level := clampi(streak, 1, PULL_SE_MAX_STREAK)
+	var run: Array = PULL_SE_RUNS[level - 1]
+	# The kick is the hit itself; it gets heavier as the streak grows.
+	notes.append({"t": 0.0, "f": 170.0, "f_end": 46.0, "dur": 0.13, "vol": 0.44 + 0.04 * float(level), "wave": "sine", "attack": 0.001, "decay": 0.10})
+	notes.append({"t": 0.0, "f": 0.0, "dur": 0.035, "vol": 0.10, "wave": "noise", "attack": 0.001, "decay": 0.03})
+	# The run: quick steps up the chord, the last one held.  Faster when longer.
+	var step := 0.052 - 0.004 * float(level - 1)
+	for k in range(run.size()):
+		var last := k == run.size() - 1
+		var pitch := _pull_se_pitch(int(run[k]))
+		var at := 0.012 + float(k) * step
+		notes.append({"t": at, "f": pitch, "dur": 0.26 if last else 0.085, "vol": 0.22 if last else 0.18, "wave": "thin", "attack": 0.003, "decay": 0.20 if last else 0.05})
+		notes.append({"t": at, "f": pitch * 2.0, "dur": 0.20 if last else 0.06, "vol": 0.09, "wave": "sine", "attack": 0.003, "decay": 0.15 if last else 0.04})
+	var top := _pull_se_pitch(int(run[run.size() - 1]))
+	var landing := 0.012 + float(run.size() - 1) * step
+	if level >= 3:
+		# Shimmer: the top note and its fifth flicker above the held note.
+		for k in range(4 + level):
+			notes.append({"t": landing + 0.05 + float(k) * 0.034, "f": top * (2.0 if k % 2 == 0 else 1.5), "dur": 0.05, "vol": 0.065, "wave": "sine", "attack": 0.002, "decay": 0.04})
+	if level >= 4:
+		# A held C major chord under the run turns the hit into a small fanfare.
+		for degree in [0, 2, 3, 5]:
+			notes.append({"t": landing, "f": _pull_se_pitch(degree), "dur": 0.42, "vol": 0.085, "wave": "tri", "attack": 0.01, "decay": 0.30})
+	if level >= 5:
+		notes.append({"t": 0.0, "f": 98.0, "f_end": 41.0, "dur": 0.36, "vol": 0.5, "wave": "sine", "attack": 0.002, "decay": 0.28})
+	if clean: notes.append({"t": landing + 0.09, "f": top * 2.0, "dur": 0.10, "vol": 0.09, "wave": "sine", "attack": 0.002, "decay": 0.08})
+	return notes
+
+# Echo taps (delay seconds, gain) that follow a pull sound.  PERFECT rings on;
+# GOOD and MISS stop dry, which is part of what makes PERFECT feel bigger.
+func _pull_se_echo(grade: String, streak: int = 0) -> Array:
+	if grade != "PERFECT": return []
+	return [[0.085, 0.30]] if streak < 3 else [[0.085, 0.32], [0.17, 0.16]]
+
+func _se_wave(wave: String, phase: float, index: int) -> float:
+	var p := fmod(phase, 1.0)
+	match wave:
+		"tri": return 1.0 - 4.0 * absf(p - 0.5)
+		"square": return 1.0 if p < 0.5 else -1.0
+		"thin": return 1.0 if p < 0.25 else -0.34
+		"noise": return absf(fmod(sin(float(index) * 12.9898) * 43758.5453, 1.0)) * 2.0 - 1.0
+		_: return sin(TAU * p)
+
+# Mixes notes into one mono buffer, adds echo taps, and keeps the peak under 0.9
+# so a dense sound is turned down as a whole rather than clipped.
+func _render_se(notes: Array, echo: Array = []) -> PackedFloat32Array:
+	var length := 0.0
+	for note in notes: length = maxf(length, float(note.t) + float(note.dur))
+	var tail := 0.0
+	for tap in echo: tail = maxf(tail, float(tap[0]))
+	length = minf(length + tail + 0.02, PULL_SE_MAX_SECONDS)
+	var out := PackedFloat32Array()
+	out.resize(int(length * SE_RATE))
+	for note in notes:
+		var start := int(float(note.t) * SE_RATE)
+		var count := int(float(note.dur) * SE_RATE)
+		var f0 := float(note.f)
+		var f1 := float(note.get("f_end", f0))
+		var wave := str(note.get("wave", "sine"))
+		var attack := maxf(0.0005, float(note.get("attack", 0.004)))
+		var decay := maxf(0.0005, float(note.get("decay", 0.05)))
+		var dur := float(note.dur)
+		var vol := float(note.vol)
+		var phase := 0.0
+		for i in range(count):
+			var at := start + i
+			if at >= out.size(): break
+			var t := float(i) / SE_RATE
+			phase += lerpf(f0, f1, t / dur) / SE_RATE
+			out[at] += _se_wave(wave, phase, at) * vol * minf(1.0, t / attack) * minf(1.0, (dur - t) / decay)
+	for tap in echo:
+		var offset := int(float(tap[0]) * SE_RATE)
+		var gain := float(tap[1])
+		# Walk backwards so each tap reads the dry signal, not its own echo.
+		for i in range(out.size() - 1, offset - 1, -1):
+			out[i] += out[i - offset] * gain
+	var peak := 0.0
+	for sample in out: peak = maxf(peak, absf(sample))
+	if peak > 0.9:
+		var scale := 0.9 / peak
+		for i in range(out.size()): out[i] *= scale
+	return out
+
+func _play_pull_se(grade: String, streak: int = 0, clean: bool = false) -> void:
+	last_pull_se = grade if grade != "PERFECT" else "PERFECT x%d" % clampi(streak, 1, PULL_SE_MAX_STREAK)
+	var playback := _se_playback()
+	if playback == null: return
+	for sample in _render_se(_pull_se_notes(grade, streak, clean), _pull_se_echo(grade, streak)):
+		if not playback.can_push_buffer(1): break
+		playback.push_frame(Vector2.ONE * sample)
 
 func _finish_cast():
 	# Compatibility helper for old saves/tests: resolve a generous GOOD hit.

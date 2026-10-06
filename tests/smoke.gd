@@ -1101,7 +1101,7 @@ func run():
 	check(fx.impacts[0].tier==2 and int(fx.counters.get('flash',0))==1 and perfect_particles>good_particles and perfect_shake>good_shake and fx.hitstop_t>good_stop,'a PERFECT pull is visibly bigger than a GOOD one')
 	fx.clear_show(); fx.counters.clear(); fx.flash_log.clear(); fx.sounds.clear()
 	fx.pull('PERFECT',impact_pos,3,0.2,3,true)
-	check(fx.impacts[0].tier==4 and fx.impacts[0].streak==3 and fx.impacts[0].clean and fx.particles.size()>perfect_particles and fx.shake_power>perfect_shake and fx.chroma()>0.0 and fx.sounds.has('streak'),'a PERFECT streak climbs to the top impact tier')
+	check(fx.impacts[0].tier==4 and fx.impacts[0].streak==3 and fx.impacts[0].clean and fx.particles.size()>perfect_particles and fx.shake_power>perfect_shake and fx.chroma()>0.0,'a PERFECT streak climbs to the top impact tier')
 	check(game.fx_front._impact_label(fx.impacts[0])=='PERFECT x3!!' and game.fx_front._impact_label({'tier':1,'streak':0})=='GOOD!' and game.fx_front._impact_label({'tier':0,'streak':0})=='STRAIN!','each impact names its grade')
 	check(fx.IMPACT_MAX_DUR<game.PULL_COOLDOWN and fx.IMPACT_DURS.max()<=fx.IMPACT_MAX_DUR,'every pull impact ends well inside the pull cooldown')
 	# The top tier's look is capped but its count is not.
@@ -1141,6 +1141,47 @@ func run():
 	game.pull_cooldown=0.0; game._handle_fishing_strike(0.5)
 	game.pull_cooldown=0.0; game.battle_tension=0.0; game._handle_fishing_strike(0.05)
 	check(game.perfect_streak==0 and fx.impacts[fx.impacts.size()-1].tier==0,'a strained pull ends the PERFECT streak')
+	# Pull sounds: one voice per grade, and a PERFECT streak that climbs.
+	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(8.0)
+	game.pull_cooldown=0.0; game._handle_fishing_strike(0.30)
+	var heard: Array = [game.last_pull_se]
+	for i in range(3):
+		game.pull_cooldown=0.0; game.battle_tension=0.0; game._handle_fishing_strike(0.5); heard.append(game.last_pull_se)
+	game.pull_cooldown=0.0; game.battle_tension=0.0; game._handle_fishing_strike(0.05); heard.append(game.last_pull_se)
+	game.pull_cooldown=0.0; game.battle_tension=0.0; game._handle_fishing_strike(0.5); heard.append(game.last_pull_se)
+	check(heard==['GOOD','PERFECT x1','PERFECT x2','PERFECT x3','MISS','PERFECT x1'],'each pull plays the sound of its grade and streak, and a miss restarts the climb')
+	game._reset_fishing()
+	var miss_notes: Array = game._pull_se_notes('MISS')
+	var good_notes: Array = game._pull_se_notes('GOOD')
+	var top_of := func(notes: Array) -> float:
+		var top := 0.0
+		for note in notes:
+			if str(note.wave) != 'noise': top = maxf(top, float(note.f))
+		return top
+	var miss_falls := true
+	for note in miss_notes:
+		if str(note.wave) != 'noise' and float(note.get('f_end', note.f)) >= float(note.f): miss_falls = false
+	check(miss_falls and top_of.call(miss_notes)<200.0 and miss_notes.any(func(note): return str(note.wave)=='square'),'a missed pull is a low, falling buzz')
+	check(top_of.call(good_notes)>top_of.call(miss_notes)*2.0 and good_notes.all(func(note): return str(note.wave) in ['sine','tri']),'a GOOD pull is a soft, higher two-note tone')
+	var tops: Array = []; var sizes: Array = []; var lengths: Array = []; var climbs := true
+	for streak in range(1, game.PULL_SE_MAX_STREAK+1):
+		var perfect_notes: Array = game._pull_se_notes('PERFECT', streak)
+		var rendered: PackedFloat32Array = game._render_se(perfect_notes, game._pull_se_echo('PERFECT', streak))
+		tops.append(top_of.call(perfect_notes)); sizes.append(perfect_notes.size()); lengths.append(rendered.size())
+		if streak>1 and (tops[streak-1]<=tops[streak-2] or sizes[streak-1]<sizes[streak-2] or lengths[streak-1]<lengths[streak-2]-200): climbs = false
+	check(climbs and tops[0]>top_of.call(good_notes) and sizes[4]>sizes[0]*2,'every PERFECT in a streak reaches higher and carries more than the last')
+	check(game._pull_se_notes('PERFECT',9).size()==game._pull_se_notes('PERFECT',game.PULL_SE_MAX_STREAK).size() and game._pull_se_notes('PERFECT',0).size()==game._pull_se_notes('PERFECT',1).size(),'the streak sound is bounded at both ends')
+	check(game._pull_se_notes('GOOD',0,true).size()==good_notes.size()+1 and game._pull_se_notes('PERFECT',2,true).size()==game._pull_se_notes('PERFECT',2).size()+1,'a clean beat adds one high note to either grade')
+	check(game._pull_se_echo('MISS').is_empty() and game._pull_se_echo('GOOD').is_empty() and game._pull_se_echo('PERFECT',1).size()==1 and game._pull_se_echo('PERFECT',3).size()==2,'only PERFECT rings on with an echo')
+	var peaks := {}
+	var sound_ok := true
+	for sound_case in [['MISS',0],['GOOD',0],['PERFECT',1],['PERFECT',5]]:
+		var wave: PackedFloat32Array = game._render_se(game._pull_se_notes(sound_case[0], sound_case[1], true), game._pull_se_echo(sound_case[0], sound_case[1]))
+		var peak := 0.0
+		for sample in wave: peak = maxf(peak, absf(sample))
+		peaks['%s%d' % sound_case] = peak
+		if peak<0.2 or peak>0.9001 or wave.size()>int(game.PULL_SE_MAX_SECONDS*game.SE_RATE): sound_ok = false
+	check(sound_ok and peaks['PERFECT1']>peaks['GOOD0'] and peaks['PERFECT5']>=peaks['PERFECT1'],'every pull sound is audible, unclipped and under a second, and PERFECT is the loudest')
 	# Nothing a pull throws outlives the impact: the top tier's poppers and sparks
 	# are all gone before the next pull can be timed.
 	fx.clear_show(); fx.flash_log.clear()
