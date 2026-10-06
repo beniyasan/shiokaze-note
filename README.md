@@ -10,7 +10,9 @@ The playable slice uses a 480×270 integer-scaled viewport over the same broad 6
 
 ## Fishing battle
 
-Space starts a cast at the shore or pier. After the bite, the fish battle is a short tug-of-war rather than a single instant check:
+Space starts a cast at the shore or pier. The float flies out and lands, a fish shadow circles in beneath it, and the float twitches with one to three nibbles before the bite, two to three and a half seconds after the cast (FEVER nearly halves that). Nothing on screen says when the bite will come. A quiet cast can also draw no bite at all: the shadow turns away, the tackle is spent, and the chain and rescue meter are left as they were. That never happens during FEVER or on a cast whose cue promises something (a purple or hotter float, a fish school, the golden tide), and better bait makes it rarer.
+
+After the bite, the fish battle is a short tug-of-war rather than a single instant check:
 
 - Follow the moving gauge and press Space in the teal/gold zone for repeated pulls
 - Hold the opposite WASD/arrow direction shown on screen to counter the fish's escape direction
@@ -162,7 +164,9 @@ XDG_DATA_HOME=/tmp/godot-data XDG_CACHE_HOME=/tmp/godot-cache XDG_CONFIG_HOME=/t
 ## Tackle economy and fair rescue forecast
 
 Bait is consumed on every cast and rods charge a small maintenance fee on the
-same cast. Worms and the Reed Rod are free, reliable fallbacks. Glowbait and
+same cast, whether or not the cast draws a bite. Worms and the Reed Rod are free,
+reliable fallbacks. Bait also decides how often a quiet cast is bitten: Worm 80%,
+Glowbait 90%, Moonseed always. Glowbait and
 Moonseed cost 2 and 4 shells and increase rarity odds, but make an uncountered
 fish surge harder. Fiberglass costs 2 shells and reduces line strain while
 slowing the bite; Stormglass costs 4 shells and suppresses escape while making

@@ -16,6 +16,9 @@ func walk_to(game, target: Vector2, frames: int = 900) -> bool:
 func run():
 	var game = load('res://main.tscn').instantiate()
 	root.add_child(game); game.set_process(false)
+	# Every cast under test reaches its bite; the no-bite outcome has its own
+	# tests further down, which switch it back on.
+	game.no_bite_enabled=false
 	check(game._walkable(game.player),'spawn is walkable')
 	check(not game._walkable(Vector2(240,300)) and not game._walkable(Vector2(478,150)) and not game._walkable(Vector2(800,260)),'cottage garden, inn and market block movement')
 	check(not game._walkable(Vector2(505,280)) and game._walkable(Vector2(505,345)),'the fountain blocks movement but the plaza around it is open')
@@ -77,7 +80,7 @@ func run():
 	# EFFECTS_DESIGN.md), so tests wait long enough for any cue to bite.
 	check(game.fishing_state==game.FishingState.ANTICIPATING,'fishing bite anticipation starts')
 	var cast_species := str(game.cast_candidate.get('name',''))
-	game._process_fishing(4.0)
+	game._process_fishing(8.0)
 	check(game.fishing_state==game.FishingState.TIMING,'bite opens timing window')
 	game._resolve_fishing_timing(0.5)
 	check(game.fishing_state==game.FishingState.RESULT and game.last_grade=='PERFECT','perfect timing resolves result')
@@ -121,7 +124,7 @@ func run():
 	game.notebook_open=false; game._try_fish()
 	check(game.cast_timer>0,'valid cast starts timed sequence')
 	check(game.fishing_state == game.FishingState.ANTICIPATING,'cast enters bite anticipation')
-	game._process_fishing(4.0)
+	game._process_fishing(8.0)
 	game._resolve_fishing_timing(0.5)
 	check(game.last_grade=='PERFECT' and game.combo>=1,'perfect timing awards grade and combo')
 	# The cast keeps a PERFECT-pool candidate, while the mini-game grade still
@@ -520,12 +523,12 @@ func run():
 	game.player=Vector2(497,151)
 	# Use a legal rocky tide for the battle probes; empty pools now refuse casts.
 	game.time_of_day=0.50; game.weather='clear'; game.season='summer'
-	game._try_fish(); game._process_fishing(4.0)
+	game._try_fish(); game._process_fishing(8.0)
 	check(game.fish_hp_max==game.FISH_STAMINA and game.timing_timer==20.0,'battle starts with stamina and a 20 second limit')
 	var chain_stamina: int = game.fish_hp_max
-	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(4.0)
+	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(8.0)
 	check(game.fish_hp_max==chain_stamina,'a longer chain does not raise fish stamina')
-	game._reset_fishing(); game._break_chain(); game.combo=2; game._try_fish(); game._process_fishing(4.0)
+	game._reset_fishing(); game._break_chain(); game.combo=2; game._try_fish(); game._process_fishing(8.0)
 	var before_battle=game.fish_count
 	game._handle_fishing_strike(0.5)
 	check(game.fish_count==before_battle and game.battle_hits==0,'initial tug cooldown rejects instant catch')
@@ -546,13 +549,13 @@ func run():
 		game._process_fishing(1.7); check(game.legendary_stage==3,'legendary advances to afterglow')
 	else:
 		check(game.last_rarity in ['COMMON','UNCOMMON','RARE','EPIC'],'bounded rarity result is valid')
-	game._reset_fishing(); game._try_fish(); game._process_fishing(4.0)
+	game._reset_fishing(); game._try_fish(); game._process_fishing(8.0)
 	game._process_fishing(1.1)
 	game._handle_fishing_strike(0.0)
 	check(game.fishing_state==game.FishingState.TIMING and game.battle_tension>0.4,'bad pull strains the line without instant failure')
 	# The gauge alone decides a pull; the challenge zone is only a bonus.
 	for seed in range(4):
-		game._reset_fishing(); game._break_chain(); game.combo=2; game._try_fish(); game._process_fishing(4.0)
+		game._reset_fishing(); game._break_chain(); game.combo=2; game._try_fish(); game._process_fishing(8.0)
 		game.fishing_challenge.configure(3,2,seed)
 		var style: String = game.fishing_challenge.current_game_name()
 		while game.pull_cooldown>0.0: game._process_fishing(1.0/60.0)
@@ -581,7 +584,7 @@ func run():
 	check(game.last_grade=='MISS' and game.combo==0,'repeated bad pulls can snap the line and reset combo')
 	game._reset_fishing()
 	check(game.fish_hp==0 and game.battle_hits==0 and game.legendary_t==0.0,'reset clears battle and celebration state')
-	game._try_fish(); game._process_fishing(4.0); game._process_fishing(21.0)
+	game._try_fish(); game._process_fishing(8.0); game._process_fishing(21.0)
 	check(game.last_grade=='MISS','battle timeout loses the fish')
 	# The standalone chain exposes all four deterministic mini-game styles.
 	var ChallengeScript = preload('res://fishing_challenge.gd')
@@ -600,13 +603,13 @@ func run():
 		check(recovered.success,'challenge %s can recover at its visible target' % starting_name)
 	# A combo-two battle wires the chain into the live timing state.
 	game._reset_fishing(); game._break_chain(); game.combo=2; game.player=Vector2(497,151)
-	game._try_fish(); game._process_fishing(4.0)
+	game._try_fish(); game._process_fishing(8.0)
 	check(game.fishing_challenge != null and game.fishing_challenge.rounds.size()==4,'bite configures the four-round challenge chain')
 	# Use the real moving gauge at 60fps, rather than injecting perfect positions.
 	# This proves each rotated chain can be caught through the normal key path.
 	for seed in range(4):
 		game._reset_fishing(); game._break_chain(); game.combo=2
-		game._try_fish(); game._process_fishing(4.0)
+		game._try_fish(); game._process_fishing(8.0)
 		game.fishing_challenge.configure(3,2,seed)
 		for frame in range(1200):
 			if game.fishing_state != game.FishingState.TIMING: break
@@ -911,7 +914,110 @@ func run():
 	check(ladder_ok and fx.wait_extension(0)==0.0,'wait extension climbs with heat and is zero for a quiet float')
 	var rod_mult := float(game.RODS[game.rod_index].get('bite_mult',1.0))
 	var base_delay: float = game.bite_delay - fx.wait_extension(game.fx_heat)
-	check(base_delay >= 0.72*rod_mult - 0.001 and base_delay <= 1.42*rod_mult + 0.001,'bite delay is the base roll plus the heat extension')
+	var wait_scale: float = game.FEVER_WAIT_SCALE if game.fever_active else 1.0
+	check(base_delay >= game.BITE_WAIT_MIN*rod_mult*wait_scale - fx.wait_extension(game.fx_heat)*(1.0-wait_scale) - 0.001 and base_delay <= game.BITE_WAIT_MAX*rod_mult + 0.001,'bite delay is the base roll plus the heat extension')
+	# --- The wait: flight, nibbles, a longer breath, and casts that do not bite.
+	var wait_state := {'map':game.current_map,'player':game.player,'time':game.time_of_day,'weather':game.weather,'season':game.season,'bait':game.bait_index,'rod':game.rod_index,'shells':game.shells}
+	game._reset_fishing(); game._break_chain(); game._reset_pity()
+	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530)
+	game.time_of_day=0.5; game.weather='clear'; game.season='spring'; game.bait_index=0; game.rod_index=0; game.shells=9999
+	var shortest := 99.0; var longest := 0.0; var nibble_ok := true; var nibble_counts := {}
+	for i in range(300):
+		game._reset_fishing(); game._try_fish()
+		var quiet_delay: float = game.bite_delay - fx.wait_extension(game.fx_heat)
+		shortest = minf(shortest, quiet_delay); longest = maxf(longest, quiet_delay)
+		nibble_counts[game.nibble_times.size()] = true
+		var last_nibble: float = game.CAST_FLIGHT_TIME
+		for at in game.nibble_times:
+			if at <= last_nibble or at >= game.bite_delay: nibble_ok = false
+			last_nibble = at
+		var expected_most := 2 if game.fx_heat<=1 else 3
+		if game.nibble_times.size()<1 or game.nibble_times.size()>expected_most: nibble_ok = false
+	check(shortest>=game.BITE_WAIT_MIN-0.001 and longest<=game.BITE_WAIT_MAX+0.001 and longest-shortest>1.0,'a cast waits %.1f to %.1f seconds before the bite (was about one)' % [game.BITE_WAIT_MIN, game.BITE_WAIT_MAX])
+	check(nibble_ok and nibble_counts.has(1) and nibble_counts.has(2),'each wait schedules one to three nibbles, in order, after the float lands and before the bite')
+	# Walking one cast through at 60fps: it lands, twitches, then bites.
+	game._reset_fishing(); fx.counters.clear(); game._try_fish()
+	var planned_nibbles: int = game.nibble_times.size()
+	check(game._cast_flight_progress()==0.0 and not game.cast_landed,'the float starts at the rod tip')
+	game._process_fishing(game.CAST_FLIGHT_TIME*0.5)
+	check(game._cast_flight_progress()>0.4 and game._cast_flight_progress()<0.6 and not game.cast_landed and int(fx.counters.get('cast_splash',0))==0,'the float is in the air for the first part of the cast')
+	var dipped := false
+	for frame in range(600):
+		if game.fishing_state != game.FishingState.ANTICIPATING: break
+		game._process_fishing(1.0/60.0)
+		if game._nibble_dip()>0.5: dipped = true
+	check(game.cast_landed and int(fx.counters.get('cast_splash',0))==1,'the float lands with one splash')
+	check(dipped and int(fx.counters.get('nibble',0))==planned_nibbles,'every planned nibble dips the float before the bite')
+	check(game.fishing_state==game.FishingState.TIMING and int(fx.counters.get('no_bite',0))==0,'a normal cast ends its wait with a bite')
+	# The wait's own rolls never shift the gameplay stream, whatever they decide.
+	game._reset_fishing(); game.no_bite_enabled=true
+	game.rng.seed=5150; fx.rng.seed=3; game.wait_rng.seed=1; game._try_fish()
+	var wait_cand := str(game.cast_candidate.get('name','')); var wait_stream: int = game.rng.state
+	game._reset_fishing(); game.rng.seed=5150; fx.rng.seed=3; game.wait_rng.seed=987654; game._try_fish()
+	check(wait_cand==str(game.cast_candidate.get('name','')) and wait_stream==game.rng.state,'nibble and no-bite rolls never shift the gameplay RNG')
+	game._reset_fishing(); game.no_bite_enabled=false
+	# In town the float lands on open water, not on the harbour wall or the decking.
+	game.player=Vector2(620,392)
+	var quay_float: Vector2 = game._float_world_pos()
+	game.player=Vector2(502,530)
+	var pier_float: Vector2 = game._float_world_pos()
+	check(not game._walkable(quay_float) and quay_float.y>470.0 and not game._walkable(pier_float) and pier_float.x<game.TOWN_PIER_SPAN.x,'town casts reach the water past the quay wall and off the side of the pier')
+	check(game._can_fish_at(Vector2(620,392)) and not game._can_fish_at(Vector2(180,392)) and not game._can_fish_at(Vector2(820,392)) and game._can_fish_at(Vector2(502,430)),'the quay is fished only where the wall drops into water')
+	game.current_map='beach'; game._build_map('beach'); game.player=Vector2(205,157)
+	check(game._float_world_pos()==Vector2(220,189),'other maps keep the float at the hero\'s feet')
+	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530)
+	# FEVER is a feeding frenzy: shorter waits.
+	game._reset_fishing(); game.rng.seed=4242; game._try_fish()
+	var calm_wait: float = game.bite_delay - fx.wait_extension(game.fx_heat)
+	game._reset_fishing(); game.rng.seed=4242; game.combo=3; game.fever_active=true; game.fever_t=30.0; game._try_fish()
+	var fever_heat_wait: float = fx.wait_extension(game.fx_heat)
+	check(game.bite_delay<=(calm_wait+fever_heat_wait)*game.FEVER_WAIT_SCALE+0.001 and game.bite_delay<calm_wait,'FEVER shortens the wait')
+	game._reset_fishing(); game._break_chain()
+	# No bite: only on quiet casts, by bait, never in FEVER.
+	game.no_bite_enabled=true
+	game.fx_premium=false; game.fx_school=false; game.fx_heat=1
+	game.bait_index=0; var worm_chance: float = game.no_bite_chance()
+	game.bait_index=1; var glow_chance: float = game.no_bite_chance()
+	game.bait_index=2; var moon_chance: float = game.no_bite_chance()
+	check(is_equal_approx(worm_chance,0.20) and is_equal_approx(glow_chance,0.10) and moon_chance==0.0 and game.bite_chance_percent()==100,'better bait draws more bites: Worm 80%, Glowbait 90%, Moonseed always')
+	game.bait_index=0
+	game.fx_heat=2; var purple_chance: float = game.no_bite_chance()
+	game.fx_heat=1; game.fx_school=true; var school_chance: float = game.no_bite_chance()
+	game.fx_school=false; game.fx_premium=true; var premium_chance: float = game.no_bite_chance()
+	game.fx_premium=false; game.fever_active=true; var fever_chance: float = game.no_bite_chance()
+	game.fever_active=false
+	check(purple_chance==0.0 and school_chance==0.0 and premium_chance==0.0 and fever_chance==0.0,'a cue that promises something, and FEVER, always bite')
+	var quiet_casts := 0; var quiet_misses := 0; var loud_misses := 0
+	for i in range(1500):
+		game._reset_fishing(); game._try_fish()
+		var quiet: bool = game.fx_heat<=1 and not game.fx_school and not game.fx_premium
+		if quiet: quiet_casts += 1
+		if game.cast_no_bite:
+			if quiet: quiet_misses += 1
+			else: loud_misses += 1
+	var miss_rate := float(quiet_misses)/float(maxi(1,quiet_casts))
+	check(loud_misses==0 and quiet_casts>800 and miss_rate>0.15 and miss_rate<0.25,'Worm misses about one quiet cast in five and no promised one (%.1f%% of %d)' % [miss_rate*100.0, quiet_casts])
+	# One no-bite cast, start to finish: tackle is paid, nothing else changes.
+	game._reset_fishing(); game._break_chain(); game._reset_pity(); game.bait_index=1; game.rod_index=1; game.shells=50
+	game.combo=2; game.pity_meter=1
+	var miss_fish: int = game.fish_count; var miss_cost: int = game.tackle_cost()
+	for attempt in range(400):
+		game._reset_fishing(); game.shells=50; game._try_fish()
+		if game.cast_no_bite: break
+	check(game.cast_no_bite and game.shells==50-miss_cost and miss_cost==4,'a cast that will not bite still pays its tackle')
+	var miss_full_wait: float = game.bite_delay
+	fx.counters.clear()
+	for frame in range(600):
+		if game.cast_leaving_t>0.0 or game.fishing_state != game.FishingState.ANTICIPATING: break
+		game._process_fishing(1.0/60.0)
+	check(game.fishing_state==game.FishingState.ANTICIPATING and game.cast_leaving_t>0.0 and int(fx.counters.get('no_bite',0))==1 and game.fish_hp_max==0,'the fish turns away instead of opening a battle')
+	check(miss_full_wait<game.BITE_WAIT_MAX*1.16*game.NO_BITE_WAIT_MAX+0.001,'a fish that will not bite gives up before a full wait')
+	game._process_fishing(game.NO_BITE_LEAVE_TIME+0.01)
+	check(game.fishing_state==game.FishingState.IDLE and game.combo==2 and game.pity_meter==1 and game.fish_count==miss_fish and not game.catch_choice_pending() and game.toast.contains('No bite') and game.toast.contains('CHAIN 2 kept'),'no bite keeps the chain and the rescue meter and lands nothing')
+	game.no_bite_enabled=false
+	game._reset_fishing(); game._break_chain(); game._reset_pity()
+	game.current_map=wait_state.map; game._build_map(wait_state.map); game.player=wait_state.player; game.time_of_day=wait_state.time; game.weather=wait_state.weather; game.season=wait_state.season
+	game.bait_index=wait_state.bait; game.rod_index=wait_state.rod; game.shells=wait_state.shells
 	# Documented contract: a natural cast never starts below H1 (gold is reachable
 	# on every cast), so the blue H0 look only appears when a reversal steps the
 	# float back, and every cast carries at least the gold wait extension.
@@ -1026,7 +1132,7 @@ func run():
 	check(fx.impacts.is_empty(),'resetting the show clears pull impacts')
 	# The live battle feeds the streak: PERFECT pulls build it, anything else ends it.
 	game._reset_fishing(); game._break_chain(); game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530)
-	game.time_of_day=0.5; game.weather='clear'; game.season='spring'; game._try_fish(); game._process_fishing(4.0)
+	game.time_of_day=0.5; game.weather='clear'; game.season='spring'; game._try_fish(); game._process_fishing(8.0)
 	game.pull_cooldown=0.0; game._handle_fishing_strike(0.5)
 	game.pull_cooldown=0.0; game._handle_fishing_strike(0.5)
 	check(game.perfect_streak==2 and fx.impacts[fx.impacts.size()-1].tier==3,'two PERFECT pulls in a row raise the impact tier')
@@ -1048,7 +1154,7 @@ func run():
 	fx.update(fx.IMPACT_MAX_DUR+0.01)
 	check(fx.particles.is_empty() and fx.impacts.is_empty(),'a pull leaves nothing on screen once its impact is over')
 	# The pull that lands the fish still shows its impact over the landing.
-	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(4.0)
+	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(8.0)
 	for i in range(8):
 		if game.fishing_state != game.FishingState.TIMING: break
 		game.pull_cooldown=0.0; game._handle_fishing_strike(0.5)
@@ -1057,7 +1163,7 @@ func run():
 	check(fx.impacts.is_empty(),'the finishing impact is gone before the card can be read')
 	check(fx.IMPACT_MAX_DUR<game._reveal_face_time()*0.62,'the finishing impact ends before even a shortened reveal turns the card')
 	# A line that snaps on a strained pull shows LINE SNAPPED, not STRAIN!.
-	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(4.0)
+	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(8.0)
 	game.pull_cooldown=0.0; game.battle_tension=0.95; game._handle_fishing_strike(0.05)
 	check(game.last_grade=='MISS' and fx.impacts.is_empty() and fx.pops.size()==1,'a snapped line replaces the strained impact with its own callout')
 	game._reset_fishing(); fx.flash_log.clear()

@@ -34,10 +34,11 @@ var rod_index := 0
 const BAITS: Array[Dictionary] = [
  # Bait is a per-cast consumable.  The brighter baits improve rarity odds,
  # but their scent also makes a hooked fish surge harder.  Worm is a safe,
- # free fallback rather than a strictly-worse tutorial item.
- {"name":"Worm","cost":0,"rarity_bonus":0.0,"tension_bonus":0.0,"escape_mult":1.0,"risk":"steady"},
- {"name":"Glowbait","cost":2,"rarity_bonus":0.14,"tension_bonus":0.06,"escape_mult":1.06,"risk":"warm line"},
- {"name":"Moonseed","cost":4,"rarity_bonus":0.28,"tension_bonus":0.12,"escape_mult":1.14,"risk":"hot line"}
+ # free fallback rather than a strictly-worse tutorial item.  "no_bite" is the
+ # chance a quiet cast draws no bite at all (see no_bite_chance).
+ {"name":"Worm","cost":0,"rarity_bonus":0.0,"tension_bonus":0.0,"escape_mult":1.0,"no_bite":0.20,"risk":"steady"},
+ {"name":"Glowbait","cost":2,"rarity_bonus":0.14,"tension_bonus":0.06,"escape_mult":1.06,"no_bite":0.10,"risk":"warm line"},
+ {"name":"Moonseed","cost":4,"rarity_bonus":0.28,"tension_bonus":0.12,"escape_mult":1.14,"no_bite":0.0,"risk":"hot line"}
 ]
 const RODS: Array[Dictionary] = [
  # Rods are also maintenance costs paid when a cast starts.  Each model has a
@@ -165,6 +166,31 @@ enum FishingState { IDLE, ANTICIPATING, TIMING, RESULT }
 var fishing_state: FishingState = FishingState.IDLE
 var bite_timer := 0.0
 var bite_delay := 1.1
+# The wait between the cast and the bite (see EFFECTS_DESIGN.md, "待ち").  The
+# float flies out and lands, a fish shadow circles in, the float twitches with
+# one to three nibbles, and then it either bites or, on a quiet cast, slips away.
+const CAST_FLIGHT_TIME := 0.4
+const BITE_WAIT_MIN := 2.0
+const BITE_WAIT_MAX := 3.5
+# FEVER is a feeding frenzy: shorter waits and every cast bites.
+const FEVER_WAIT_SCALE := 0.55
+# A fish that will not bite loses interest before a full wait has passed.
+const NO_BITE_WAIT_MIN := 0.55
+const NO_BITE_WAIT_MAX := 0.80
+const NO_BITE_LEAVE_TIME := 0.6
+const NIBBLE_TIME := 0.28
+# Nibble timing and the no-bite roll use their own stream, like the FX
+# director's cues, so adding them cannot change which fish a cast rolls.
+var wait_rng := RandomNumberGenerator.new()
+# Smoke tests switch this off so a cast under test always reaches its bite.
+var no_bite_enabled := true
+var cast_no_bite := false
+var cast_landed := false
+var cast_leaving_t := 0.0
+var nibble_times: Array[float] = []
+var nibble_index := 0
+var nibble_t := 0.0
+var nibble_strength := 1.0
 var timing_timer := 0.0
 var timing_window := 0.72
 var gauge := 0.0
@@ -347,6 +373,7 @@ func _ready():
 		add_child(music)
 		_music_call("start_field")
 	rng.randomize()
+	wait_rng.randomize()
 	if not OS.get_cmdline_user_args().has("--fresh"):
 		_load_game()
 	queue_redraw()
@@ -806,9 +833,26 @@ func toggle_reduced_flash() -> void:
 	toast = "FLASH  REDUCED  (F to restore)" if fx.reduced else "FLASH  NORMAL  (F to reduce)"
 	toast_t = 2.0
 
+# Where the float sits on the water, in world space.  Most banks have water at
+# the hero's feet.  Saltmere's quay stands on a tall harbour wall and the pier
+# is decking, so there the line is cast out to the open water instead: straight
+# down past the wall from the quay, and off the west side from the pier.
+const TOWN_WATER_Y := 498.0
+const TOWN_QUAY_WATER_SPAN := Vector2(250, 760)
+const TOWN_PIER_SPAN := Vector2(462, 564)
+const TOWN_PIER_WATER_X := 448.0
+
+func _float_world_pos() -> Vector2:
+	var feet := player.round()
+	if current_map == "town":
+		if feet.x >= TOWN_PIER_SPAN.x and feet.x <= TOWN_PIER_SPAN.y:
+			return Vector2(TOWN_PIER_WATER_X, clampf(feet.y + 10.0, 488.0, 590.0))
+		return Vector2(feet.x + 15.0, TOWN_WATER_Y)
+	return feet + Vector2(15, 32)
+
 # Screen position (480x270 HUD space) of the float, for splashes and pops.
 func _float_screen_pos() -> Vector2:
-	var world := player.round() + Vector2(15, 32)
+	var world := _float_world_pos()
 	if not is_inside_tree(): return Vector2(240, 160)
 	return get_viewport().get_canvas_transform() * world
 
@@ -891,9 +935,10 @@ func _can_fish_at(pos: Vector2) -> bool:
 	for spot in _fishing_spots():
 		if pos.distance_to(spot.pos) <= 24.0: return true
 	if current_map == "grotto": return false
-	# Town casts from the harbour edge: the quay's seaward strip or anywhere on
-	# the pier. The east sand is the way out, not a fishing bank.
-	if current_map == "town": return pos.y >= 380.0 and pos.x < 940.0
+	# Town casts from the harbour edge: anywhere on the pier, or the quay's
+	# seaward strip where the wall drops into water (the west end stands over
+	# rocks and sand, the east end over reeds and the beach).
+	if current_map == "town": return pos.y >= 380.0 and pos.x > TOWN_QUAY_WATER_SPAN.x and pos.x < TOWN_QUAY_WATER_SPAN.y
 	return (pos.y >= _shore(pos.x)-21 and pos.x>70 and pos.x<810)
 
 func _fishing_spots() -> Array[Dictionary]:
@@ -1616,7 +1661,7 @@ func tackle_summary() -> String:
 func cycle_bait(step: int = 1) -> void:
 	if fishing_state != FishingState.IDLE: return
 	bait_index = posmod(bait_index + step, BAITS.size())
-	toast = "%s selected (%d shells/cast, rarity +%d%%, %s)" % [bait_name(), bait_cost(), int(BAITS[bait_index].rarity_bonus * 100.0), str(BAITS[bait_index].get("risk", "steady"))]
+	toast = "%s selected (%d shells/cast, rarity +%d%%, bites %d%%, %s)" % [bait_name(), bait_cost(), int(BAITS[bait_index].rarity_bonus * 100.0), bite_chance_percent(), str(BAITS[bait_index].get("risk", "steady"))]
 	toast_t = 2.0
 func cycle_rod(step: int = 1) -> void:
 	if fishing_state != FishingState.IDLE: return
@@ -1675,8 +1720,9 @@ func _try_fish():
 			promotion_cue_rank = 2
 		promotion_reversal_armed = rng.randf() < PROMOTION_REVERSAL_CHANCE
 		cast_timer = 1.8
-		bite_delay = rng.randf_range(0.72, 1.42) * float(RODS[rod_index].get("bite_mult", 1.0))
+		bite_delay = rng.randf_range(BITE_WAIT_MIN, BITE_WAIT_MAX) * float(RODS[rod_index].get("bite_mult", 1.0))
 		_plan_cast_fx()
+		_plan_cast_wait()
 		bite_timer = 0.0
 		face = 0
 		toast = "Line out... %s" % tackle_summary()
@@ -1719,6 +1765,58 @@ func _plan_cast_fx() -> void:
 	reveal_glow_start = -1
 	fx.cast(fx_heat)
 
+# Chance that this cast draws no bite.  It is only ever non-zero on a quiet
+# cast: FEVER always bites, and so does any cast whose cue promises something
+# (a float that climbs to purple or hotter, a fish school, the golden tide).
+func no_bite_chance() -> float:
+	if not no_bite_enabled or fever_active: return 0.0
+	if fx_premium or fx_school or fx_heat >= 2: return 0.0
+	return clampf(float(BAITS[bait_index].get("no_bite", 0.0)), 0.0, 1.0)
+
+func bite_chance_percent() -> int:
+	return int(round((1.0 - float(BAITS[bait_index].get("no_bite", 0.0))) * 100.0))
+
+# Decides how the wait plays out, after the cue has been planned: its length,
+# whether the fish bites, and when the float twitches.
+func _plan_cast_wait() -> void:
+	if fever_active: bite_delay *= FEVER_WAIT_SCALE
+	cast_no_bite = wait_rng.randf() < no_bite_chance()
+	if cast_no_bite: bite_delay *= wait_rng.randf_range(NO_BITE_WAIT_MIN, NO_BITE_WAIT_MAX)
+	bite_delay = maxf(bite_delay, CAST_FLIGHT_TIME + 0.6)
+	cast_landed = false
+	cast_leaving_t = 0.0
+	nibble_index = 0
+	nibble_t = 0.0
+	# Hotter cues nibble more often and harder: one or two twitches on a quiet
+	# cast, two or three on purple, always three on rainbow and the golden tide.
+	var count := 3
+	if fx_heat <= 1: count = 1 + wait_rng.randi() % 2
+	elif fx_heat == 2: count = 2 + wait_rng.randi() % 2
+	nibble_strength = 1.0 + 0.5 * float(mini(fx_heat, 3))
+	nibble_times.clear()
+	var afloat := bite_delay - CAST_FLIGHT_TIME
+	for k in range(count):
+		# One nibble per slice of the wait, so they never bunch up or land on
+		# the bite itself.
+		var slice := (float(k) + wait_rng.randf_range(0.2, 0.8)) / float(count)
+		nibble_times.append(CAST_FLIGHT_TIME + afloat * (0.24 + slice * 0.64))
+
+# 0 while the float is at the rod tip, 1 once it has landed.
+func _cast_flight_progress() -> float:
+	return clampf(bite_timer / CAST_FLIGHT_TIME, 0.0, 1.0)
+
+# How far the float is pulled under by the current nibble, in pixels.
+func _nibble_dip() -> float:
+	if nibble_t <= 0.0: return 0.0
+	return sin((1.0 - nibble_t / NIBBLE_TIME) * PI) * (2.0 + nibble_strength)
+
+func _finish_no_bite() -> void:
+	# Nothing was hooked, so nothing is lost: the chain and the rescue meter stay
+	# as they were (FEVER's clock simply kept running through the wait).
+	_reset_fishing()
+	toast = "No bite...  the fish slipped away" + ("  /  CHAIN %d kept" % combo if combo > 0 else "")
+	toast_t = 2.2
+
 func _update_cue_fx(promotion_progress: float) -> void:
 	var float_pos := _float_screen_pos()
 	if fx_premium and not fx_premium_done and promotion_progress >= 0.12:
@@ -1748,9 +1846,22 @@ func _process_fishing(delta: float):
 			_break_chain()
 			toast = "FEVER ended / Build another three-catch chain"
 			toast_t = 2.0
-	if fishing_state == FishingState.ANTICIPATING:
+	if fishing_state == FishingState.ANTICIPATING and cast_leaving_t > 0.0:
+		# The fish has turned away; the float sits still while its shadow leaves.
+		cast_leaving_t -= delta
+		if cast_leaving_t <= 0.0: _finish_no_bite()
+	elif fishing_state == FishingState.ANTICIPATING:
 		bite_timer += delta
 		promotion_t = bite_timer
+		if not cast_landed and bite_timer >= CAST_FLIGHT_TIME:
+			cast_landed = true
+			fx.cast_splash(_float_screen_pos())
+		nibble_t = maxf(0.0, nibble_t - delta)
+		while nibble_index < nibble_times.size() and bite_timer >= nibble_times[nibble_index]:
+			nibble_index += 1
+			if bite_timer < bite_delay:
+				nibble_t = NIBBLE_TIME
+				fx.nibble(_float_screen_pos(), nibble_strength)
 		var promotion_progress := clampf(bite_timer / maxf(0.01, bite_delay), 0.0, 1.0)
 		# The rescue tide is a visible promotion assist, not an auto-catch. It
 		# brings the float forward a little after repeated misses/GOOD catches,
@@ -1762,7 +1873,13 @@ func _process_fishing(delta: float):
 		if promotion_reversal_armed and promotion_progress > 0.62 and promotion_progress < 0.76: promotion_reversal = true
 		_update_cue_fx(promotion_progress)
 		cast_timer = maxf(0.0, cast_timer-delta)
-		if bite_timer >= bite_delay:
+		if bite_timer >= bite_delay and cast_no_bite:
+			cast_leaving_t = NO_BITE_LEAVE_TIME
+			nibble_t = 0.0
+			fx.no_bite(_float_screen_pos())
+			toast = "..."
+			toast_t = NO_BITE_LEAVE_TIME
+		elif bite_timer >= bite_delay:
 			fishing_state = FishingState.TIMING
 			# The heat the player actually saw decides the reach and where the
 			# reveal's summon light starts.
@@ -2233,6 +2350,10 @@ func _play_se(kind: String):
 			base = 110.0; duration = 0.13; volume = 0.42; sweep = -60.0; noise = 0.35
 		"landed":
 			base = 196.0; duration = 0.38; volume = 0.36; sweep = 200.0; tones = [392.0, 587.3]; noise = 0.2
+		"plop":
+			base = 190.0; duration = 0.13; volume = 0.2; sweep = -90.0; noise = 0.3
+		"nibble":
+			base = 520.0; duration = 0.06; volume = 0.14; sweep = -140.0
 		"streak":
 			# A rising sting for a run of PERFECT pulls; each step climbs a tone.
 			base = 659.3 * pow(2.0, float(mini(perfect_streak, 6) - 2) / 6.0); duration = 0.3; volume = 0.3; sweep = 240.0; tones = [base * 1.25, base * 1.5, base * 2.0]; decay = 0.16
@@ -2317,6 +2438,12 @@ func _reset_fishing():
 	pull_cooldown = 0.0
 	perfect_pulls = 0
 	perfect_streak = 0
+	cast_no_bite = false
+	cast_landed = false
+	cast_leaving_t = 0.0
+	nibble_times.clear()
+	nibble_index = 0
+	nibble_t = 0.0
 	direction_timer = 0.0
 	battle_tension = 0.0
 	battle_escape = 0.0
@@ -2553,9 +2680,23 @@ func _draw():
 	if transition_active:
 		draw_rect(Rect2(Vector2.ZERO, WORLD_SIZE), Color(0.04,0.08,0.10, transition_fade))
 	if fishing_state == FishingState.ANTICIPATING or fishing_state == FishingState.TIMING:
-		var float_pos := player.round()+Vector2(15,32+int(sin(elapsed*6)))
-		draw_line(player.round()+Vector2(7,-9),player.round()+Vector2(12,-23),Color("#80674a"))
-		draw_line(player.round()+Vector2(12,-23),float_pos,Color("#d1d6b2"))
+		var rod_tip := player.round()+Vector2(12,-23)
+		var float_rest := _float_world_pos()+Vector2(0,int(sin(elapsed*6)))
+		var float_pos := float_rest
+		var waiting := fishing_state == FishingState.ANTICIPATING
+		if waiting and not cast_landed:
+			# The cast: the float arcs out from the rod tip before it lands.
+			var flight := _cast_flight_progress()
+			float_pos = rod_tip.lerp(float_rest, flight) + Vector2(0, -22.0 * sin(flight * PI))
+		elif waiting:
+			_draw_fish_shadow(float_rest)
+			float_pos.y += roundf(_nibble_dip())
+			if nibble_t > 0.0:
+				# A nibble sends one quick ripple out from the float.
+				var ripple := 1.0 - nibble_t / NIBBLE_TIME
+				draw_arc(float_rest + Vector2(1, 2), 3.0 + ripple * (7.0 + nibble_strength * 3.0), 0, TAU, 18, Color(0.85, 0.95, 1.0, (1.0 - ripple) * 0.8), 1.0)
+		draw_line(player.round()+Vector2(7,-9),rod_tip,Color("#80674a"))
+		draw_line(rod_tip,float_pos,Color("#d1d6b2"))
 		var float_color := Color("#6db7ff")
 		var visible_stage := _visible_promotion_stage()
 		if visible_stage == 1: float_color = Color("#f0c65a")
@@ -2571,6 +2712,38 @@ func _draw():
 		if visible_stage >= 2:
 			draw_circle(float_pos+Vector2(1,1), 7.0 + sin(elapsed*12.0) * 1.5, Color(float_color, 0.22))
 		draw_circle(float_pos+Vector2(1,1),3.0+sin(elapsed*10)*1.2,float_color)
+
+# A fish circles under the float during the wait, closing in as the bite nears
+# and darting at the float on each nibble.  Its size is the cue's claimed rarity,
+# so it hints at the catch and can mislead exactly as the float colour does.  On
+# a cast with no bite it turns and swims off instead.
+func _draw_fish_shadow(centre: Vector2) -> void:
+	var progress := clampf((bite_timer - CAST_FLIGHT_TIME) / maxf(0.01, bite_delay - CAST_FLIGHT_TIME), 0.0, 1.0)
+	var alpha := 0.62 * clampf(progress / 0.12, 0.0, 1.0)
+	var radius := lerpf(30.0, 9.0, progress * progress)
+	if nibble_t > 0.0: radius *= 1.0 - 0.6 * sin((1.0 - nibble_t / NIBBLE_TIME) * PI)
+	var angle := elapsed * 1.7 + bite_timer * 0.9
+	if cast_leaving_t > 0.0:
+		var leave := 1.0 - cast_leaving_t / NO_BITE_LEAVE_TIME
+		radius = lerpf(9.0, 70.0, leave)
+		alpha *= 1.0 - leave
+		angle = 0.6
+	if alpha <= 0.01: return
+	var length := 10.0 + 4.0 * float(mini(3, promotion_cue_rank))
+	var pos := centre + Vector2(1, 4) + Vector2(cos(angle), sin(angle) * 0.55) * radius
+	# Heading: along the orbit while circling, straight away when leaving.
+	var heading := Vector2(-sin(angle), cos(angle) * 0.55).normalized()
+	if cast_leaving_t > 0.0: heading = Vector2(cos(angle), sin(angle) * 0.55).normalized()
+	var side := Vector2(-heading.y, heading.x)
+	var ink := Color(0.02, 0.07, 0.12, alpha)
+	draw_colored_polygon(PackedVector2Array([
+		pos + heading * length, pos + heading * length * 0.3 + side * length * 0.36,
+		pos - heading * length * 0.6 + side * length * 0.2, pos - heading * length * 0.6 - side * length * 0.2,
+		pos + heading * length * 0.3 - side * length * 0.36
+	]), ink)
+	draw_colored_polygon(PackedVector2Array([
+		pos - heading * length * 0.55, pos - heading * length * 1.05 + side * length * 0.32, pos - heading * length * 1.05 - side * length * 0.32
+	]), ink)
 
 func _draw_map_background() -> void:
 	match current_map:
@@ -3131,17 +3304,21 @@ func _draw_fishing_hud():
 	if fishing_state == FishingState.ANTICIPATING:
 		# The wait is the stage for the cue show: keep the world and the float
 		# visible and put the readout in a slim strip near the bottom.
-		_panel(Rect2(96,180,288,36))
-		var p := clampf(bite_timer / maxf(0.01,bite_delay), 0.0, 1.0)
+		# A slim strip under the top HUD names the cue.  There is no progress bar:
+		# the wait must not say when the bite will come, and the strip stays off
+		# the hero and the float, which are the show.
 		var stage := _visible_promotion_stage()
 		var cue: String = ["FLOAT BLUE  /  quiet water", "FLOAT GOLD  /  chance", "FLOAT PURPLE  /  hold your breath", "RAINBOW  /  激アツ"][stage]
 		if fx_premium and fx_premium_done: cue = "GOLDEN TIDE  /  確定"
-		_text(Vector2(106,195), cue, 10)
-		var bar_col: Color = Color("#ffd44a") if fx_premium and fx_premium_done else _heat_draw_color(stage, elapsed)
-		if stage == 0 and not (fx_premium and fx_premium_done): bar_col = Color("#6c9b91")
-		hud_bar(Vector2(106,202),Vector2(268,5),p,bar_col)
-		if promotion_rescue_bonus > 0.0:
-			_text(Vector2(106,213), "RESCUE TIDE  /  PURPLE+ cue +%d%%" % int(round(promotion_rescue_bonus * 100.0)), 7)
+		if cast_leaving_t > 0.0: cue = "..."
+		elif not cast_landed: cue = "CAST"
+		var rescue_line := promotion_rescue_bonus > 0.0
+		_panel(Rect2(140,62,200,26 if rescue_line else 17))
+		var cue_col: Color = Color("#ffd44a") if fx_premium and fx_premium_done else _heat_draw_color(stage, elapsed)
+		hud.draw_rect(Rect2(146,67,5,7), cue_col)
+		_text(Vector2(156,74), cue + ["", " .", " . .", " . . ."][int(elapsed * 2.5) % 4], 9)
+		if rescue_line:
+			_text(Vector2(146,84), "RESCUE TIDE  /  PURPLE+ cue +%d%%" % int(round(promotion_rescue_bonus * 100.0)), 7)
 		return
 	var panel := Rect2(96,48,288,160 + challenge_offset)
 	_panel(panel)
