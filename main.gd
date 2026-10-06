@@ -644,7 +644,7 @@ func _walkable(pos: Vector2) -> bool:
 	# Feet collision: canopy overlap is intentional for top-down depth.
 	var feet := Rect2(pos-Vector2(4,3),Vector2(8,5))
 	for c in [feet.position,feet.position+Vector2(8,0),feet.end,feet.position+Vector2(0,5)]:
-		var on_pier: bool = c.x >= 486 and c.x <= 518 and c.y >= 440 and c.y <= 545
+		var on_pier: bool = current_map == "town" and c.x >= 486 and c.x <= 518 and c.y >= 440 and c.y <= 545
 		if not on_pier and (c.x < 28 or c.x >= 828 or c.y < 28 or c.y >= _shore(c.x)-4): return false
 	for body in solids:
 		if body.intersects(feet): return false
@@ -760,7 +760,7 @@ func _check_map_exit():
 	var exit := ""
 	if current_map == "town":
 		# The south road meets the shoreline around y=440; keep the exit on walkable land.
-		if player.y > 438 and player.x > 450 and player.x < 550: exit = "beach"
+		if player.y > 448 and player.x > 528 and player.x < 584: exit = "beach"
 		elif player.x > 798 and player.y > 250 and player.y < 430: exit = "rocky"
 	elif current_map == "beach":
 		if player.y < 34 and player.x > 280 and player.x < 560: exit = "town"
@@ -1537,8 +1537,14 @@ func _try_fish():
 		# Restrictive tide windows can leave a map with no legal species. Keep the
 		# cast idle in that state instead of charging tackle or creating an illegal
 		# catch through an empty candidate.
-		if _species_pool().is_empty():
-			toast = "No fish are biting under this tide"; toast_t = 2.5
+		var available_pool := _species_pool()
+		var ordinary_available := false
+		for fish in available_pool:
+			if str(fish.get("rarity", "COMMON")) != "LEGENDARY":
+				ordinary_available = true
+				break
+		if available_pool.is_empty() or not ordinary_available:
+			toast = "No ordinary fish are biting under this tide"; toast_t = 2.5
 			return
 		var cast_cost := tackle_cost()
 		if shells < cast_cost:
@@ -1676,7 +1682,7 @@ func _process_fishing(delta: float):
 			fx.bite(fx_bite_heat, _float_screen_pos())
 			# A bite opens a short tug-of-war instead of a one-frame skill check.
 			# The fish must be controlled through several good inputs.
-			fish_hp_max = 10 + mini(combo, 4)
+			fish_hp_max = 10
 			fish_hp = fish_hp_max
 			battle_hits = 0
 			battle_required = fish_hp_max
