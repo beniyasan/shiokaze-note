@@ -1022,6 +1022,31 @@ func run():
 	game.pull_cooldown=0.0; game._handle_fishing_strike(0.5)
 	game.pull_cooldown=0.0; game.battle_tension=0.0; game._handle_fishing_strike(0.05)
 	check(game.perfect_streak==0 and fx.impacts[fx.impacts.size()-1].tier==0,'a strained pull ends the PERFECT streak')
+	# Nothing a pull throws outlives the impact: the top tier's poppers and sparks
+	# are all gone before the next pull can be timed.
+	fx.clear_show(); fx.flash_log.clear()
+	fx.pull('PERFECT',impact_pos,3,0.5,3,true)
+	var longest_life := 0.0
+	for particle in fx.particles: longest_life = maxf(longest_life, float(particle.life))
+	check(fx.particles.size()>60 and longest_life<=fx.IMPACT_MAX_DUR,'every particle from a pull lives no longer than the impact')
+	fx.strain(impact_pos); longest_life = 0.0
+	for particle in fx.particles: longest_life = maxf(longest_life, float(particle.life))
+	check(longest_life<=fx.IMPACT_MAX_DUR,'a strained pull is held to the same lifetime')
+	fx.update(fx.IMPACT_MAX_DUR+0.01)
+	check(fx.particles.is_empty() and fx.impacts.is_empty(),'a pull leaves nothing on screen once its impact is over')
+	# The pull that lands the fish still shows its impact over the landing.
+	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(4.0)
+	for i in range(8):
+		if game.fishing_state != game.FishingState.TIMING: break
+		game.pull_cooldown=0.0; game._handle_fishing_strike(0.5)
+	check(game.fishing_state==game.FishingState.RESULT and game.last_grade=='PERFECT' and fx.impacts.size()==1 and fx.impacts[0].tier==4 and fx.pops.is_empty() and fx.cutins.is_empty(),'the finishing pull keeps its impact through the landing')
+	fx.update(fx.IMPACT_MAX_DUR+0.01)
+	check(fx.impacts.is_empty(),'the finishing impact is gone before the card can be read')
+	check(fx.IMPACT_MAX_DUR<game._reveal_face_time()*0.62,'the finishing impact ends before even a shortened reveal turns the card')
+	# A line that snaps on a strained pull shows LINE SNAPPED, not STRAIN!.
+	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(4.0)
+	game.pull_cooldown=0.0; game.battle_tension=0.95; game._handle_fishing_strike(0.05)
+	check(game.last_grade=='MISS' and fx.impacts.is_empty() and fx.pops.size()==1,'a snapped line replaces the strained impact with its own callout')
 	game._reset_fishing(); fx.flash_log.clear()
 	# Resetting a cast is a hard boundary: no reveal particles, banners, shards,
 	# active flash or delayed callback may leak into the idle world/next cast.
