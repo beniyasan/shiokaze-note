@@ -364,6 +364,27 @@ func cast(heat: int) -> void:
 	clear_show()
 	speed_heat = heat
 
+# ---- the wait ---------------------------------------------------------------
+
+func cast_splash(pos: Vector2) -> void:
+	burst(pos, Color("#d8f1ff"), 8, 70.0, "drop", false, 0.5)
+	_sound("plop")
+	_count("cast_splash")
+
+# The float twitches before the bite.  Hotter cues twitch harder.
+func nibble(pos: Vector2, strength: float) -> void:
+	burst(pos, Color("#d8f1ff"), int(2.0 + strength * 2.0), 36.0 + strength * 10.0, "drop", false, 0.4)
+	if strength >= 2.0: shake(0.5 * strength, 0.12)
+	_sound("nibble")
+	_count("nibble")
+
+# A quiet cast that draws no bite: the fish simply leaves.
+func no_bite(pos: Vector2) -> void:
+	burst(pos, Color("#8f9aa8"), 6, 40.0, "ash", false, 0.5)
+	pop("逃げられた…", pos + Vector2(0, -28), Color("#b6c0cc"), 11, 0.9, "drop")
+	_sound("fizzle")
+	_count("no_bite")
+
 func cue_step(stage: int, float_pos: Vector2) -> void:
 	_count("cue_step_%d" % stage)
 	match stage:
