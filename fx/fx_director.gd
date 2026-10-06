@@ -84,6 +84,31 @@ const IMPACT_LANE_TOP := 234.0
 const IMPACT_TEXT_POS := Vector2(240, 264)
 const IMPACT_TEXT_SIZES := [20, 20, 24, 26, 28]
 var impacts: Array[Dictionary] = []
+# Each impact also throws up an emblem: a designed badge for the grade that
+# grows through the streak (see fx_canvas._draw_emblem).  It lives in the free
+# margin to the right of the fishing panel, so it can be big without covering
+# anything the player reads.
+const IMPACT_EMBLEM_POS := Vector2(432, 100)
+const IMPACT_EMBLEM_RADIUS := 44.0
+# The streak card: five slots in the left margin, stamped one per consecutive
+# PERFECT pull.  Five PERFECT pulls land a fish, so a full card is a perfect
+# catch; a GOOD or strained pull knocks the stamps off.
+const STREAK_CARD_SLOTS := 5
+const STREAK_CARD_RECT := Rect2(14, 64, 68, 174)
+const STREAK_CARD_BREAK_TIME := 0.5
+# The old angler watching from the margin below the emblem.  His face follows
+# the streak: calm before the first PERFECT, then one step more excited for each
+# one in a row (assets/portraits/angler_1..5.png).  A broken streak drops him
+# back to calm.  PORTRAIT_HOLD keeps him on screen through the landing.
+const PORTRAIT_RECT := Rect2(398, 158, 68, 68)
+const PORTRAIT_FACES := 5
+const PORTRAIT_HOLD := 1.2
+var portrait_change_t := 99.0
+var portrait_hold: Dictionary = {}
+var card_active := false
+var card_count := 0
+var card_stamp_t := 99.0
+var card_break: Dictionary = {}
 var cutins: Array[Dictionary] = []
 var pops: Array[Dictionary] = []
 var particles: Array[Dictionary] = []
@@ -139,6 +164,14 @@ func update(delta: float) -> void:
 	fever_border = move_toward(fever_border, fever_target, delta * 1.6)
 	for i in impacts: i.t = float(i.t) + delta
 	impacts = impacts.filter(func(i): return float(i.t) < float(i.dur))
+	card_stamp_t += delta
+	portrait_change_t += delta
+	if not portrait_hold.is_empty():
+		portrait_hold.t = float(portrait_hold.t) + delta
+		if float(portrait_hold.t) >= PORTRAIT_HOLD: portrait_hold = {}
+	if not card_break.is_empty():
+		card_break.t = float(card_break.t) + delta
+		if float(card_break.t) >= STREAK_CARD_BREAK_TIME: card_break = {}
 	for c in cutins: c.t = float(c.t) + delta
 	cutins = cutins.filter(func(c): return float(c.t) < float(c.dur))
 	for p in pops: p.t = float(p.t) + delta
@@ -297,6 +330,14 @@ func burst(pos: Vector2, color: Color, count: int, spd: float, kind: String = "s
 				gravity = 120.0; drag = 0.25; life = rng.randf_range(1.2, 2.2); size = rng.randf_range(2.0, 3.4)
 			"ash":
 				gravity = 60.0; drag = 0.3; life = rng.randf_range(0.5, 0.9)
+			"star", "gem":
+				# Icons thrown up and out in a fan, tumbling as they fall.
+				v = Vector2(rng.randf_range(-1.0, 1.0) * spd, -rng.randf_range(0.35, 1.0) * spd)
+				gravity = 300.0; drag = 0.45; life = rng.randf_range(0.6, 1.0); size = rng.randf_range(3.2, 5.6)
+			"note":
+				# Music notes drift up instead of falling.
+				v = Vector2(rng.randf_range(-0.7, 0.7) * spd, -rng.randf_range(0.5, 1.0) * spd)
+				gravity = -50.0; drag = 0.55; life = rng.randf_range(0.6, 1.0); size = rng.randf_range(3.6, 4.8)
 		if max_life > 0.0 and life > max_life:
 			# Keep the spread of lifetimes, squeezed under the cap, so capped
 			# particles still fade out raggedly instead of vanishing together.
@@ -340,6 +381,12 @@ func clear_show() -> void:
 	flash_t = 0.0
 	flash_dur = 0.0
 	impacts.clear()
+	card_active = false
+	card_count = 0
+	card_stamp_t = 99.0
+	card_break = {}
+	portrait_change_t = 99.0
+	portrait_hold = {}
 	cutins.clear()
 	pops.clear()
 	particles.clear()
@@ -460,6 +507,11 @@ func bite(heat: int, float_pos: Vector2) -> void:
 	burst(float_pos, Color("#d8f1ff"), 16 + heat * 6, 110.0, "drop")
 	if heat >= 2: request_flash(Color(1, 1, 1), 0.22 + 0.06 * heat, 0.18)
 	pop("HIT!", float_pos + Vector2(0, -24), Color.WHITE, 16, 0.6, "slam")
+	# The battle has begun: lay out an empty streak card.
+	card_active = true
+	card_count = 0
+	card_stamp_t = 99.0
+	card_break = {}
 	if heat >= 2: reach_start(heat)
 
 # ---- B. reach ---------------------------------------------------------------
@@ -480,6 +532,32 @@ func impact_tier(grade: String, streak: int = 0) -> int:
 	if grade == "PERFECT": return clampi(1 + maxi(1, streak), 2, 4)
 	return 1 if grade == "GOOD" else 0
 
+# Which emblem an impact shows: 0 strained, 1 GOOD, then 2-6 for a PERFECT
+# streak of one to five.  Unlike the tier it keeps climbing to the fifth pull.
+func emblem_level(tier: int, streak: int) -> int:
+	if tier <= 1: return tier
+	return 1 + clampi(streak, 1, STREAK_CARD_SLOTS)
+
+# Centre of a streak-card slot; slot 0 is the bottom one.
+func streak_slot_pos(slot: int) -> Vector2:
+	var slot_h := (STREAK_CARD_RECT.size.y - 20.0) / float(STREAK_CARD_SLOTS)
+	return Vector2(STREAK_CARD_RECT.get_center().x, STREAK_CARD_RECT.end.y - 6.0 - slot_h * (float(slot) + 0.5))
+
+# Which of the angler's faces is showing, 1 (calm) to PORTRAIT_FACES (awed).
+func portrait_face() -> int:
+	if not portrait_hold.is_empty(): return int(portrait_hold.face)
+	return clampi(card_count + 1, 1, PORTRAIT_FACES)
+
+func portrait_visible() -> bool:
+	return card_active or not portrait_hold.is_empty()
+
+func _break_card() -> void:
+	if card_count <= 0: return
+	portrait_change_t = 0.0
+	card_break = {"count": card_count, "t": 0.0}
+	card_count = 0
+	_count("card_break")
+
 func _add_impact(grade: String, tier: int, pos: Vector2, streak: int, clean: bool) -> void:
 	impacts.append({"grade": grade, "tier": tier, "pos": pos, "t": 0.0, "dur": float(IMPACT_DURS[tier]), "streak": streak, "clean": clean, "seed": rng.randi()})
 	if impacts.size() > 4: impacts.pop_front()
@@ -497,7 +575,24 @@ func pull(grade: String, pos: Vector2, hits: int, power: float, streak: int = 0,
 	burst(pos, Color("#d8f1ff"), 10 + hits * 2, 100.0, "drop", false, IMPACT_MAX_DUR)
 	_add_impact(grade, tier, pos, streak, clean)
 	if perfect:
+		card_count = clampi(streak, 1, STREAK_CARD_SLOTS)
+		card_stamp_t = 0.0
+		portrait_change_t = 0.0
+		_count("card_stamp")
+	else:
+		_break_card()
+		burst(IMPACT_EMBLEM_POS, Color("#8fe6d2"), 3, 80.0, "star", false, IMPACT_MAX_DUR)
+	if perfect:
 		var rainbow := tier >= 4
+		# Icons fly out of the emblem as it lands: stars and music notes, and
+		# gems once the streak is running.  They start in the margins (the
+		# emblem and the fresh stamp), not at the float, which is often behind
+		# the fishing panel: icons are opaque and must not cross the gauge.
+		burst(IMPACT_EMBLEM_POS, HEAT_COLORS[1], 4 + tier * 2, 110.0, "star", rainbow, IMPACT_MAX_DUR)
+		burst(IMPACT_EMBLEM_POS + Vector2(0, -10), Color("#bfe9ff"), 2 + tier, 90.0, "note", rainbow, IMPACT_MAX_DUR)
+		if tier >= 3: burst(IMPACT_EMBLEM_POS, Color("#ff9ad5"), tier * 2, 120.0, "gem", true, IMPACT_MAX_DUR)
+		burst(IMPACT_EMBLEM_POS, HEAT_COLORS[1], 6 + tier * 3, 95.0, "spark", rainbow, IMPACT_MAX_DUR)
+		burst(streak_slot_pos(card_count - 1), HEAT_COLORS[1], 5 + tier, 60.0, "star", rainbow, IMPACT_MAX_DUR)
 		burst(pos, HEAT_COLORS[1], 12 + tier * 4, 120.0 + float(tier) * 20.0, "spark", rainbow, IMPACT_MAX_DUR)
 		request_flash(Color("#fff3c2") if tier == 2 else Color("#fffdf0"), [0.0, 0.22, 0.30, 0.38][step], 0.14)
 		# Party poppers from both bottom corners carry the hit across the screen.
@@ -527,6 +622,7 @@ func strain(pos: Vector2) -> void:
 	# A missed pull gets the same screen-wide treatment in red, so the three
 	# outcomes of a pull read as one family: red, teal, gold.
 	_add_impact("MISS", 0, pos, 0, false)
+	_break_card()
 
 func set_danger(tension: float) -> void:
 	danger = clampf((tension - 0.7) / 0.3, 0.0, 1.0)
@@ -539,8 +635,12 @@ func landed(rank: int, legendary: bool, pos: Vector2) -> void:
 	if not impacts.is_empty():
 		var newest: Dictionary = impacts[impacts.size() - 1]
 		if float(newest.t) <= 0.0 and int(newest.tier) > 0: finishing.append(newest)
+	var last_face := portrait_face()
+	var watching := card_active
 	clear_show()
 	impacts = finishing
+	# The angler stays for a beat with the face the last pull earned.
+	if watching: portrait_hold = {"face": last_face, "t": 0.0}
 	# Battle callouts must not linger over the face-down card.
 	pops.clear()
 	cutins.clear()

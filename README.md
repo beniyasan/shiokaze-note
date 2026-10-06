@@ -114,6 +114,17 @@ The whole cast is staged as one escalating show, defined in
   keeps going (`x4`, `x5`). The burst is gone within 0.6 s, inside the pull cooldown,
   and the grade is written in a lane along the bottom of the screen, clear of every
   row of the fishing panel.
+- **Emblems and the streak card.** Each pull also throws up an emblem in the margin right
+  of the fishing panel: a cracked red badge (`OUCH`), a teal tick (`OK!`), then for PERFECT
+  a spinning gold burst (`GREAT`) that gains orbiting stars (`SUPER`), a crown (`HYPER`),
+  wings (`ULTRA`) and, on the fifth PERFECT in a row, a fish leaping over the crown in a
+  rainbow halo (`KING!`). Stars, music notes and gems fly out of it. In the left margin a
+  five-slot streak card is stamped once per consecutive PERFECT; five land the fish, so a
+  full card is a perfect catch, and a GOOD or strained pull knocks the stamps off.
+- **The watching angler.** Under the emblem an old angler watches the fight, and his face
+  follows the streak (`assets/portraits/angler_1.png` to `angler_5.png`): calm, then a
+  step more excited for each PERFECT in a row, up to wide-eyed awe. A broken streak
+  drops him back to calm, and he stays for a beat as the fish lands.
 - **Reveal.** The card glows in the promised heat, then promotes one step at a time
   to the real result (`UP!`) or quietly fizzles. The flip bursts in proportion to
   rarity, followed by `NEW!` / `CROWN!` stamps. LEGENDARY cracks the screen, then
