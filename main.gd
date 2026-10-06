@@ -37,6 +37,10 @@ const PULL_COOLDOWN := 1.5
 const GOOD_PULL_TENSION := 0.14
 const PERFECT_PULL_TENSION := 0.08
 const CLEAN_BEAT_TENSION_RELIEF := 0.05
+const LEGENDARY_BASE_CHANCE := 0.01
+const LEGENDARY_FEVER_BONUS := 0.02
+const LEGENDARY_MOONSEED_BONUS := 0.02
+const LEGENDARY_CHANCE_CAP := 0.05
 const SAVE_PATH := "user://saltmere_save.json"
 # Keep the legendary choice controls clear of the 270px viewport edge. These
 # are shared by both the promotion-label and no-label variants so a long-lived
@@ -487,7 +491,7 @@ func _fish_conditions(species: String) -> Dictionary:
 	var all_seasons := ["spring", "summer", "autumn", "winter"]
 	match species:
 		"Amber anchovy": return {"times":["dawn", "day", "dusk"], "weather":["clear", "overcast"], "seasons":["spring", "summer"]}
-		"Sunrise bream": return {"times":["dawn", "day"], "weather":["clear", "overcast"], "seasons":["spring", "summer", "autumn"]}
+		"Sunrise bream": return {"times":["dawn", "day"], "weather":["clear", "overcast"], "seasons":["spring", "summer", "autumn", "winter"]}
 		"Moonfish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["autumn", "winter"]}
 		"Coral grouper": return {"times":["day", "dusk"], "weather":["clear", "overcast", "rain"], "seasons":["summer", "autumn"]}
 		"Jellyfish fish": return {"times":["dusk", "night"], "weather":["clear", "rain"], "seasons":["spring", "summer", "autumn"]}
@@ -1015,7 +1019,9 @@ func _pick_species(grade: String, apply_rescue := false, exclude_legendary := fa
 	for fish in pool:
 		if exclude_legendary and str(fish.get("rarity", "COMMON")) == "LEGENDARY": continue
 		if grade == "PERFECT" or fish.rarity in ["COMMON","UNCOMMON","RARE"]: eligible.append(fish)
-	if eligible.is_empty(): eligible = pool
+	if eligible.is_empty():
+		if exclude_legendary: return {}
+		eligible = pool
 	# Rescue is intentionally a soft odds nudge before the one-shot RARE floor.
 	# It makes an unlucky forecast feel warmer without handing out a catch or
 	# changing the map/time/weather legality of the pool.
@@ -1106,6 +1112,7 @@ func _pick_cast_candidate(apply_rescue := false) -> Dictionary:
 	# legendary; the ordinary perfect-pool pick excludes legendary entries so its
 	# small base weight cannot bypass the five-percent cap.
 	var candidate := _pick_species("PERFECT", apply_rescue, true)
+	if candidate.is_empty(): return {}
 	var chance := _legendary_chance_for_cast()
 	if chance > 0.0 and rng.randf() < chance:
 		var legendary_pool: Array[Dictionary] = []
