@@ -2051,7 +2051,7 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	var challenge_clean := false
 	if fishing_challenge != null and not fishing_challenge.done:
 		var challenge_result: Dictionary = fishing_challenge.accept(position, counter_axis)
-		var challenge_clean := bool(challenge_result.get("success", false))
+		challenge_clean = bool(challenge_result.get("success", false))
 		challenge_round_event = str(challenge_result.get("event", ""))
 		challenge_hint_t = 1.1
 		if not challenge_clean:
