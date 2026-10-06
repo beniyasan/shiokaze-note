@@ -507,9 +507,9 @@ func pull(grade: String, pos: Vector2, hits: int, power: float, streak: int = 0,
 		for k in range((tier - 2) * 4):
 			burst(Vector2(rng.randf_range(30.0, SCREEN.x - 30.0), rng.randf_range(24.0, SCREEN.y - 40.0)), Color("#fff6cf"), 4, 50.0, "spark", rainbow, IMPACT_MAX_DUR)
 		if tier >= 3: chroma_pulse(0.35 + 0.15 * float(tier - 3), 0.3)
-		if tier >= 3: _sound("streak")
+	# The pull's sound is main.gd's (_play_pull_se): it is one designed sound per
+	# grade and streak, not a stack of effect cues.
 	speed_target = clampf(speed_target + 0.05, 0.0, 1.0) if letterbox_target > 0.0 else maxf(speed_target, power * 0.35)
-	_sound("impact")
 
 func last_pull(heat: int, pos: Vector2) -> void:
 	heartbeat_on = true
