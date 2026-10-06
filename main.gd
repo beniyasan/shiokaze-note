@@ -2048,6 +2048,7 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	# Challenge beats are deliberately forgiving and resolve before the normal
 	# gauge grade.  A missed beat strains the same authoritative line model as a
 	# missed gold-zone pull; it never bypasses the existing escape/tension rules.
+	var challenge_clean := false
 	if fishing_challenge != null and not fishing_challenge.done:
 		var challenge_result: Dictionary = fishing_challenge.accept(position, counter_axis)
 		var challenge_clean := bool(challenge_result.get("success", false))
