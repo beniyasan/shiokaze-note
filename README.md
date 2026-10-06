@@ -125,6 +125,14 @@ The whole cast is staged as one escalating show, defined in
   follows the streak (`assets/portraits/angler_1.png` to `angler_5.png`): calm, then a
   step more excited for each PERFECT in a row, up to wide-eyed awe. A broken streak
   drops him back to calm, and he stays for a beat as the fish lands.
+- **Gacha reveal.** Every catch below LEGENDARY is revealed like a gacha pull. A summon
+  style is drawn at random (meteors, bubbles, thunder or a rising wave) and plays over
+  the face-down card while summon rays turn behind it; orbs spiral in over a tightening
+  drum roll; and when the card turns, fireworks go off beside it, a star rating counts up
+  (one star for COMMON to four for EPIC) and a jingle plays, picked at random from three
+  melodies per rarity. About one reveal in seven ends in a festival of extra fireworks
+  and confetti. All of it is for show: the rolls use the FX random stream and never
+  change the catch, and nothing before the turn says more than the summon light does.
 - **Reveal.** The card glows in the promised heat, then promotes one step at a time
   to the real result (`UP!`) or quietly fizzles. The flip bursts in proportion to
   rarity, followed by `NEW!` / `CROWN!` stamps. LEGENDARY cracks the screen, then
