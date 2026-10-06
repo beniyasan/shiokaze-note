@@ -1200,6 +1200,169 @@ func run():
 	for portrait in game.fx_front.portraits:
 		if portrait == null or portrait.get_width() != portrait.get_height() or portrait.get_width() > 256: portraits_ok = false
 	check(portraits_ok,'all five angler portraits load as small square textures')
+	# --- The catch reveal as a gacha pull.
+	var gacha_state := {'map':game.current_map,'player':game.player,'time':game.time_of_day,'weather':game.weather,'season':game.season}
+	game.current_map='town'; game._build_map('town'); game.player=Vector2(500,530); game.time_of_day=0.5; game.weather='clear'; game.season='spring'
+	var land_fish := func(rarity: String) -> void:
+		game._reset_fishing(); game._break_chain(); fx.flash_log.clear(); game.shells=99
+		game._try_fish(); game._process_fishing(8.0)
+		for species in game.FISH_SPECIES:
+			if species.rarity == rarity:
+				game.cast_candidate = species.duplicate(true); game.promotion_target_rarity = rarity
+				break
+		fx.counters.clear(); fx.sounds.clear()
+		for i in range(8):
+			if game.fishing_state != game.FishingState.TIMING: break
+			game.pull_cooldown=0.0; game.battle_tension=0.0; game._handle_fishing_strike(0.5)
+	var rng_before: int = game.rng.state
+	fx.gacha_begin()
+	check(game.rng.state==rng_before and not fx.gacha.is_empty(),'the gacha rolls never touch the gameplay RNG')
+	var style_seen := {}; var festivals := 0; var variant_seen := {}
+	for i in range(600):
+		fx.gacha_begin(); style_seen[fx.gacha.style] = true; variant_seen[fx.gacha.variant] = true
+		if fx.gacha.festival: festivals += 1
+	check(style_seen.size()==fx.GACHA_STYLES.size() and variant_seen.size()==fx.GACHA_FLIP_VARIANTS,'every summon style and jingle melody comes up')
+	check(festivals>50 and festivals<135,'about one reveal in seven ends in a festival (%d of 600)' % festivals)
+	fx.clear_show(); fx.flash_log.clear()
+	check(fx.gacha.is_empty(),'resetting the show clears the gacha')
+	land_fish.call('RARE')
+	check(game.last_rarity=='RARE' and not fx.gacha.is_empty() and int(fx.counters.get('gacha_begin',0))==1 and fx.GACHA_STYLES.has(fx.gacha.style) and fx.sounds.has('gacha_style_'+str(fx.gacha.style)),'landing a fish starts a gacha pull with a summon style and its sound')
+	check(game.gacha_flip_buffer.size()>int(0.4*game.SE_RATE) and game.gacha_flip_buffer.size()<=int(game.GACHA_SE_MAX_SECONDS*game.SE_RATE),'the turn\'s sound is rendered ahead, at the landing')
+	# Nothing before the turn may say more than the summon light does.
+	var honest := true; var charges_before := 0
+	fx.sounds.clear()
+	for frame in range(400):
+		if game.reveal_t >= game._reveal_face_time(): break
+		if int(fx.gacha.heat) != game._reveal_glow_rank_at(game.reveal_t) or fx.gacha_stars_shown() != 0 or not fx.gacha.fireworks.is_empty() or float(fx.gacha.flip_t) >= 0.0: honest = false
+		if game.reveal_t < 0.82 and float(fx.gacha.charge_t) >= 0.0: honest = false
+		game._process_fishing(1.0/60.0); fx.update(1.0/60.0)
+	check(honest,'until the card turns the gacha shows only the summon light\'s heat: no stars, no fireworks')
+	check(int(fx.counters.get('gacha_charge',0))==1 and fx.sounds.has('gacha_roll_long') and float(fx.gacha.charge_dur)>0.55,'the last stretch before the turn charges up over a drum roll')
+	check(int(fx.counters.get('gacha_flip',0))==1 and fx.sounds.has('gacha_flip') and not fx.sounds.has('flip2') and int(fx.gacha.rank)==2 and int(fx.gacha.stars)==3,'the turn plays the gacha sound and rates a RARE three stars')
+	var star_steps: Array = [fx.gacha_stars_shown()]
+	for i in range(4):
+		fx.update(fx.GACHA_STAR_GAP); star_steps.append(fx.gacha_stars_shown())
+	check(star_steps[0]==0 and star_steps[4]==3 and star_steps[1]<=star_steps[2] and star_steps[2]<=star_steps[3],'the stars count up one at a time after the turn')
+	var margins_ok := true
+	for show in fx.gacha.fireworks:
+		if show.pos.x > 96.0 and show.pos.x < 480.0 - 96.0: margins_ok = false
+	check(fx.gacha.fireworks.size()==fx.firework_times(2, fx.gacha.festival).size() and margins_ok,'fireworks go off in the margins beside the card')
+	check(fx.firework_times(0,false).size()==2 and fx.firework_times(1,false).size()==4 and fx.firework_times(2,false).size()==7 and fx.firework_times(3,false).size()==10 and fx.firework_times(1,true).size()==12,'rarer catches get more fireworks, and a festival adds eight')
+	check(fx.gacha_star_count(0)==1 and fx.gacha_star_count(1)==2 and fx.gacha_star_count(2)==3 and fx.gacha_star_count(3)==4,'the star rating is one star per rarity step')
+	check(fx.GACHA_STARS_RECT.end.x+3.0<=104.0 and fx.GACHA_STARS_RECT.position.y-3.0>=110.0 and fx.GACHA_STARS_RECT.end.y+3.0<=244.0 and fx.GACHA_STARS_RECT.has_point(fx.gacha_star_pos(0)) and fx.GACHA_STARS_RECT.has_point(fx.gacha_star_pos(4)),'the star rating sits left of the card, under the chain panel and above the toast bar')
+	# A repeat catch runs the shortened reveal with the shorter roll.
+	land_fish.call('RARE')
+	fx.sounds.clear()
+	for frame in range(200):
+		if game.reveal_t >= game._reveal_face_time(): break
+		game._process_fishing(1.0/60.0); fx.update(1.0/60.0)
+	check(game.reveal_shortened and fx.sounds.has('gacha_roll_short') and fx.sounds.has('gacha_flip'),'a repeat catch gets the shorter drum roll and still turns with the gacha sound')
+	game._reset_fishing()
+	check(fx.gacha.is_empty() and game.gacha_flip_buffer.is_empty(),'the gacha leaves with the result card')
+	fx.sounds.clear(); fx.reveal_flip(2,false,false)
+	check(fx.sounds.has('flip2') and not fx.sounds.has('gacha_flip'),'a card turned without a gacha running keeps the plain chime')
+	fx.clear_show(); fx.flash_log.clear()
+	# The sounds: louder and longer for rarer fish, three melodies each.
+	var jingle_ok := true; var jingle_sizes: Array = []
+	for heat in range(4):
+		var melodies := {}
+		for variant in range(fx.GACHA_FLIP_VARIANTS): melodies[str(game.GACHA_JINGLES[heat][variant])] = true
+		if melodies.size() != fx.GACHA_FLIP_VARIANTS or game.GACHA_JINGLES[heat][0].size() != game.GACHA_JINGLES[heat][2].size(): jingle_ok = false
+		jingle_sizes.append(game._gacha_flip_notes(heat, 0, 0, []).size())
+	check(jingle_ok and jingle_sizes[0]<jingle_sizes[1] and jingle_sizes[1]<jingle_sizes[2] and jingle_sizes[2]<jingle_sizes[3],'each rarity has three different jingles, and rarer ones carry more')
+	check(game._gacha_flip_notes(1,0,3,[]).size()>game._gacha_flip_notes(1,0,0,[]).size()+5 and game._gacha_flip_notes(1,0,0,[0.1,0.3]).size()==game._gacha_flip_notes(1,0,0,[]).size()+4,'the turn\'s sound adds a ding per star and a pop per firework')
+	var style_sounds_ok := true
+	for style in fx.GACHA_STYLES:
+		var style_wave: PackedFloat32Array = game._render_se(game._gacha_style_notes(style), [], game.GACHA_SE_MAX_SECONDS)
+		var style_peak := 0.0
+		for sample in style_wave: style_peak = maxf(style_peak, absf(sample))
+		if game._gacha_style_notes(style).is_empty() or style_peak < 0.1 or style_peak > 0.9001: style_sounds_ok = false
+	check(style_sounds_ok and game._gacha_style_notes('unknown').is_empty(),'every summon style has an audible, unclipped sound')
+	var roll_notes: Array = game._gacha_roll_notes(0.6)
+	var roll_hits: Array = []
+	for note in roll_notes:
+		if str(note.wave) == 'noise': roll_hits.append(float(note.t))
+	check(roll_hits.size()>10 and roll_hits[1]-roll_hits[0] > roll_hits[roll_hits.size()-1]-roll_hits[roll_hits.size()-2] and float(roll_notes[roll_notes.size()-3].vol) > float(roll_notes[0].vol),'the drum roll tightens and swells toward the turn')
+	var big_turn: PackedFloat32Array = game._render_se(game._gacha_flip_notes(3, 2, 4, fx.firework_times(3, true)), [[0.09, 0.22]], game.GACHA_SE_MAX_SECONDS)
+	var big_peak := 0.0
+	for sample in big_turn: big_peak = maxf(big_peak, absf(sample))
+	check(big_peak>0.3 and big_peak<=0.9001 and big_turn.size()<=int(game.GACHA_SE_MAX_SECONDS*game.SE_RATE),'the biggest turn (EPIC, festival) stays unclipped and within its length')
+	# Every SE voice can hold the longest sound the game renders.
+	var voices_ok: bool = game.SE_BUFFER_SECONDS > game.GACHA_SE_MAX_SECONDS and game.se_players.size() == 4
+	for voice in game.se_players:
+		if voice.stream == null or voice.stream.buffer_length < game.GACHA_SE_MAX_SECONDS: voices_ok = false
+	check(voices_ok and big_turn.size() < int(game.SE_BUFFER_SECONDS*game.SE_RATE),'an SE voice is long enough for the whole gacha finale')
+	# A reveal saved face-down resumes its gacha show after loading.
+	land_fish.call('RARE')
+	for frame in range(30): game._process_fishing(1.0/60.0)
+	check(game.reveal_t>0.3 and game.reveal_t<0.82 and not fx.gacha.is_empty(),'a reveal is under way, before its charge')
+	# Force rolls the default would rarely give, so a reroll could not pass by luck.
+	fx.gacha.style='thunder'; fx.gacha.variant=2; fx.gacha.festival=true; fx.gacha.seed=424242
+	var saved_roll: Dictionary = fx.gacha_roll()
+	game._save_game('res://.smoke-gacha-mid.json')
+	game._reset_fishing(); fx.counters.clear(); fx.sounds.clear()
+	game._load_game('res://.smoke-gacha-mid.json')
+	check(game.catch_choice_pending() and not fx.gacha.is_empty() and float(fx.gacha.flip_t)<0.0 and float(fx.gacha.charge_t)<0.0 and fx.GACHA_STYLES.has(fx.gacha.style) and not game.gacha_flip_buffer.is_empty(),'loading a face-down reveal brings the gacha show back')
+	check(saved_roll=={'style':'thunder','variant':2,'festival':true,'seed':424242} and fx.gacha_roll()==saved_roll and int(fx.counters.get('gacha_resume',0))==1 and int(fx.counters.get('gacha_begin',0))==0 and fx.sounds.is_empty() and float(fx.gacha.t)>0.3,'the restored pull is the same one: same style, melody, festival and seed, with no reroll and no opening sound')
+	var resumed_turn: PackedFloat32Array = game._render_se(game._gacha_flip_notes(2, 2, 3, fx.firework_times(2, true)), [[0.09, 0.22]], game.GACHA_SE_MAX_SECONDS)
+	check(game.gacha_flip_buffer.size()==resumed_turn.size(),'the restored pull turns with its own melody and festival fireworks')
+	for frame in range(200):
+		if game.reveal_t >= game._reveal_face_time(): break
+		game._process_fishing(1.0/60.0); fx.update(1.0/60.0)
+	check(int(fx.counters.get('gacha_charge',0))==1 and fx.sounds.has('gacha_flip') and int(fx.gacha.stars)==3,'the restored reveal charges and turns with the gacha sound')
+	# Saved after the charge began: the charge resumes for the time that is left.
+	land_fish.call('RARE')
+	for frame in range(200):
+		if game.reveal_t >= 1.0*(0.62 if game.reveal_shortened else 1.0): break
+		game._process_fishing(1.0/60.0)
+	game._save_game('res://.smoke-gacha-charge.json'); var saved_reveal_t: float = game.reveal_t
+	game._reset_fishing(); game._load_game('res://.smoke-gacha-charge.json')
+	check(float(fx.gacha.charge_t)>=0.0 and float(fx.gacha.charge_dur)<0.6 and float(fx.gacha.charge_dur)>=0.05 and is_equal_approx(game.reveal_t, saved_reveal_t),'a reveal saved mid-charge resumes the charge for the time left')
+	# Saved after the turn: the rating is shown, nothing is replayed.
+	for frame in range(200):
+		if game.reveal_t >= game._reveal_face_time(): break
+		game._process_fishing(1.0/60.0); fx.update(1.0/60.0)
+	game._process_fishing(0.2)
+	game._save_game('res://.smoke-gacha-turned.json')
+	game._reset_fishing(); fx.counters.clear(); fx.sounds.clear()
+	game._load_game('res://.smoke-gacha-turned.json')
+	check(not fx.gacha.is_empty() and fx.gacha_stars_shown()==3 and fx.gacha.fireworks.is_empty() and fx.sounds.is_empty() and int(fx.counters.get('gacha_restore',0))==1 and int(fx.counters.get('gacha_begin',0))==0,'a card saved after its turn shows its stars without replaying the show')
+	game._process_fishing(0.5); fx.update(0.5)
+	check(not fx.sounds.has('gacha_flip') and not fx.sounds.has('flip2'),'the restored card does not turn a second time')
+	game._reset_fishing()
+	# Saves without usable rolls fall back to a fresh draw rather than no show.
+	check(not fx.gacha_resume({}, 0.2) and not fx.gacha_resume({'style':'volcano','variant':1}, 0.2),'unknown or missing saved rolls are refused')
+	land_fish.call('RARE')
+	for frame in range(30): game._process_fishing(1.0/60.0)
+	game._save_game('res://.smoke-gacha-old.json')
+	var old_save = JSON.parse_string(FileAccess.get_file_as_string('res://.smoke-gacha-old.json'))
+	old_save.erase('gacha')
+	var old_file := FileAccess.open('res://.smoke-gacha-old.json', FileAccess.WRITE); old_file.store_string(JSON.stringify(old_save)); old_file.close()
+	game._reset_fishing(); fx.counters.clear()
+	game._load_game('res://.smoke-gacha-old.json')
+	check(not fx.gacha.is_empty() and int(fx.counters.get('gacha_begin',0))==1 and int(fx.counters.get('gacha_resume',0))==0,'a save from before the rolls were stored draws a new pull')
+	game._reset_fishing()
+	check(fx.gacha_roll().is_empty(),'nothing is saved for the gacha outside a reveal')
+	# Every firework of the longest finale gets its full time on screen.
+	fx.gacha_begin(); fx.gacha.festival=true; fx.reveal_flip(3,false,false)
+	var launches: Array = fx.firework_times(3, true)
+	var shown_all := true; var last_launch: float = launches[launches.size()-1]
+	for show in fx.gacha.fireworks:
+		fx.gacha.flip_t = float(show.at) + fx.GACHA_FIREWORK_LIFE * 0.5
+		if not is_equal_approx(fx.firework_progress(show), 0.5): shown_all = false
+		fx.gacha.flip_t = float(show.at) + fx.GACHA_FIREWORK_LIFE - 0.01
+		if fx.firework_progress(show) < 0.95: shown_all = false
+		fx.gacha.flip_t = float(show.at) - 0.01
+		if fx.firework_progress(show) >= 0.0: shown_all = false
+	check(shown_all and fx.gacha.fireworks.size()==18 and last_launch>fx.GACHA_FIREWORK_LIFE,'every firework is on screen for its full life, however late it launches (last at %.2fs)' % last_launch)
+	fx.gacha.flip_t = last_launch + fx.GACHA_FIREWORK_LIFE + 0.01
+	check(fx.gacha.fireworks.all(func(show): return fx.firework_progress(show) < 0.0),'the finale is over once the last firework has burned out')
+	fx.clear_show(); fx.flash_log.clear()
+	# LEGENDARY keeps its own arc.
+	land_fish.call('LEGENDARY')
+	check(game.last_rarity=='LEGENDARY' and fx.gacha.is_empty(),'a LEGENDARY catch keeps its own reveal, without the gacha')
+	game._reset_fishing(); game._break_chain(); game._reset_pity(); fx.flash_log.clear()
+	game.current_map=gacha_state.map; game._build_map(gacha_state.map); game.player=gacha_state.player; game.time_of_day=gacha_state.time; game.weather=gacha_state.weather; game.season=gacha_state.season
 	game._reset_fishing(); fx.flash_log.clear()
 	# Pull sounds: one voice per grade, and a PERFECT streak that climbs.
 	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(8.0)

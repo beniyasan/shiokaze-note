@@ -282,6 +282,9 @@ var challenge_hint_t := 0.0
 var music: Node
 var se_player := AudioStreamPlayer.new()
 const SE_RATE := 22050.0
+# Each SE voice can hold this much queued sound.  It must exceed the longest
+# sound the game renders (GACHA_SE_MAX_SECONDS), or that sound's tail is cut.
+const SE_BUFFER_SECONDS := 3.0
 var hud := Node2D.new()
 # Dopamine FX (see EFFECTS_DESIGN.md). The director owns the heat ladder and
 # timing; main only reports events. It exists before _ready so direct calls
@@ -362,7 +365,7 @@ func _ready():
 		var player_node := se_player if i == 0 else AudioStreamPlayer.new()
 		var generator := AudioStreamGenerator.new()
 		generator.mix_rate = SE_RATE
-		generator.buffer_length = 1.0
+		generator.buffer_length = SE_BUFFER_SECONDS
 		player_node.stream = generator
 		player_node.volume_db = -8.0
 		add_child(player_node)
@@ -2014,6 +2017,13 @@ func _process_fishing(delta: float):
 			var flip_time := 0.92 if reveal_shortened else 1.48
 			if previous_reveal_t < flip_time and reveal_t >= flip_time:
 				_play_se("rise")
+			# The gacha show follows the summon light: it only ever shows the heat
+			# the card glow shows, and charges up over the last stretch before the
+			# card turns.
+			var reveal_scale := 0.62 if reveal_shortened else 1.0
+			fx.gacha_heat(_reveal_glow_rank_at(reveal_t))
+			if previous_reveal_t < 0.82 * reveal_scale and reveal_t >= 0.82 * reveal_scale:
+				fx.reveal_charge((1.42 - 0.82) * reveal_scale)
 			for step in _reveal_glow_plan():
 				if previous_reveal_t < float(step.t) and reveal_t >= float(step.t):
 					if str(step.kind) == "promote": fx.reveal_promote(int(step.rank))
@@ -2211,6 +2221,11 @@ func _resolve_fishing_timing(position: float):
 	reveal_t = 0.0
 	reveal_stage = 0
 	result_t = 6.2 if last_rarity == "LEGENDARY" else 2.0
+	if last_rarity != "LEGENDARY":
+		# LEGENDARY keeps its own six-second arc; every other catch is a gacha pull.
+		fx.gacha_begin()
+		fx.gacha_heat(_reveal_glow_rank_at(0.0))
+		_prepare_gacha_flip_se()
 	shake_t = 1.10 if last_rarity == "LEGENDARY" else (0.22 if last_rarity == "RARE" else 0.10)
 	_play_se("catch" if last_rarity != "LEGENDARY" else "legendary")
 	var catch_toast := ("BIG CATCH!!  " if legendary else grade + "!  ") + last_catch
@@ -2296,6 +2311,9 @@ func _play_se(kind: String):
 	# Tiny procedural chimes keep the feedback punchy while avoiding bundled
 	# copyrighted assets. In headless tests the audio server may be absent, so
 	# every step is guarded and simply becomes a no-op there.
+	if kind.begins_with("gacha_"):
+		_play_gacha_se(kind)
+		return
 	var playback := _se_playback()
 	if playback == null: return
 	var duration := 0.18
@@ -2476,12 +2494,12 @@ func _se_wave(wave: String, phase: float, index: int) -> float:
 
 # Mixes notes into one mono buffer, adds echo taps, and keeps the peak under 0.9
 # so a dense sound is turned down as a whole rather than clipped.
-func _render_se(notes: Array, echo: Array = []) -> PackedFloat32Array:
+func _render_se(notes: Array, echo: Array = [], max_seconds: float = PULL_SE_MAX_SECONDS) -> PackedFloat32Array:
 	var length := 0.0
 	for note in notes: length = maxf(length, float(note.t) + float(note.dur))
 	var tail := 0.0
 	for tap in echo: tail = maxf(tail, float(tap[0]))
-	length = minf(length + tail + 0.02, PULL_SE_MAX_SECONDS)
+	length = minf(length + tail + 0.02, max_seconds)
 	var out := PackedFloat32Array()
 	out.resize(int(length * SE_RATE))
 	for note in notes:
@@ -2513,6 +2531,139 @@ func _render_se(notes: Array, echo: Array = []) -> PackedFloat32Array:
 		var scale := 0.9 / peak
 		for i in range(out.size()): out[i] *= scale
 	return out
+
+# ---- Gacha reveal sounds ----------------------------------------------------
+# The catch reveal is scored like a gacha pull, with the same note synth as the
+# pull sounds and the same scale as the music:
+#   style   one sound for the summon style drawn at random (a falling whistle
+#           for meteors, rising blips for bubbles, a crack and rumble for
+#           thunder, a swell of surf for the wave).
+#   roll    a drum roll that tightens and climbs until the card turns.
+#   flip    one mixed sound for the turn: a jingle for the rarity (three
+#           melodies each, picked at random), a ding per star of the rating
+#           climbing the scale, and a pop for every firework.
+const GACHA_SE_MAX_SECONDS := 2.6
+# Jingle melodies by rarity heat, as degrees of PULL_SE_SCALE.
+const GACHA_JINGLES := [
+	[[0, 2], [2, 3], [0, 3]],
+	[[0, 2, 3], [2, 3, 5], [0, 3, 5]],
+	[[0, 2, 3, 5], [2, 3, 5, 7], [3, 2, 5, 7]],
+	[[0, 2, 3, 5, 7, 8], [2, 3, 5, 7, 8, 10], [0, 3, 5, 3, 7, 10]]
+]
+var gacha_flip_buffer := PackedFloat32Array()
+var last_gacha_se := ""
+
+func _gacha_style_notes(style: String) -> Array[Dictionary]:
+	var notes: Array[Dictionary] = []
+	match style:
+		"meteor":
+			notes.append({"t": 0.0, "f": 2400.0, "f_end": 520.0, "dur": 0.42, "vol": 0.22, "wave": "sine", "attack": 0.01, "decay": 0.25})
+			notes.append({"t": 0.05, "f": 3200.0, "f_end": 900.0, "dur": 0.36, "vol": 0.10, "wave": "sine", "attack": 0.01, "decay": 0.2})
+			for k in range(4): notes.append({"t": 0.3 + float(k) * 0.05, "f": _pull_se_pitch(10 - k * 2), "dur": 0.06, "vol": 0.08, "wave": "sine", "attack": 0.002, "decay": 0.05})
+		"bubble":
+			for k in range(7):
+				var f := 380.0 + float(k) * 95.0 + float((k * 37) % 5) * 22.0
+				notes.append({"t": float(k) * 0.055, "f": f, "f_end": f * 1.7, "dur": 0.07, "vol": 0.2, "wave": "sine", "attack": 0.003, "decay": 0.04})
+		"thunder":
+			notes.append({"t": 0.0, "f": 0.0, "dur": 0.5, "vol": 0.3, "wave": "noise", "attack": 0.001, "decay": 0.45})
+			notes.append({"t": 0.0, "f": 1800.0, "f_end": 240.0, "dur": 0.09, "vol": 0.22, "wave": "thin", "attack": 0.001, "decay": 0.07})
+			notes.append({"t": 0.02, "f": 82.0, "f_end": 48.0, "dur": 0.5, "vol": 0.42, "wave": "sine", "attack": 0.005, "decay": 0.4})
+		"wave":
+			notes.append({"t": 0.0, "f": 0.0, "dur": 0.6, "vol": 0.22, "wave": "noise", "attack": 0.32, "decay": 0.26})
+			notes.append({"t": 0.0, "f": 196.0, "f_end": 294.0, "dur": 0.6, "vol": 0.16, "wave": "tri", "attack": 0.25, "decay": 0.3})
+	return notes
+
+func _gacha_roll_notes(dur: float) -> Array[Dictionary]:
+	var notes: Array[Dictionary] = []
+	# Hits start loose and close up, getting louder: the roll tightens.
+	var at := 0.0
+	while at < dur - 0.02:
+		var p := at / dur
+		notes.append({"t": at, "f": 0.0, "dur": 0.03, "vol": 0.08 + 0.2 * p, "wave": "noise", "attack": 0.001, "decay": 0.026})
+		notes.append({"t": at, "f": 180.0, "f_end": 120.0, "dur": 0.03, "vol": 0.06 + 0.12 * p, "wave": "sine", "attack": 0.001, "decay": 0.026})
+		at += lerpf(0.07, 0.028, p)
+	notes.append({"t": 0.0, "f": 196.0, "f_end": 392.0, "dur": dur, "vol": 0.14, "wave": "tri", "attack": dur * 0.6, "decay": 0.04})
+	return notes
+
+# The whole turn of the card as one sound, so the jingle, the star count and
+# the fireworks stay in time with the picture however busy the mixer is.
+func _gacha_flip_notes(heat: int, variant: int, stars: int, firework_times: Array) -> Array[Dictionary]:
+	var notes: Array[Dictionary] = []
+	var rank := clampi(heat, 0, 3)
+	var melody: Array = GACHA_JINGLES[rank][posmod(variant, GACHA_JINGLES[rank].size())]
+	notes.append({"t": 0.0, "f": 150.0, "f_end": 48.0, "dur": 0.12, "vol": 0.3 + 0.08 * float(rank), "wave": "sine", "attack": 0.001, "decay": 0.1})
+	var step := 0.075
+	for k in range(melody.size()):
+		var last := k == melody.size() - 1
+		var pitch := _pull_se_pitch(int(melody[k]))
+		notes.append({"t": 0.01 + float(k) * step, "f": pitch, "dur": 0.34 if last else 0.1, "vol": 0.2 if last else 0.16, "wave": "thin", "attack": 0.003, "decay": 0.26 if last else 0.05})
+		notes.append({"t": 0.01 + float(k) * step, "f": pitch * 2.0, "dur": 0.24 if last else 0.07, "vol": 0.07, "wave": "sine", "attack": 0.003, "decay": 0.18 if last else 0.04})
+	var landing := 0.01 + float(melody.size() - 1) * step
+	if rank >= 2:
+		# A held chord under the last note: the catch is worth a fanfare.
+		for degree in [0, 2, 3, 5]:
+			notes.append({"t": landing, "f": _pull_se_pitch(degree), "dur": 0.5 + 0.2 * float(rank - 2), "vol": 0.075, "wave": "tri", "attack": 0.01, "decay": 0.35})
+	if rank >= 3:
+		notes.append({"t": 0.0, "f": 98.0, "f_end": 41.0, "dur": 0.4, "vol": 0.42, "wave": "sine", "attack": 0.002, "decay": 0.3})
+		var top := _pull_se_pitch(int(melody[melody.size() - 1]))
+		for k in range(8): notes.append({"t": landing + 0.06 + float(k) * 0.04, "f": top * (2.0 if k % 2 == 0 else 1.5), "dur": 0.05, "vol": 0.055, "wave": "sine", "attack": 0.002, "decay": 0.04})
+	# One ding per star, climbing the scale; the last one rings an octave up.
+	for k in range(stars):
+		var at: float = fx.GACHA_STAR_FIRST + float(k) * fx.GACHA_STAR_GAP
+		var ding := _pull_se_pitch(5 + k * 2)
+		notes.append({"t": at, "f": ding, "dur": 0.1, "vol": 0.15, "wave": "sine", "attack": 0.002, "decay": 0.08})
+		notes.append({"t": at, "f": 0.0, "dur": 0.02, "vol": 0.05, "wave": "noise", "attack": 0.001, "decay": 0.018})
+		if k == stars - 1: notes.append({"t": at + 0.03, "f": ding * 2.0, "dur": 0.22, "vol": 0.12, "wave": "sine", "attack": 0.002, "decay": 0.18})
+	# A thump and a crackle for each firework.
+	for index in range(firework_times.size()):
+		var at2 := float(firework_times[index])
+		notes.append({"t": at2, "f": 240.0 - float(index % 3) * 35.0, "f_end": 70.0, "dur": 0.09, "vol": 0.16, "wave": "sine", "attack": 0.001, "decay": 0.08})
+		notes.append({"t": at2 + 0.02, "f": 0.0, "dur": 0.12, "vol": 0.07, "wave": "noise", "attack": 0.002, "decay": 0.1})
+	return notes
+
+# Renders the turn's sound ahead of time, at the landing, where a hit-stop
+# already hides the cost; the turn itself then only has to play it.
+func _prepare_gacha_flip_se() -> void:
+	gacha_flip_buffer = PackedFloat32Array()
+	if fx.gacha.is_empty(): return
+	var heat := _rarity_heat(last_rarity)
+	var times: Array = fx.firework_times(heat, bool(fx.gacha.festival))
+	gacha_flip_buffer = _render_se(_gacha_flip_notes(heat, int(fx.gacha.variant), fx.gacha_star_count(heat), times), [[0.09, 0.22]], GACHA_SE_MAX_SECONDS)
+
+# Brings the gacha show back for a result card restored from a save.  A card
+# saved face-down resumes the same pull (its style, melody and festival roll
+# are in the save) from where its reveal clock stands; a card already turned
+# shows its star rating without replaying the turn.  A save from before the
+# rolls were stored, or with rolls this build does not know, draws new ones.
+func _restore_gacha(roll: Dictionary = {}) -> void:
+	if last_rarity == "LEGENDARY" or last_rarity == "" or last_grade == "MISS": return
+	var heat := _rarity_heat(last_rarity)
+	if reveal_t >= _reveal_face_time():
+		fx.gacha_restore_turned(heat)
+		return
+	if not fx.gacha_resume(roll, reveal_t): fx.gacha_begin()
+	fx.gacha_heat(_reveal_glow_rank_at(reveal_t))
+	_prepare_gacha_flip_se()
+	var scale := 0.62 if reveal_shortened else 1.0
+	if reveal_t >= 0.82 * scale:
+		fx.reveal_charge(maxf(0.05, 1.42 * scale - reveal_t))
+
+func _push_se(samples: PackedFloat32Array) -> void:
+	var playback := _se_playback()
+	if playback == null: return
+	for sample in samples:
+		if not playback.can_push_buffer(1): break
+		playback.push_frame(Vector2.ONE * sample)
+
+func _play_gacha_se(kind: String) -> void:
+	last_gacha_se = kind
+	if kind == "gacha_flip":
+		_push_se(gacha_flip_buffer)
+	elif kind.begins_with("gacha_roll"):
+		var scale := 0.62 if kind == "gacha_roll_short" else 1.0
+		_push_se(_render_se(_gacha_roll_notes((1.42 - 0.82) * scale), [], GACHA_SE_MAX_SECONDS))
+	elif kind.begins_with("gacha_style_"):
+		_push_se(_render_se(_gacha_style_notes(kind.trim_prefix("gacha_style_")), [[0.11, 0.2]], GACHA_SE_MAX_SECONDS))
 
 func _play_pull_se(grade: String, streak: int = 0, clean: bool = false) -> void:
 	last_pull_se = grade if grade != "PERFECT" else "PERFECT x%d" % clampi(streak, 1, PULL_SE_MAX_STREAK)
@@ -2570,6 +2721,7 @@ func _reset_fishing():
 	nibble_times.clear()
 	nibble_index = 0
 	nibble_t = 0.0
+	gacha_flip_buffer = PackedFloat32Array()
 	direction_timer = 0.0
 	battle_tension = 0.0
 	battle_escape = 0.0
@@ -2599,7 +2751,7 @@ func _save_game(path: String = SAVE_PATH):
 	var f := FileAccess.open(path, FileAccess.WRITE)
 	if f == null:
 		toast = "Could not save. Please check available storage."; toast_t = 4; return
-	f.store_string(JSON.stringify({"version":13,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"weather":weather,"season":season,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"heard_rumors":heard_rumors,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected,"pending_catch":pending_catch,"pending_catch_state":pending_catch_state,"last_catch_decision":last_catch_decision,"reveal_t":reveal_t,"reveal_stage":reveal_stage,"reveal_shortened":reveal_shortened,"legendary_t":legendary_t,"legendary_stage":legendary_stage,"fx_reduced":fx.reduced,"fever_announce_pending":fever_announce_pending and fever_active and catch_choice_pending()}))
+	f.store_string(JSON.stringify({"version":13,"combo":combo,"fever_t":fever_t,"pity_meter":pity_meter,"rescue_meter":pity_meter,"rescue_ready":rescue_ready,"low_grade_streak":low_grade_streak,"map":current_map,"day":day,"time":time_of_day,"weather":weather,"season":season,"fish":fish_count,"shells":shells,"bait":bait_index,"rod":rod_index,"x":player.x,"y":player.y,"catches":catches,"catch_metadata":catch_metadata,"first_capture_metadata":first_capture_metadata,"catch_latest":catch_latest,"best_records":best_records,"rumor_found":rumor_found,"heard_rumors":heard_rumors,"hidden_spot_unlocked":hidden_spot_unlocked,"hidden_spot_collected":hidden_spot_collected,"pending_catch":pending_catch,"pending_catch_state":pending_catch_state,"last_catch_decision":last_catch_decision,"reveal_t":reveal_t,"reveal_stage":reveal_stage,"reveal_shortened":reveal_shortened,"legendary_t":legendary_t,"legendary_stage":legendary_stage,"fx_reduced":fx.reduced,"fever_announce_pending":fever_announce_pending and fever_active and catch_choice_pending(),"gacha":fx.gacha_roll() if catch_choice_pending() else {}}))
 	toast = "Saved to the tide ledger"; toast_t = 2.4
 
 func _normalize_catch_metadata(raw: Dictionary, species: String, first_capture := true) -> Dictionary:
@@ -2753,6 +2905,8 @@ func _load_game(path: String = SAVE_PATH):
 			legendary_t = clampf(float(data.get("legendary_t", 6.0 if last_rarity == "LEGENDARY" else 0.0)), 0.0, 6.0)
 			legendary_stage = clampi(int(data.get("legendary_stage", 3 if last_rarity == "LEGENDARY" and legendary_t >= 3.75 else 0)), 0, 3)
 			result_t = 999.0
+			var saved_gacha = data.get("gacha", {})
+			_restore_gacha(saved_gacha if saved_gacha is Dictionary else {})
 			toast = "Catch restored / choose REGISTER or SELL"
 			toast_t = 4.0
 	rumor_found = bool(data.get("rumor_found", false))

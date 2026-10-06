@@ -105,6 +105,26 @@ const PORTRAIT_FACES := 5
 const PORTRAIT_HOLD := 1.2
 var portrait_change_t := 99.0
 var portrait_hold: Dictionary = {}
+# ---- The catch reveal as a gacha pull (see EFFECTS_DESIGN.md, C) -----------
+# One of these summon styles is drawn at random for every catch.  The draw uses
+# this director's RNG and is purely for show: it never changes or hints at the
+# fish, which is already decided.
+const GACHA_STYLES := ["meteor", "bubble", "thunder", "wave"]
+# The reveal jingle has this many melodies per rarity, also picked at random.
+const GACHA_FLIP_VARIANTS := 3
+# Now and then the reveal ends in a festival: far more fireworks and a confetti
+# rain.  It is a flourish, not a reward.
+const GACHA_FESTIVAL_CHANCE := 0.15
+const GACHA_FIREWORKS := [2, 4, 7, 10]
+const GACHA_FESTIVAL_FIREWORKS := 8
+const GACHA_FIREWORK_LIFE := 0.9
+# Star rating: one star per rarity step, counted up after the card turns, in the
+# margin left of the card and below the chain/rescue panel.
+const GACHA_STAR_SLOTS := 5
+const GACHA_STAR_FIRST := 0.14
+const GACHA_STAR_GAP := 0.11
+const GACHA_STARS_RECT := Rect2(36, 116, 34, 122)
+var gacha: Dictionary = {}
 var card_active := false
 var card_count := 0
 var card_stamp_t := 99.0
@@ -165,6 +185,10 @@ func update(delta: float) -> void:
 	for i in impacts: i.t = float(i.t) + delta
 	impacts = impacts.filter(func(i): return float(i.t) < float(i.dur))
 	card_stamp_t += delta
+	if not gacha.is_empty():
+		gacha.t = float(gacha.t) + delta
+		if float(gacha.charge_t) >= 0.0: gacha.charge_t = float(gacha.charge_t) + delta
+		if float(gacha.flip_t) >= 0.0: gacha.flip_t = float(gacha.flip_t) + delta
 	portrait_change_t += delta
 	if not portrait_hold.is_empty():
 		portrait_hold.t = float(portrait_hold.t) + delta
@@ -387,6 +411,7 @@ func clear_show() -> void:
 	card_break = {}
 	portrait_change_t = 99.0
 	portrait_hold = {}
+	gacha = {}
 	cutins.clear()
 	pops.clear()
 	particles.clear()
@@ -664,6 +689,117 @@ func miss(pos: Vector2, near_fever: bool) -> void:
 
 # ---- C. reveal --------------------------------------------------------------
 
+# Starts the gacha show for a standard (non-LEGENDARY) catch: rolls the summon
+# style, the jingle melody and whether this one ends in a festival.
+func gacha_begin() -> void:
+	gacha = {
+		"style": str(GACHA_STYLES[rng.randi() % GACHA_STYLES.size()]),
+		"variant": rng.randi() % GACHA_FLIP_VARIANTS,
+		"festival": rng.randf() < GACHA_FESTIVAL_CHANCE,
+		"seed": rng.randi(),
+		"t": 0.0, "heat": 0, "charge_t": -1.0, "charge_dur": 0.0,
+		"flip_t": -1.0, "rank": -1, "stars": 0, "fireworks": []
+	}
+	_sound("gacha_style_" + str(gacha.style))
+	_count("gacha_begin")
+	_count("gacha_style_" + str(gacha.style))
+
+# The rolls of the pull in progress, for the save file.  Empty once the card
+# has turned: there is nothing left of the show to resume.
+func gacha_roll() -> Dictionary:
+	if gacha.is_empty() or float(gacha.flip_t) >= 0.0: return {}
+	return {"style": str(gacha.style), "variant": int(gacha.variant), "festival": bool(gacha.festival), "seed": int(gacha.seed)}
+
+# Resumes a pull from its saved rolls, `elapsed` seconds into the reveal, without
+# rolling again or replaying the style's opening sound.  Returns false, leaving
+# nothing started, if the saved rolls are missing or not ones this build knows.
+func gacha_resume(roll: Dictionary, elapsed: float) -> bool:
+	if not GACHA_STYLES.has(str(roll.get("style", ""))): return false
+	gacha = {
+		"style": str(roll.style),
+		"variant": posmod(int(roll.get("variant", 0)), GACHA_FLIP_VARIANTS),
+		"festival": bool(roll.get("festival", false)),
+		"seed": int(roll.get("seed", 0)),
+		"t": maxf(0.0, elapsed), "heat": 0, "charge_t": -1.0, "charge_dur": 0.0,
+		"flip_t": -1.0, "rank": -1, "stars": 0, "fireworks": []
+	}
+	_count("gacha_resume")
+	return true
+
+# How far through its burst a firework is, 0 to 1, or -1 while it is not on
+# screen.  Each one lives GACHA_FIREWORK_LIFE from its own launch time, so the
+# late ones of a long finale are shown in full.
+func firework_progress(show: Dictionary) -> float:
+	if gacha.is_empty() or float(gacha.flip_t) < 0.0: return -1.0
+	var age := float(gacha.flip_t) - float(show.at)
+	if age <= 0.0 or age >= GACHA_FIREWORK_LIFE: return -1.0
+	return age / GACHA_FIREWORK_LIFE
+
+# A card that was already turned when it was saved: the star rating and the
+# settled halo, with no style, charge, fireworks or sound to replay.
+func gacha_restore_turned(rank: int) -> void:
+	var shown := clampi(rank, 0, 3)
+	gacha = {
+		"style": "", "variant": 0, "festival": false, "seed": rng.randi(),
+		"t": 99.0, "heat": shown, "charge_t": -1.0, "charge_dur": 0.0,
+		"flip_t": 99.0, "rank": shown, "stars": gacha_star_count(shown), "fireworks": []
+	}
+	_count("gacha_restore")
+
+# The heat the summon light currently shows (what the player was promised, then
+# each promotion or the fizzle).  The show before the flip only ever uses this.
+func gacha_heat(heat: int) -> void:
+	if not gacha.is_empty(): gacha.heat = clampi(heat, 0, 3)
+
+# The last stretch before the card turns: orbs rush in over a drum roll.
+func reveal_charge(dur: float) -> void:
+	if gacha.is_empty(): return
+	gacha.charge_t = 0.0
+	gacha.charge_dur = maxf(0.05, dur)
+	_sound("gacha_roll_short" if dur < 0.5 else "gacha_roll_long")
+	_count("gacha_charge")
+
+# When each firework of the finale goes off, in seconds after the card turns.
+func firework_times(rank: int, festival: bool) -> Array[float]:
+	var count: int = int(GACHA_FIREWORKS[clampi(rank, 0, 3)]) + (GACHA_FESTIVAL_FIREWORKS if festival else 0)
+	var gap := 0.10 if festival else 0.16
+	var times: Array[float] = []
+	for k in range(count): times.append(0.08 + float(k) * gap)
+	return times
+
+func gacha_star_count(rank: int) -> int:
+	return clampi(rank + 1, 1, GACHA_STAR_SLOTS)
+
+# Centre of a star slot; slot 0 is the bottom one.
+func gacha_star_pos(slot: int) -> Vector2:
+	var slot_h := GACHA_STARS_RECT.size.y / float(GACHA_STAR_SLOTS)
+	return Vector2(GACHA_STARS_RECT.get_center().x, GACHA_STARS_RECT.end.y - slot_h * (float(slot) + 0.5))
+
+# How many stars have landed so far.
+func gacha_stars_shown() -> int:
+	if gacha.is_empty() or float(gacha.flip_t) < GACHA_STAR_FIRST: return 0
+	return mini(int(gacha.stars), 1 + int((float(gacha.flip_t) - GACHA_STAR_FIRST) / GACHA_STAR_GAP))
+
+func _gacha_flip(rank: int) -> void:
+	gacha.flip_t = 0.0
+	gacha.rank = rank
+	gacha.heat = rank
+	gacha.stars = gacha_star_count(rank)
+	var shows: Array = []
+	for at in firework_times(rank, bool(gacha.festival)):
+		# The card fills the middle of the screen, so fireworks go off in the
+		# margins beside it, alternating sides.
+		var left := shows.size() % 2 == 0
+		var x := rng.randf_range(14.0, 96.0) if left else rng.randf_range(SCREEN.x - 96.0, SCREEN.x - 14.0)
+		shows.append({"at": at, "pos": Vector2(x, rng.randf_range(40.0, SCREEN.y - 50.0)), "hue": rng.randf(), "size": rng.randf_range(34.0, 50.0) + 4.0 * float(rank), "seed": rng.randi()})
+	gacha.fireworks = shows
+	if bool(gacha.festival):
+		burst(Vector2(60, -6), Color.WHITE, 26, 150.0, "confetti", true)
+		burst(Vector2(SCREEN.x - 60, -6), Color.WHITE, 26, 150.0, "confetti", true)
+		_count("gacha_festival")
+	_sound("gacha_flip")
+	_count("gacha_flip")
+
 func reveal_promote(rank: int) -> void:
 	var col: Color = HEAT_COLORS[clampi(rank, 0, 3)]
 	burst(CARD_CENTER, col, 18 + rank * 6, 130.0, "spark", rank >= 3)
@@ -694,7 +830,10 @@ func reveal_flip(rank: int, is_new: bool, is_crown: bool) -> void:
 		speed_target = 0.6
 		speed_heat = 3
 		schedule(1.0, "_ease_speed")
-	_sound("flip%d" % clampi(rank, 0, 3))
+	# With the gacha show running, the turn has one mixed sound of its own (the
+	# jingle, the star count and the fireworks); otherwise the plain flip chime.
+	if gacha.is_empty(): _sound("flip%d" % clampi(rank, 0, 3))
+	else: _gacha_flip(clampi(rank, 0, 3))
 	var delay := 0.24
 	if is_new:
 		schedule(delay, "stamp", ["NEW!", Color("#7ff0b2"), CARD_CENTER + Vector2(-92, -62)])

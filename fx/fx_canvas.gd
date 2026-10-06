@@ -39,6 +39,10 @@ func heat_color(heat: int, phase: float = 0.0) -> Color:
 
 func _draw_back() -> void:
 	var d: FxDirector = director
+	# The gacha backdrop is on this layer on purpose: the result card and every
+	# HUD panel are drawn above it, so it can fill the screen and still never
+	# cover anything the player reads.
+	if not d.gacha.is_empty(): _draw_gacha_back()
 	if d.dim > 0.01:
 		draw_rect(Rect2(0, 0, W, H), Color(0.02, 0.02, 0.06, d.dim))
 	if d.vignette > 0.01:
@@ -80,6 +84,8 @@ func _draw_front() -> void:
 	for s in d.shards: _draw_shard(s)
 	if d.card_active or not d.card_break.is_empty(): _draw_streak_card()
 	if d.portrait_visible(): _draw_portrait()
+	if not d.gacha.is_empty() and float(d.gacha.flip_t) < 0.2: _draw_gacha_style()
+	if not d.gacha.is_empty() and float(d.gacha.flip_t) >= 0.0: _draw_gacha_stars()
 	for p in d.particles: _draw_particle(p)
 	for i in d.impacts: _draw_impact(i)
 	for c in d.cutins: _draw_cutin(c)
@@ -259,6 +265,167 @@ func _impact_text_top(tier: int, label: String) -> float:
 	var lift := absf(sin(float(IMPACT_TEXT_ROT[tier]))) * half_width
 	return float(director.IMPACT_TEXT_POS.y) - height - lift - IMPACT_OUTLINE
 
+# ---- the gacha reveal --------------------------------------------------------
+
+func _gacha_color(heat: int, phase: float = 0.0) -> Color:
+	if heat >= 3: return Color.from_hsv(fmod(director.time * 0.3 + phase, 1.0), 0.6, 1.0)
+	return director.HEAT_COLORS[clampi(heat, 0, 2)]
+
+func _draw_gacha_back() -> void:
+	var d: FxDirector = director
+	var g: Dictionary = d.gacha
+	var t := float(g.t)
+	var heat := int(g.heat)
+	var flip_t := float(g.flip_t)
+	var flipped := flip_t >= 0.0
+	var charge := 0.0
+	if float(g.charge_t) >= 0.0: charge = clampf(float(g.charge_t) / float(g.charge_dur), 0.0, 1.0)
+	var k := 0.5 if d.reduced else 1.0
+	var c: Vector2 = d.CARD_CENTER
+	# Summon rays turn behind the card, brightening through the charge.  After
+	# the turn they flare, then settle: a rare catch keeps a slow halo while the
+	# card waits, a common one lets it go.
+	var ray_a := 0.14 + 0.26 * charge
+	if flipped:
+		var settle := float([0.0, 0.05, 0.14, 0.2][clampi(heat, 0, 3)])
+		ray_a = lerpf(0.5 + 0.06 * float(heat), settle, clampf(flip_t / 1.4, 0.0, 1.0))
+	ray_a *= clampf(t / 0.2, 0.0, 1.0) * k
+	if ray_a > 0.004:
+		var rays := 16
+		var spin := d.time * (0.25 + 0.5 * charge)
+		for i in range(rays):
+			var a0 := spin + float(i) * TAU / float(rays)
+			var a1 := a0 + TAU / float(rays) * 0.45
+			draw_colored_polygon(PackedVector2Array([c, c + Vector2(cos(a0), sin(a0)) * 520.0, c + Vector2(cos(a1), sin(a1)) * 520.0]), Color(_gacha_color(heat, float(i) / float(rays)), ray_a))
+	# Fireworks after the turn, across the whole screen.
+	if flipped:
+		for show in g.fireworks:
+			var fp: float = d.firework_progress(show)
+			if fp < 0.0: continue
+			var centre: Vector2 = show.pos
+			var radius := float(show.size) * _ease_out(fp * 1.5)
+			var fade := (1.0 - fp) * k
+			var fr := RandomNumberGenerator.new()
+			fr.seed = int(show.seed)
+			var petals := 18
+			for i in range(petals):
+				var a2 := float(i) * TAU / float(petals) + fr.randf() * 0.2
+				var reach := radius * (0.8 + fr.randf() * 0.35)
+				var tip := centre + Vector2(cos(a2), sin(a2)) * reach + Vector2(0, 16.0 * fp * fp)
+				var hue := fmod(float(show.hue) + (float(i) / float(petals) if heat >= 3 or bool(g.festival) else fr.randf() * 0.08), 1.0)
+				var col2 := Color.from_hsv(hue, 0.55, 1.0) if heat >= 3 or bool(g.festival) else _gacha_color(heat).lerp(Color.from_hsv(hue, 0.4, 1.0), 0.35)
+				draw_line(centre.lerp(tip, 0.45), tip, Color(col2, 0.85 * fade), 2.5)
+				draw_rect(Rect2(tip - Vector2(2, 2), Vector2(4, 4)), Color(col2.lightened(0.45), fade))
+				# A shorter inner ring fills the flower in.
+				draw_rect(Rect2(centre.lerp(tip, 0.5) - Vector2(1, 1), Vector2(2, 2)), Color(1, 1, 1, 0.8 * fade))
+			if fp < 0.3: draw_circle(centre, 9.0 * (1.0 - fp / 0.3), Color(1, 1, 1, 0.95 * k))
+
+
+# The summon style and the charging orbs play over the whole screen, card
+# included, while the card is still face-down and has nothing to read.  They
+# are gone within a fifth of a second of the turn.
+func _draw_gacha_style() -> void:
+	var d: FxDirector = director
+	var g: Dictionary = d.gacha
+	var t := float(g.t)
+	var heat := int(g.heat)
+	var flip_t := float(g.flip_t)
+	var flipped := flip_t >= 0.0
+	var charge := 0.0
+	if float(g.charge_t) >= 0.0: charge = clampf(float(g.charge_t) / float(g.charge_dur), 0.0, 1.0)
+	var k := 0.5 if d.reduced else 1.0
+	var c: Vector2 = d.CARD_CENTER
+	var r := RandomNumberGenerator.new()
+	r.seed = int(g.seed)
+	var style_a := clampf(t / 0.15, 0.0, 1.0) * (1.0 - clampf(flip_t / 0.18, 0.0, 1.0) if flipped else 1.0) * k
+	if style_a > 0.01:
+		match str(g.style):
+			"meteor":
+				for i in range(16):
+					var period := 0.5 + r.randf() * 0.35
+					var p := fmod(t + r.randf() * period, period) / period
+					var from := Vector2(r.randf_range(120.0, 620.0), -30.0)
+					var head := from + Vector2(-230.0, 300.0) * p
+					var tail := head - Vector2(-230.0, 300.0).normalized() * (26.0 + 20.0 * r.randf())
+					var streak := _gacha_color(heat, r.randf())
+					draw_line(tail, head, Color(streak, 0.4 * style_a), 5.0)
+					draw_line(tail, head, Color(streak.lightened(0.5), 0.9 * style_a * (1.0 - p * 0.4)), 2.0)
+					draw_circle(head, 3.0, Color(1, 1, 1, style_a))
+			"bubble":
+				for i in range(34):
+					var period2 := 1.1 + r.randf() * 0.9
+					var p2 := fmod(t + r.randf() * period2, period2) / period2
+					var x := r.randf_range(8.0, W - 8.0) + sin(t * 3.0 + float(i)) * 6.0
+					var y := H + 10.0 - p2 * (H + 30.0)
+					var rad := 4.0 + r.randf() * 9.0
+					draw_arc(Vector2(x, y), rad, 0, TAU, 14, Color(_gacha_color(heat, r.randf()).lightened(0.35), 0.9 * style_a), 2.0)
+					draw_circle(Vector2(x - rad * 0.3, y - rad * 0.3), rad * 0.22, Color(1, 1, 1, 0.8 * style_a))
+			"thunder":
+				# Bolts strike toward the card and fade smoothly: no strobing.
+				for i in range(4):
+					var period3 := 0.62
+					var p3 := fmod(t + float(i) * 0.17, period3) / period3
+					var bolt_a := (1.0 - p3) * (1.0 - p3) * style_a
+					var strike := int((t + float(i) * 0.17) / period3)
+					var br := RandomNumberGenerator.new()
+					br.seed = int(g.seed) + i * 131 + strike * 977
+					var x0 := br.randf_range(30.0, W - 30.0)
+					var pts := PackedVector2Array([Vector2(x0, 0.0)])
+					var target := Vector2(c.x + br.randf_range(-150.0, 150.0), c.y + br.randf_range(-30.0, 60.0))
+					for seg in range(1, 7):
+						var q := Vector2(x0, 0.0).lerp(target, float(seg) / 6.0)
+						if seg < 6: q.x += br.randf_range(-16.0, 16.0)
+						pts.append(q)
+					draw_polyline(pts, Color(_gacha_color(heat, float(i) * 0.2), 0.5 * bolt_a), 7.0)
+					draw_polyline(pts, Color(1, 1, 1, 0.95 * bolt_a), 2.0)
+			"wave":
+				for band in range(5):
+					var pts2 := PackedVector2Array()
+					var base_y := H - 22.0 - float(band) * 34.0 - 30.0 * charge
+					for step in range(25):
+						var x2 := float(step) / 24.0 * W
+						pts2.append(Vector2(x2, base_y + sin(x2 * 0.035 + t * (3.0 + float(band)) + float(band)) * (7.0 + 3.0 * float(band))))
+					draw_polyline(pts2, Color(_gacha_color(heat, float(band) * 0.15).lightened(0.2), (0.7 - float(band) * 0.1) * style_a), 3.0 - float(band) * 0.4)
+	# Orbs spiral in to the card through the charge.
+	if charge > 0.0 and not flipped:
+		var orbs := 10 + heat * 5
+		for i in range(orbs):
+			var a := float(i) * TAU / float(orbs) + charge * 5.0 + r.randf() * 0.4
+			var dist := lerpf(300.0, 14.0, charge * charge) * (0.85 + r.randf() * 0.3)
+			var pos := c + Vector2(cos(a), sin(a) * 0.62) * dist
+			var col := _gacha_color(heat, float(i) / float(orbs))
+			draw_circle(pos, 7.0, Color(col, 0.35 * k))
+			draw_circle(pos, 3.2, Color(col.lightened(0.5), 0.95 * k))
+			draw_line(pos, pos - Vector2(-sin(a), cos(a) * 0.62) * 16.0, Color(col, 0.6 * k), 2.0)
+
+# The star rating counts up after the card turns: one star per rarity step,
+# each slamming into its slot, with a ring off the last one.
+func _draw_gacha_stars() -> void:
+	var d: FxDirector = director
+	var g: Dictionary = d.gacha
+	var flip_t := float(g.flip_t)
+	var total := int(g.stars)
+	var shown: int = d.gacha_stars_shown()
+	var r: Rect2 = d.GACHA_STARS_RECT
+	var appear := clampf(flip_t / 0.12, 0.0, 1.0)
+	draw_rect(r.grow(3.0), Color(0.05, 0.07, 0.13, 0.78 * appear))
+	draw_rect(r.grow(2.0), Color(_gacha_color(int(g.rank)), 0.8 * appear), false, 1.0)
+	for slot in range(d.GACHA_STAR_SLOTS):
+		var c: Vector2 = d.gacha_star_pos(slot)
+		if slot >= shown:
+			draw_colored_polygon(_star(c, 8.0, 3.4, 5), Color(0.5, 0.56, 0.6, 0.32 * appear))
+			continue
+		var landed_at: float = d.GACHA_STAR_FIRST + float(slot) * d.GACHA_STAR_GAP
+		var age := flip_t - landed_at
+		var slam := 1.0 + 1.6 * (1.0 - _ease_out(clampf(age / 0.13, 0.0, 1.0)))
+		var col := Color("#ffd23a") if total < 4 else Color.from_hsv(fmod(director.time * 0.5 + float(slot) * 0.16, 1.0), 0.5, 1.0)
+		draw_colored_polygon(_star(c, 11.0 * slam, 4.7 * slam, 5), Color(0.05, 0.04, 0.1, 0.95))
+		draw_colored_polygon(_star(c, 9.0 * slam, 3.8 * slam, 5), col)
+		draw_colored_polygon(_star(c + Vector2(-1.2, -1.2), 3.4 * slam, 1.4 * slam, 5), Color(1, 1, 1, 0.6))
+		if slot == total - 1 and age < 0.4:
+			var ring := age / 0.4
+			draw_arc(c, 9.0 + ring * 22.0, 0, TAU, 24, Color(col, (1.0 - ring) * 0.9), 2.0)
+
 # ---- emblems and the streak card -------------------------------------------
 
 func _star(center: Vector2, outer: float, inner: float, points: int, rot: float = 0.0) -> PackedVector2Array:
@@ -296,6 +463,9 @@ func _draw_emblem(i: Dictionary) -> void:
 	var t := float(i.t)
 	var alpha := (1.0 - clampf((t - float(i.dur) * 0.7) / (float(i.dur) * 0.3), 0.0, 1.0)) * (0.6 if d.reduced else 1.0)
 	var pop_in := _ease_out_back(t / 0.16)
+	# On its first frame the badge has almost no size, and its ribbon folds over
+	# itself below about a tenth of full size; such a polygon cannot be drawn.
+	if pop_in < 0.12: return
 	var c: Vector2 = d.IMPACT_EMBLEM_POS
 	var unit: float = d.IMPACT_EMBLEM_RADIUS / 44.0 * pop_in
 	var ink := Color(0.05, 0.04, 0.1, alpha)
