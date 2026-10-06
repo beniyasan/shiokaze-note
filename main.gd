@@ -35,6 +35,8 @@ const FISH_STAMINA := 10
 const FIRST_PULL_DELAY := 1.0
 const PULL_COOLDOWN := 1.8
 const GOOD_PULL_TENSION := 0.14
+const PERFECT_PULL_TENSION := 0.08
+const CLEAN_BEAT_TENSION_RELIEF := 0.05
 const SAVE_PATH := "user://saltmere_save.json"
 # Keep the legendary choice controls clear of the 270px viewport edge. These
 # are shared by both the promotion-label and no-label variants so a long-lived
@@ -793,7 +795,7 @@ func _check_map_exit():
 		# east on the same bank so merely approaching the pool cannot transition.
 		if hidden_spot_unlocked and player.x > 760 and player.y > 450 and player.y < 500: exit = "grotto"
 		elif player.x < 34 and player.y > 250 and player.y < 430: exit = "town"
-		elif player.y > 420 and player.x > 280 and player.x < 560: exit = "beach"
+		elif player.y > 470 and player.x > 390 and player.x < 450: exit = "beach"
 	elif current_map == "grotto":
 		# The grotto's return route is the west edge, matching the authored map
 		# workflow and keeping the cave entry above the lagoon as a one-way route.
@@ -1757,7 +1759,7 @@ func _process_fishing(delta: float):
 		if fishing_challenge != null and not fishing_challenge.done:
 			# Keep the slalom lane and the visible counter prompt on one direction.
 			fishing_challenge.counter_lane = -battle_direction
-			fishing_challenge.tick(delta, counter)
+			fishing_challenge.tick(delta, counter, pull_cooldown <= 0.0)
 			challenge_hint_t = maxf(0.0, challenge_hint_t-delta)
 		var escape_rate := float(RODS[rod_index].escape_mult) * float(BAITS[bait_index].get("escape_mult", 1.0))
 		# Bait risk applies to uncountered surges only. A deliberate counter
@@ -2048,9 +2050,12 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	# missed gold-zone pull; it never bypasses the existing escape/tension rules.
 	if fishing_challenge != null and not fishing_challenge.done:
 		var challenge_result: Dictionary = fishing_challenge.accept(position, counter_axis)
+		var challenge_clean := bool(challenge_result.get("success", false))
 		challenge_round_event = str(challenge_result.get("event", ""))
 		challenge_hint_t = 1.1
-		if not bool(challenge_result.get("success", false)):
+		if not challenge_clean:
+			# A missed bonus beat strains the line, but the authoritative gauge
+			# pull still resolves normally instead of being discarded.
 			battle_tension = clampf(battle_tension + 0.25, 0.0, 1.0)
 			battle_escape = clampf(battle_escape + 0.12, 0.0, 1.0)
 			shake_t = 0.24
@@ -2060,7 +2065,7 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 			toast_t = 1.2
 			if battle_tension >= 1.0 or battle_escape >= 1.0:
 				_resolve_fishing_timing(-1.0)
-			return
+				return
 		if bool(challenge_result.get("round_complete", false)):
 			_play_se("perfect_tug")
 
@@ -2086,7 +2091,9 @@ func _handle_fishing_strike(position: float, counter_axis: float = 0.0):
 	_music_call("set_combo", [mini(4, combo + battle_hits)])
 	if grade == "PERFECT": perfect_pulls += 1
 	fish_hp = maxi(0, fish_hp - (2 if grade == "PERFECT" else 1))
-	battle_tension = clampf(battle_tension + (0.08 if grade == "PERFECT" else 0.14), 0.0, 1.0)
+	battle_tension = clampf(battle_tension + (PERFECT_PULL_TENSION if grade == "PERFECT" else GOOD_PULL_TENSION), 0.0, 1.0)
+	if challenge_clean:
+		battle_tension = maxf(0.0, battle_tension - CLEAN_BEAT_TENSION_RELIEF)
 	battle_escape = maxf(0.0, battle_escape - (0.24 if grade == "PERFECT" else 0.11))
 	gauge_direction = -gauge_direction
 	shake_t = maxf(shake_t, 0.14 + battle_hits * 0.06)
