@@ -13,6 +13,19 @@ var layer_kind := "front"
 const W := 480.0
 const H := 270.0
 
+# The angler's five faces, in order of excitement.  A face that fails to load
+# simply is not drawn, so missing art never stops a battle.
+var portraits: Array[Texture2D] = []
+
+func _ready() -> void:
+	# Painted portraits are scaled down a lot; smooth filtering keeps them from
+	# shimmering.  Everything else this canvas draws is lines and polygons.
+	texture_filter = CanvasItem.TEXTURE_FILTER_LINEAR
+	portraits.clear()
+	for n in range(1, FxDirector.PORTRAIT_FACES + 1):
+		var path := "res://assets/portraits/angler_%d.png" % n
+		portraits.append(load(path) as Texture2D if ResourceLoader.exists(path) else null)
+
 func _draw() -> void:
 	if director == null: return
 	if layer_kind == "back": _draw_back()
@@ -65,6 +78,8 @@ func _draw_front() -> void:
 	if not d.golden.is_empty(): _draw_golden(d.golden)
 	if d.crack_t >= 0.0: _draw_cracks()
 	for s in d.shards: _draw_shard(s)
+	if d.card_active or not d.card_break.is_empty(): _draw_streak_card()
+	if d.portrait_visible(): _draw_portrait()
 	for p in d.particles: _draw_particle(p)
 	for i in d.impacts: _draw_impact(i)
 	for c in d.cutins: _draw_cutin(c)
@@ -91,6 +106,20 @@ func _draw_particle(p: Dictionary) -> void:
 			draw_rect(Rect2(pos - Vector2(sz * 0.5, sz), Vector2(sz, sz * 2.0)), Color(col, life))
 		"ash":
 			draw_rect(Rect2(pos - Vector2(sz, sz) * 0.5, Vector2(sz, sz)), Color(col, life * 0.8))
+		"star":
+			var a_star := minf(1.0, life * 2.2)
+			draw_colored_polygon(_star(pos, sz + 1.2, (sz + 1.2) * 0.45, 5, float(p.rot)), Color(0.05, 0.04, 0.1, a_star * 0.7))
+			draw_colored_polygon(_star(pos, sz, sz * 0.42, 5, float(p.rot)), Color(col, a_star))
+		"gem":
+			var a_gem := minf(1.0, life * 2.2)
+			var gem := PackedVector2Array([pos + Vector2(0, -sz), pos + Vector2(sz * 0.75, -sz * 0.15), pos + Vector2(0, sz), pos + Vector2(-sz * 0.75, -sz * 0.15)])
+			draw_colored_polygon(gem, Color(col, a_gem))
+			draw_colored_polygon(PackedVector2Array([pos + Vector2(0, -sz), pos + Vector2(sz * 0.75, -sz * 0.15), pos + Vector2(0, -sz * 0.05)]), Color(1, 1, 1, a_gem * 0.75))
+		"note":
+			var a_note := minf(1.0, life * 2.2)
+			draw_line(pos + Vector2(sz * 0.45, 0), pos + Vector2(sz * 0.45, -sz * 2.0), Color(col, a_note), 1.0)
+			draw_line(pos + Vector2(sz * 0.45, -sz * 2.0), pos + Vector2(sz * 1.3, -sz * 1.5), Color(col, a_note), 2.0)
+			draw_circle(pos, sz * 0.55, Color(col, a_note))
 		_:
 			draw_rect(Rect2(pos - Vector2(sz, sz) * 0.5, Vector2(sz, sz)), Color(col, life))
 			if sz > 1.8 and life > 0.5:
@@ -202,6 +231,7 @@ func _draw_impact(i: Dictionary) -> void:
 			var sy := top + 4.0 + fmod(float(j) * 11.0, rows.size.y - 8.0)
 			draw_line(Vector2(sx, sy), Vector2(sx + 30.0, sy), Color(1, 1, 1, 0.3 * alpha), 1.0)
 	_text_center(_impact_label(i), text_pos, size, Color(col, alpha), slam, rot, tier >= 4, IMPACT_SLAM_TALL)
+	_draw_emblem(i)
 	if bool(i.clean):
 		# Beside the grade, at the right end of the lane. It waits for the slam
 		# to settle, because the stretched word reaches this far at first.
@@ -228,6 +258,219 @@ func _impact_text_top(tier: int, label: String) -> float:
 	var half_width := ThemeDB.fallback_font.get_string_size(label, HORIZONTAL_ALIGNMENT_LEFT, -1, size).x * 0.5 * peak
 	var lift := absf(sin(float(IMPACT_TEXT_ROT[tier]))) * half_width
 	return float(director.IMPACT_TEXT_POS.y) - height - lift - IMPACT_OUTLINE
+
+# ---- emblems and the streak card -------------------------------------------
+
+func _star(center: Vector2, outer: float, inner: float, points: int, rot: float = 0.0) -> PackedVector2Array:
+	var out := PackedVector2Array()
+	for k in range(points * 2):
+		var a := rot - PI * 0.5 + float(k) * PI / float(points)
+		out.append(center + Vector2(cos(a), sin(a)) * (outer if k % 2 == 0 else inner))
+	return out
+
+func _ease_out_back(x: float) -> float:
+	var c := clampf(x, 0.0, 1.0) - 1.0
+	return 1.0 + 2.70158 * c * c * c + 1.70158 * c * c
+
+# The word on an emblem's ribbon, by emblem level (see emblem_level()).
+const EMBLEM_WORDS := ["OUCH", "OK!", "GREAT", "SUPER", "HYPER", "ULTRA", "KING!"]
+
+func _emblem_word(level: int) -> String:
+	return str(EMBLEM_WORDS[clampi(level, 0, EMBLEM_WORDS.size() - 1)])
+
+func _emblem_color(level: int, phase: float = 0.0) -> Color:
+	match level:
+		0: return Color("#e0473c")
+		1: return Color("#3fbfa8")
+		2: return Color("#ffc93c")
+		3: return Color("#ff9d2e")
+		_: return Color.from_hsv(fmod(director.time * 0.8 + phase, 1.0), 0.62, 1.0)
+
+# A badge for the pull, drawn in the margin right of the fishing panel.  It pops
+# in with an overshoot, and each level adds a part: a check for GOOD; a star on
+# a burst for PERFECT; then orbiting stars, a crown, wings, and for the fifth
+# PERFECT in a row a fish leaping over the crown inside a rainbow halo.
+func _draw_emblem(i: Dictionary) -> void:
+	var d: FxDirector = director
+	var level: int = d.emblem_level(int(i.tier), int(i.streak))
+	var t := float(i.t)
+	var alpha := (1.0 - clampf((t - float(i.dur) * 0.7) / (float(i.dur) * 0.3), 0.0, 1.0)) * (0.6 if d.reduced else 1.0)
+	var pop_in := _ease_out_back(t / 0.16)
+	var c: Vector2 = d.IMPACT_EMBLEM_POS
+	var unit: float = d.IMPACT_EMBLEM_RADIUS / 44.0 * pop_in
+	var ink := Color(0.05, 0.04, 0.1, alpha)
+	var col := _emblem_color(level)
+	var spin := d.time * 1.4
+	if level >= 6:
+		# Rainbow halo: long rays turning behind everything else.
+		for k in range(16):
+			var a := spin * 0.6 + float(k) * TAU / 16.0
+			draw_line(c + Vector2(cos(a), sin(a)) * 18.0 * unit, c + Vector2(cos(a), sin(a)) * 43.0 * unit, Color(_emblem_color(level, float(k) / 16.0), 0.75 * alpha), 3.0)
+	if level >= 5:
+		# Wings: three feathers a side.
+		for side in [-1.0, 1.0]:
+			for f in range(3):
+				var lift := -0.25 - float(f) * 0.42
+				var tip := c + Vector2(side * cos(lift), sin(lift)) * (40.0 - float(f) * 3.0) * unit
+				var root_a := c + Vector2(side * 14.0, 4.0 - float(f) * 6.0) * unit
+				var root_b := c + Vector2(side * 14.0, -4.0 - float(f) * 6.0) * unit
+				draw_colored_polygon(PackedVector2Array([root_a, tip, root_b]), Color(1.0, 0.98, 0.9, alpha))
+				draw_polyline(PackedVector2Array([root_a, tip, root_b]), ink, 1.0)
+	if level == 0:
+		# A cracked red badge with a cross.
+		draw_colored_polygon(_star(c, 26.0 * unit, 21.0 * unit, 9, 0.2), ink)
+		draw_colored_polygon(_star(c, 23.0 * unit, 18.5 * unit, 9, 0.2), Color(col, alpha))
+		for s in [-1.0, 1.0]:
+			draw_line(c + Vector2(-10.0, -10.0 * s) * unit, c + Vector2(10.0, 10.0 * s) * unit, ink, 7.0 * unit)
+			draw_line(c + Vector2(-10.0, -10.0 * s) * unit, c + Vector2(10.0, 10.0 * s) * unit, Color(1, 1, 1, alpha), 4.0 * unit)
+	elif level == 1:
+		# A round teal badge with a tick.
+		draw_circle(c, 25.0 * unit, ink)
+		draw_circle(c, 22.5 * unit, Color(col, alpha))
+		draw_arc(c, 18.5 * unit, 0, TAU, 32, Color(1, 1, 1, 0.75 * alpha), 1.5)
+		var tick := PackedVector2Array([c + Vector2(-10, 0) * unit, c + Vector2(-3, 8) * unit, c + Vector2(11, -8) * unit])
+		draw_polyline(tick, ink, 7.0 * unit)
+		draw_polyline(tick, Color(1, 1, 1, alpha), 4.0 * unit)
+	else:
+		# PERFECT: a spinning burst, a second one behind it from the second
+		# pull on, and a white star (or the leaping fish) in the middle.
+		if level >= 3:
+			draw_colored_polygon(_star(c, 34.0 * unit, 24.0 * unit, 12, -spin * 0.7), Color(_emblem_color(level, 0.35), alpha))
+		draw_colored_polygon(_star(c, 31.0 * unit, 22.0 * unit, 12, spin), ink)
+		draw_colored_polygon(_star(c, 28.5 * unit, 20.5 * unit, 12, spin), Color(col, alpha))
+		draw_circle(c, 17.0 * unit, Color(1.0, 0.97, 0.82, alpha))
+		draw_arc(c, 17.0 * unit, 0, TAU, 32, ink, 1.5)
+		if level >= 6:
+			# The fish: body, tail and eye, tilted as if clearing the crown.
+			var tilt := -0.35
+			var body := PackedVector2Array()
+			for q in [Vector2(-13, 0), Vector2(-5, -7), Vector2(7, -6), Vector2(14, 0), Vector2(7, 6), Vector2(-5, 7)]:
+				body.append(c + Vector2(0, 1) * unit + q.rotated(tilt) * unit)
+			var tail := PackedVector2Array()
+			for q in [Vector2(-11, 0), Vector2(-19, -7), Vector2(-19, 7)]:
+				tail.append(c + Vector2(0, 1) * unit + q.rotated(tilt) * unit)
+			draw_colored_polygon(tail, Color("#2b7fd1", alpha))
+			draw_colored_polygon(body, Color("#3fa0ee", alpha))
+			var body_line := body.duplicate(); body_line.append(body[0])
+			draw_polyline(body_line, ink, 1.5)
+			draw_circle(c + Vector2(0, 1) * unit + Vector2(8, -2).rotated(tilt) * unit, 1.8 * unit, ink)
+		else:
+			draw_colored_polygon(_star(c, 14.5 * unit, 6.2 * unit, 5), ink)
+			draw_colored_polygon(_star(c, 12.0 * unit, 5.0 * unit, 5), Color(col.lerp(Color("#ff7a00"), 0.25), alpha))
+		if level >= 3:
+			# Small stars in orbit: two, then one more per level.
+			var orbit := level - 1
+			for k in range(orbit):
+				var a2 := -spin * 1.8 + float(k) * TAU / float(orbit)
+				var sp := c + Vector2(cos(a2), sin(a2) * 0.8) * 37.0 * unit
+				draw_colored_polygon(_star(sp, 5.5 * unit, 2.3 * unit, 5, a2), ink)
+				draw_colored_polygon(_star(sp, 4.2 * unit, 1.8 * unit, 5, a2), Color(1.0, 0.95, 0.6, alpha))
+		if level >= 4:
+			# The crown sits on top of the badge.
+			var base := c + Vector2(0, -24) * unit
+			var crown := PackedVector2Array()
+			for q in [Vector2(-13, 6), Vector2(-14, -6), Vector2(-7, 0), Vector2(0, -10), Vector2(7, 0), Vector2(14, -6), Vector2(13, 6)]:
+				crown.append(base + q * unit)
+			draw_colored_polygon(crown, Color("#ffd23a", alpha))
+			var crown_line := crown.duplicate(); crown_line.append(crown[0])
+			draw_polyline(crown_line, ink, 1.5)
+			for q in [Vector2(-14, -6), Vector2(0, -10), Vector2(14, -6)]:
+				draw_circle(base + q * unit, 2.2 * unit, Color("#ff5a8a", alpha))
+	# A shine sweeps across the badge once as it lands.
+	var sweep := clampf((t - 0.1) / 0.22, 0.0, 1.0)
+	if sweep > 0.0 and sweep < 1.0 and level >= 1:
+		var sx := c.x + (sweep * 2.0 - 1.0) * 26.0 * unit
+		draw_line(Vector2(sx - 5.0, c.y + 20.0 * unit), Vector2(sx + 5.0, c.y - 20.0 * unit), Color(1, 1, 1, 0.55 * alpha), 3.0)
+	# Ribbon with the rank word under the badge.
+	var word := _emblem_word(level)
+	var rib := c + Vector2(0, 34) * unit
+	var half := 27.0 * unit
+	var ribbon := PackedVector2Array([rib + Vector2(-half - 6, -7), rib + Vector2(half + 6, -7), rib + Vector2(half, 0), rib + Vector2(half + 6, 7), rib + Vector2(-half - 6, 7), rib + Vector2(-half, 0)])
+	draw_colored_polygon(ribbon, ink)
+	draw_colored_polygon(PackedVector2Array([rib + Vector2(-half - 3, -5), rib + Vector2(half + 3, -5), rib + Vector2(half - 2, 0), rib + Vector2(half + 3, 5), rib + Vector2(-half - 3, 5), rib + Vector2(-half + 2, 0)]), Color(col.darkened(0.25) if level < 4 else Color("#7a2fb8"), alpha))
+	_text_center(word, rib + Vector2(0, 4), 10, Color(1, 1, 1, alpha), 1.0, 0.0, level >= 6)
+
+# The angler's portrait, in the margin under the emblem.  It punches in whenever
+# his face changes, gets a hotter frame as the streak grows, and shakes and
+# dims for a moment when the streak breaks.
+func _draw_portrait() -> void:
+	var d: FxDirector = director
+	var face: int = d.portrait_face()
+	if face < 1 or face > portraits.size(): return
+	var tex: Texture2D = portraits[face - 1]
+	if tex == null: return
+	var r: Rect2 = d.PORTRAIT_RECT
+	var broke := not d.card_break.is_empty()
+	var held := not d.portrait_hold.is_empty()
+	var alpha := 1.0
+	if held: alpha = 1.0 - clampf((float(d.portrait_hold.t) - d.PORTRAIT_HOLD * 0.75) / (d.PORTRAIT_HOLD * 0.25), 0.0, 1.0)
+	var punch := 1.0 + (0.16 + 0.05 * float(face)) * (1.0 - _ease_out(clampf(d.portrait_change_t / 0.18, 0.0, 1.0)))
+	if broke: punch = 1.0
+	var centre := r.get_center()
+	if broke:
+		var jolt := 1.0 - float(d.card_break.t) / d.STREAK_CARD_BREAK_TIME
+		centre.x += sin(d.time * 70.0) * 3.0 * jolt
+	var size := r.size * punch
+	var box := Rect2(centre - size * 0.5, size)
+	var frame_col := Color("#8ba79b") if face <= 1 else _emblem_color(face, 0.2)
+	if face >= 4 and not broke:
+		# Excitement lines burst out from behind the frame.
+		var rr := RandomNumberGenerator.new()
+		rr.seed = face
+		for k in range(14):
+			var a := float(k) * TAU / 14.0 + sin(d.time * 6.0 + float(k)) * 0.05
+			var inner := size.x * 0.62
+			var outer := inner + 7.0 + rr.randf() * 9.0 + (4.0 if face >= 5 else 0.0)
+			draw_line(centre + Vector2(cos(a), sin(a)) * inner, centre + Vector2(cos(a), sin(a)) * outer, Color(_emblem_color(face, float(k) / 14.0), 0.85 * alpha), 2.0)
+	draw_rect(box.grow(3.0), Color(0.05, 0.04, 0.1, 0.9 * alpha))
+	draw_texture_rect(tex, box, false, Color(1, 1, 1, alpha))
+	if broke:
+		var dim := 0.45 * (1.0 - float(d.card_break.t) / d.STREAK_CARD_BREAK_TIME)
+		draw_rect(box, Color(0.1, 0.12, 0.25, dim))
+	draw_rect(box.grow(1.5), Color(frame_col, alpha), false, 3.0 if face >= 3 else 2.0)
+	if face >= 2 and d.portrait_change_t < 0.3 and not broke:
+		# A ring off the frame on every step up.
+		var ring := d.portrait_change_t / 0.3
+		draw_rect(box.grow(2.0 + ring * 10.0), Color(frame_col, (1.0 - ring) * 0.8 * alpha), false, 2.0)
+
+# The streak card in the left margin: five slots that fill from the bottom, one
+# star per consecutive PERFECT.  The newest stamp slams in; a broken streak
+# drops its stamps off the card.
+func _draw_streak_card() -> void:
+	var d: FxDirector = director
+	var r: Rect2 = d.STREAK_CARD_RECT
+	var k := 0.6 if d.reduced else 1.0
+	var full := d.card_count >= d.STREAK_CARD_SLOTS
+	draw_rect(r, Color(0.05, 0.07, 0.13, 0.72))
+	var rim := _emblem_color(6) if full else Color("#8ba79b")
+	draw_rect(r.grow(-1.0), Color(rim, 0.95 if full else 0.7), false, 2.0 if full else 1.0)
+	_text_center("FULL!" if full else "STREAK", Vector2(r.get_center().x, r.position.y + 12.0), 8, Color("#fff0c6") if not full else _emblem_color(6, 0.3), 1.0, 0.0, false)
+	for slot in range(d.STREAK_CARD_SLOTS):
+		var c: Vector2 = d.streak_slot_pos(slot)
+		draw_circle(c, 12.0, Color(0.02, 0.03, 0.07, 0.8))
+		draw_arc(c, 12.0, 0, TAU, 24, Color(0.55, 0.65, 0.62, 0.55), 1.0)
+		if slot >= d.card_count:
+			_text_center(str(slot + 1), c + Vector2(0, 3), 8, Color(0.55, 0.65, 0.62, 0.6), 1.0, 0.0, false)
+			continue
+		var newest := slot == d.card_count - 1
+		var slam := 1.0
+		if newest: slam = 1.0 + 1.4 * (1.0 - _ease_out(clampf(d.card_stamp_t / 0.14, 0.0, 1.0)))
+		var stamp_col := _emblem_color(slot + 2, float(slot) * 0.17)
+		draw_colored_polygon(_star(c, 12.5 * slam, 5.4 * slam, 5), Color(0.05, 0.04, 0.1, 0.9))
+		draw_colored_polygon(_star(c, 10.5 * slam, 4.4 * slam, 5), Color(stamp_col, k if not d.reduced else 0.85))
+		draw_colored_polygon(_star(c + Vector2(-1.5, -1.5), 4.0 * slam, 1.7 * slam, 5), Color(1, 1, 1, 0.55))
+		if newest and d.card_stamp_t < 0.3:
+			# One ring off the fresh stamp.
+			var ring := d.card_stamp_t / 0.3
+			draw_arc(c, 10.0 + ring * 16.0, 0, TAU, 24, Color(stamp_col, (1.0 - ring) * 0.8 * k), 2.0)
+	if not d.card_break.is_empty():
+		# Knocked-off stamps tumble down and fade.
+		var bt := float(d.card_break.t)
+		var fade := 1.0 - bt / d.STREAK_CARD_BREAK_TIME
+		for slot in range(int(d.card_break.count)):
+			var from: Vector2 = d.streak_slot_pos(slot)
+			var drift := Vector2((float(slot % 2) * 2.0 - 1.0) * 26.0 * bt, 150.0 * bt * bt - 20.0 * bt)
+			draw_colored_polygon(_star(from + drift, 10.0, 4.2, 5, bt * 9.0 * (1.0 if slot % 2 == 0 else -1.0)), Color(0.6, 0.63, 0.7, fade * 0.9))
 
 func _impact_text_size(tier: int) -> int:
 	return int(director.IMPACT_TEXT_SIZES[clampi(tier, 0, director.IMPACT_TEXT_SIZES.size() - 1)])

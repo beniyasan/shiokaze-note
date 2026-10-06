@@ -3419,7 +3419,10 @@ func _draw_hud():
 
 # The escape meter is the lowest row of the fishing panel; a live challenge
 # pushes every row down by CHALLENGE_HUD_OFFSET. Screen effects that must not
-# cover the panel (the pull-impact lane) are laid out below this.
+# cover the panel are laid out around it: the pull-impact lane below, the
+# streak card in the margin to its left and the emblem in the margin to its right.
+const FISHING_PANEL_X := 96
+const FISHING_PANEL_W := 288
 const FISHING_HUD_ESCAPE_Y := 201
 const CHALLENGE_HUD_OFFSET := 30
 
@@ -3446,7 +3449,7 @@ func _draw_fishing_hud():
 		if rescue_line:
 			_text(Vector2(146,84), "RESCUE TIDE  /  PURPLE+ cue +%d%%" % int(round(promotion_rescue_bonus * 100.0)), 7)
 		return
-	var panel := Rect2(96,48,288,160 + challenge_offset)
+	var panel := Rect2(FISHING_PANEL_X,48,FISHING_PANEL_W,160 + challenge_offset)
 	_panel(panel)
 	_text(Vector2(114,70), "FISHING  /  TUG-OF-WAR", 12)
 	if challenge_live:

@@ -1141,6 +1141,66 @@ func run():
 	game.pull_cooldown=0.0; game._handle_fishing_strike(0.5)
 	game.pull_cooldown=0.0; game.battle_tension=0.0; game._handle_fishing_strike(0.05)
 	check(game.perfect_streak==0 and fx.impacts[fx.impacts.size()-1].tier==0,'a strained pull ends the PERFECT streak')
+	# Emblems and the streak card: more than a word for a good pull.
+	check(fx.emblem_level(0,0)==0 and fx.emblem_level(1,0)==1 and fx.emblem_level(2,1)==2 and fx.emblem_level(4,3)==4 and fx.emblem_level(4,5)==6 and fx.emblem_level(4,9)==6,'emblems climb past the top impact tier, to the fifth PERFECT')
+	var emblem_words: Array = []
+	for emblem_step in range(7): emblem_words.append(game.fx_front._emblem_word(emblem_step))
+	check(emblem_words==['OUCH','OK!','GREAT','SUPER','HYPER','ULTRA','KING!'],'each emblem level has its own word')
+	check(fx.IMPACT_EMBLEM_POS.x-fx.IMPACT_EMBLEM_RADIUS>=game.FISHING_PANEL_X+game.FISHING_PANEL_W and fx.IMPACT_EMBLEM_POS.x+fx.IMPACT_EMBLEM_RADIUS<=480.0 and fx.IMPACT_EMBLEM_POS.y+fx.IMPACT_EMBLEM_RADIUS<fx.IMPACT_LANE_TOP,'the emblem sits in the margin right of the fishing panel, above the grade lane')
+	check(fx.STREAK_CARD_RECT.end.x<=game.FISHING_PANEL_X and fx.STREAK_CARD_RECT.position.x>=0.0 and fx.STREAK_CARD_RECT.end.y<=fx.IMPACT_LANE_TOP+6.0 and fx.STREAK_CARD_RECT.position.y>=58.0,'the streak card sits in the margin left of the fishing panel')
+	fx.clear_show(); fx.counters.clear(); fx.flash_log.clear()
+	check(not fx.card_active and fx.card_count==0,'no streak card outside a battle')
+	fx.bite(1, impact_pos)
+	check(fx.card_active and fx.card_count==0,'a bite lays out an empty streak card')
+	var stamps: Array = []
+	for i in range(6):
+		fx.pull('PERFECT',impact_pos,i+1,0.3,i+1); stamps.append(fx.card_count); fx.update(0.7)
+	check(stamps==[1,2,3,4,5,5] and int(fx.counters.get('card_stamp',0))==6,'each PERFECT in a row stamps the card, up to five')
+	fx.pull('PERFECT',impact_pos,1,0.3,5)
+	var icon_kinds := {}
+	for particle in fx.particles: icon_kinds[str(particle.kind)] = true
+	check(icon_kinds.has('star') and icon_kinds.has('note') and icon_kinds.has('gem'),'a PERFECT streak throws stars, notes and gems')
+	check(fx.card_stamp_t==0.0 and fx.streak_slot_pos(0).y>fx.streak_slot_pos(4).y and fx.STREAK_CARD_RECT.has_point(fx.streak_slot_pos(0)) and fx.STREAK_CARD_RECT.has_point(fx.streak_slot_pos(4)),'stamps fill the card from the bottom up')
+	fx.update(0.7); fx.pull('GOOD',impact_pos,1,0.3)
+	icon_kinds = {}
+	for particle in fx.particles: icon_kinds[str(particle.kind)] = true
+	check(fx.card_count==0 and int(fx.card_break.get('count',0))==5 and int(fx.counters.get('card_break',0))==1 and not icon_kinds.has('note') and not icon_kinds.has('gem'),'a GOOD pull knocks the stamps off and throws no notes or gems')
+	fx.update(fx.STREAK_CARD_BREAK_TIME+0.01)
+	check(fx.card_break.is_empty() and fx.card_active,'the knocked-off stamps are gone in half a second and the card stays')
+	fx.pull('PERFECT',impact_pos,1,0.3,1); fx.pull('PERFECT',impact_pos,2,0.3,2); fx.strain(impact_pos)
+	check(fx.card_count==0 and int(fx.card_break.get('count',0))==2,'a strained pull knocks the stamps off too')
+	fx.pull('GOOD',impact_pos,1,0.3)
+	check(int(fx.counters.get('card_break',0))==2,'an empty card has nothing to knock off')
+	fx.clear_show(); fx.flash_log.clear()
+	check(not fx.card_active and fx.card_count==0 and fx.card_break.is_empty(),'the streak card leaves with the battle')
+	# In a live battle the card follows the streak, and a perfect catch fills it.
+	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(8.0)
+	check(fx.card_active and fx.card_count==0,'the live battle opens with an empty card')
+	var live_card: Array = []
+	for i in range(5):
+		if game.fishing_state != game.FishingState.TIMING: break
+		game.pull_cooldown=0.0; game.battle_tension=0.0; game._handle_fishing_strike(0.5); live_card.append(game.perfect_streak)
+	check(live_card==[1,2,3,4,5] and game.fishing_state==game.FishingState.RESULT and fx.impacts.size()==1 and fx.emblem_level(fx.impacts[0].tier, fx.impacts[0].streak)==6,'five PERFECT pulls land the fish under the KING emblem')
+	# The watching angler: his face follows the streak and stays for the landing.
+	check(not fx.portrait_hold.is_empty() and fx.portrait_face()==fx.PORTRAIT_FACES and fx.portrait_visible() and not fx.card_active,'the angler stays on screen, awed, as a perfect catch lands')
+	fx.update(fx.PORTRAIT_HOLD+0.01)
+	check(not fx.portrait_visible(),'the angler leaves after the landing')
+	fx.clear_show(); fx.flash_log.clear()
+	check(not fx.portrait_visible() and fx.portrait_face()==1,'no angler outside a battle')
+	fx.bite(1, impact_pos)
+	var faces: Array = [fx.portrait_face()]
+	for i in range(6):
+		fx.pull('PERFECT',impact_pos,i+1,0.3,i+1); faces.append(fx.portrait_face()); fx.update(0.7)
+	check(fx.portrait_visible() and faces==[1,2,3,4,5,5,5],'each PERFECT in a row changes the angler\'s face, calm to awed')
+	fx.pull('PERFECT',impact_pos,1,0.3,3); fx.update(0.5); fx.pull('GOOD',impact_pos,1,0.3)
+	check(fx.portrait_face()==1 and fx.portrait_change_t==0.0,'a broken streak drops the angler back to calm')
+	fx.clear_show(); fx.flash_log.clear()
+	check(fx.PORTRAIT_RECT.position.x>=game.FISHING_PANEL_X+game.FISHING_PANEL_W and fx.PORTRAIT_RECT.end.x<=480.0 and fx.PORTRAIT_RECT.position.y>=fx.IMPACT_EMBLEM_POS.y+fx.IMPACT_EMBLEM_RADIUS and fx.PORTRAIT_RECT.end.y<=fx.IMPACT_LANE_TOP,'the portrait sits in the right margin, under the emblem and above the grade lane')
+	var portraits_ok: bool = game.fx_front.portraits.size()==fx.PORTRAIT_FACES
+	for portrait in game.fx_front.portraits:
+		if portrait == null or portrait.get_width() != portrait.get_height() or portrait.get_width() > 256: portraits_ok = false
+	check(portraits_ok,'all five angler portraits load as small square textures')
+	game._reset_fishing(); fx.flash_log.clear()
 	# Pull sounds: one voice per grade, and a PERFECT streak that climbs.
 	game._reset_fishing(); game._break_chain(); game._try_fish(); game._process_fishing(8.0)
 	game.pull_cooldown=0.0; game._handle_fishing_strike(0.30)
